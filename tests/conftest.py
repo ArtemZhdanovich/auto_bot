@@ -58,6 +58,17 @@ class FakeRedis:
     async def llen(self, key: str) -> int:
         return len(self.data.get(key) or [])
 
+    async def incr(self, key: str) -> int:
+        """Инкремент счётчика (rate limit партнёрского API)."""
+        self.data[key] = int(self.data.get(key, 0)) + 1
+        return int(self.data[key])
+
+    async def expire(self, key: str, ttl: int) -> bool:
+        if key in self.data:
+            self.ttls[key] = ttl
+            return True
+        return False
+
 
 class FakeSession:
     """Стаб AsyncSession: add() копит объекты, get/execute — пусто.
@@ -118,6 +129,9 @@ class FakeSession:
 
     async def commit(self) -> None:
         self.committed = True
+
+    async def flush(self) -> None:
+        return None
 
     async def refresh(self, obj: Any) -> None:
         return None

@@ -21,6 +21,7 @@ from app.api import (
     listings,
     me,
     notifications,
+    partners,
     payments,
     users,
 )
@@ -222,3 +223,5 @@ app.include_router(dialog.router)
 app.include_router(ai_search.router)
 app.include_router(notifications.router)
 app.include_router(leads.router)
+app.include_router(partners.admin_router)
+app.include_router(partners.router)

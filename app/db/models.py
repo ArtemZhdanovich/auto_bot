@@ -160,6 +160,14 @@ class Lead(Base):
     status: Mapped[str] = mapped_column(Text, default="new")  # new / in_progress / closed / rejected
     manager_id: Mapped[int | None] = mapped_column(BigInteger)
     comment: Mapped[str | None] = mapped_column(Text)
+    # Партнёрский контур (P2-10): эксклюзивная продажа лида партнёру (ИП/перекуп)
+    partner_id: Mapped[int | None] = mapped_column(ForeignKey("partner_accounts.id"))
+    partner_status: Mapped[str | None] = mapped_column(
+        Text
+    )  # claimed / accepted / returned / junk / deal
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # AI-квалификация (бюджет/срок/готовность к предоплате) — поднимает цену лида
+    qualification: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -215,3 +223,47 @@ class AnalyticsEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class PartnerAccount(Base):
+    """Партнёр (ИП/перекуп/салон), покупающий лиды (P2-10, CPL-монетизация).
+
+    plan: starter / pro / salon — влияет на дневную квоту и цену лида.
+    status: active / suspended — suspended блокирует все запросы по ключам.
+    """
+
+    __tablename__ = "partner_accounts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    contact: Mapped[str | None] = mapped_column(Text)  # telegram / email
+    plan: Mapped[str] = mapped_column(Text, default="starter")
+    daily_quota: Mapped[int] = mapped_column(Integer, default=10)
+    status: Mapped[str] = mapped_column(Text, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PartnerApiKey(Base):
+    """API-ключ партнёра. Хранится только SHA-256 хэш + префикс для опознания.
+
+    Ротация: старому ключу ставится status=rotated (мгновенно недействителен),
+    выдаётся новый. status: active / rotated / revoked.
+    """
+
+    __tablename__ = "partner_api_keys"
+    __table_args__ = (
+        UniqueConstraint("key_hash", name="uq_partner_api_keys_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    partner_id: Mapped[int] = mapped_column(ForeignKey("partner_accounts.id"))
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    key_prefix: Mapped[str | None] = mapped_column(Text)  # "pi_ab12cd…" для ЛК
+    status: Mapped[str] = mapped_column(Text, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

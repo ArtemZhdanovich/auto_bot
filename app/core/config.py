@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     refresh_token_ttl_sec: int = 60 * 60 * 24 * 30
     init_data_max_age_sec: int = 60 * 60 * 24
 
+    # Партнёрский API (P2-10): rate limit запросов на партнёрский ключ в минуту
+    partner_rate_limit_per_min: int = 60
+
     # LLM (этап 3): OpenAI-совместимые провайдеры; основной — GLM (Zhipu)
     glm_api_key: str | None = None
     # Международный эндпоинт z.ai; для ключей open.bigmodel.cn задайте
