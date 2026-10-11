@@ -207,12 +207,3 @@ async def my_leads(
     )
     return list(result.scalars().all())
 
-    key = result.scalar_one_or_none()
-    if key is None or key.status != "active":
-        return None
-    account = await session.get(PartnerAccount, key.partner_id)
-    if account is None or account.status != "active":
-        return None
-    key.last_used_at = datetime.now(UTC)
-    await session.commit()
-    return key, account
