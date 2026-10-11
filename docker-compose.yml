@@ -1,0 +1,189 @@
+# Dev/staging окружение (ТЗ п. 11.2; воркеры и Mini App добавляются на этапах 2–5)
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: autoselect
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+
+  bot:
+    build: .
+    command: python -m app.bot
+    env_file: .env
+    environment:
+      # Внутри compose бот ходит в backend по имени сервиса
+      APP_BASE_URL: http://backend:8000
+    depends_on:
+      backend: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  worker_fetch:
+    build: .
+    command: python -m app.workers.fetch
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  worker_send:
+    build: .
+    command: python -m app.workers.send
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  miniapp:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      backend: { condition: service_healthy }
+
+  # ---------- RAG-микросервис (ядро из rag_service) ----------
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  # One-shot: БД rag в общем postgres + миграции alembic
+  rag_migrate:
+    image: postgres:16
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-app}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        psql -h postgres -U app -d autoselect -tc "SELECT 1 FROM pg_database WHERE datname='rag'" | grep -q 1 ||           psql -h postgres -U app -d autoselect -c 'CREATE DATABASE rag'
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  rag_migrate_alembic:
+    build: ./services/rag
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      POSTGRES_DSN: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/rag
+    depends_on:
+      rag_migrate: { condition: service_completed_successfully }
+    restart: "no"
+
+  rag_worker:
+    build: ./services/rag
+    command: ["rag-worker"]
+    environment: &rag_env
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      QDRANT_HOST: qdrant
+      POSTGRES_DSN: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/rag
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      JWT_SECRET: ${RAG_JWT_SECRET:-${APP_SECRET_KEY}}
+      EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      LLM_PROVIDER: ${RAG_LLM_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      REDIS_URL: redis://redis:6379/1
+      METRICS_PORT: "8101"
+      WORKER_QUEUES: "all"
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      qdrant: { condition: service_started }
+      minio: { condition: service_started }
+      rag_migrate_alembic: { condition: service_completed_successfully }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  rag_api:
+    build: ./services/rag
+    command: ["rag-api"]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      API_TOKEN: ${RAG_API_TOKEN:-change-me-rag}
+      JWT_SECRET: ${RAG_JWT_SECRET:-${APP_SECRET_KEY}}
+      SERVICE_USER_ID: auto_bot
+      ASK_TIMEOUT_SEC: "30"
+      PORT: "8100"
+    ports:
+      - "8100:8100"
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+      rag_worker: { condition: service_healthy }
+    restart: unless-stopped
+
+
+volumes:
+  qdrant_storage:
+  minio_data:
+  pg_data:
+  redis_data:
+  rabbitmq_data:
