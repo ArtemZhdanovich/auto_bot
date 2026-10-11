@@ -65,6 +65,8 @@ services:
     environment:
       # Внутри compose бот ходит в backend по имени сервиса
       APP_BASE_URL: http://backend:8000
+      # FSM-хранилище бота — Redis; .env может держать localhost (запуск по процессам)
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       backend: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
