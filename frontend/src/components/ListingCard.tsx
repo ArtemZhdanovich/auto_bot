@@ -100,6 +100,12 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
           {listing.make} {listing.model}
           {listing.year ? `, ${listing.year}` : ""}
         </div>
+        {/* Переведённый тайтл источника (фаза 5): есть — показываем строкой ниже */}
+        {(listing.title_ru ?? listing.title_raw) && (
+          <div className="listing-card__sub">
+            {listing.title_ru ?? listing.title_raw}
+          </div>
+        )}
         <div className="listing-card__price">
           {listing.price !== null
             ? `${listing.price.toLocaleString("ru")} ${listing.currency ?? ""}`

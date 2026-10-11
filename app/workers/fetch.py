@@ -14,18 +14,19 @@ from datetime import datetime, timezone
 from typing import Any
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import bindparam, func, select, update
 
 from app.adapters.registry import AdapterRegistry
 from app.adapters.common.proxy import build_proxy_pool
 from app.core.config import get_settings
-from app.db.models import Source
+from app.db.models import Listing, Source
 from app.db.session import session_factory
 from app.queue import QUEUE_FETCH, CronSpec, IntervalSpec, TaskWorker, enqueue_task
 from app.schemas.criteria import SearchCriteria
 from app.services.cron import cron_matches
 from app.services.fetch import mark_stale, save_listings
 from app.services.source_health import record_error, record_success, should_skip_source
+from app.services.translate_client import translate_client_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,9 @@ async def fetch_source_task(
             "cross_dup": 0,
         }
         # id-списки для статусных уведомлений (price_drop/returned, фаза 3)
+        # и перевода тайтлов (фаза 5)
         event_ids: dict[str, list[int]] = {"price_drop": [], "returned": []}
+        translate_ids: list[int] = []
         cursor: str | None = None
         pages = 0
         parsed_total = 0
@@ -78,6 +81,8 @@ async def fetch_source_task(
                         event_ids["price_drop"].extend(value)
                     elif key == "reactivated_ids":
                         event_ids["returned"].extend(value)
+                    elif key == "translate_ids":
+                        translate_ids.extend(value)
                     else:
                         totals[key] += value
                 parsed_total += len(result.items)
@@ -106,6 +111,9 @@ async def fetch_source_task(
         for kind, ids in event_ids.items():
             if ids:
                 await enqueue_status_scan(ctx, kind, ids)
+
+        if translate_ids:
+            await enqueue_translate(ctx, source_name, translate_ids)
 
         if pages and parsed_total == 0:
             # Источник отвечает, но карточек 0 — вероятнее всего сменилась
@@ -197,6 +205,74 @@ async def enqueue_status_scan(
         return False
 
 
+async def enqueue_translate(
+    ctx: dict[str, Any], source_name: str, listing_ids: list[int]
+) -> bool:
+    """Перевод тайтлов (фаза 5) — не критичен для fetch: упал enqueue →
+    title_ru останется NULL, UI покажет оригинал."""
+    try:
+        await enqueue_task("translate_listings", source_name, listing_ids)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enqueue_translate_failed: %s", exc)
+        return False
+
+
+async def translate_listings(
+    ctx: dict[str, Any], source_name: str, listing_ids: list[int]
+) -> dict[str, Any]:
+    """Перевод тайтлов через services/translate (PLAN.md, фаза 5).
+
+    Батчами (TRANSLATE_BATCH_SIZE), кэш в Redis внутри клиента. Сервис
+    недоступен → title_ru остаётся NULL, следующий парсинг NEW/хэша повторит
+    попытку. source_language пишем тот, что задан для источника
+    (translate_source_langs; "auto" — детект по письменности в сервисе).
+    """
+    client = ctx.get("translate")
+    if client is None or not client.enabled or not listing_ids:
+        return {"translated": 0, "skipped": True}
+    settings = get_settings()
+    source_lang = settings.translate_source_langs.get(source_name, "auto")
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(Listing.id, Listing.title_raw)
+                .where(Listing.id.in_(listing_ids))
+                .where(Listing.title_raw.is_not(None))
+            )
+        ).all()
+        translations: dict[int, str] = {}
+        for start in range(0, len(rows), settings.translate_batch_size):
+            chunk = rows[start : start + settings.translate_batch_size]
+            translated = await client.translate(
+                [row.title_raw for row in chunk], source_lang=source_lang
+            )
+            for row, ru in zip(chunk, translated):
+                if ru:
+                    translations[row.id] = ru
+        if translations:
+            stmt = (
+                update(Listing)
+                .where(Listing.id == bindparam("b_id"))
+                .values(
+                    title_ru=bindparam("b_ru"),
+                    source_language=source_lang,
+                    translated_at=func.now(),
+                )
+            )
+            await session.execute(
+                stmt,
+                [{"b_id": lid, "b_ru": ru} for lid, ru in translations.items()],
+            )
+            await session.commit()
+    logger.info(
+        "translate_done: source=%s requested=%d translated=%d",
+        source_name, len(listing_ids), len(translations),
+    )
+    return {"translated": len(translations)}
+
+
 async def stale_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
     """Cron 04:00 UTC (PLAN.md, фаза 3): устаревшие объявления → is_active=false.
 
@@ -222,6 +298,8 @@ async def startup(ctx: dict[str, Any]) -> None:
     await registry.load()
     ctx["registry"] = registry
     ctx["redis"] = redis
+    # Клиент перевода (фаза 5): disabled, если TRANSLATE_ENABLED=false или URL пуст
+    ctx["translate"] = translate_client_from_settings(redis)
     logger.info("fetch_worker_started: sources=%s", [a.source_name for a in registry.all()])
 
 
@@ -238,6 +316,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 HANDLERS = {
     "fetch_source_task": fetch_source_task,
     "stale_check_job": stale_check_job,
+    "translate_listings": translate_listings,
 }
 
 

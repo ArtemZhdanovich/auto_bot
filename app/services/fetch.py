@@ -40,11 +40,11 @@ upserted AS (
     INSERT INTO listings (
         source, source_id, url, make, model, year, price, currency,
         mileage_km, vin, images, raw_payload, schema_version, parsed_at,
-        content_hash, is_active, first_seen_at, last_seen_at
+        content_hash, is_active, first_seen_at, last_seen_at, title_raw
     ) VALUES (
         :source, :source_id, :url, :make, :model, :year, :price, :currency,
         :mileage_km, :vin, :images, :raw_payload, :schema_version, :parsed_at,
-        :content_hash, TRUE, now(), now()
+        :content_hash, TRUE, now(), now(), :title_raw
     )
     ON CONFLICT ON CONSTRAINT uq_listings_source_source_id DO UPDATE SET
         url = EXCLUDED.url,
@@ -63,6 +63,7 @@ upserted AS (
         is_active = TRUE,
         disappeared_at = NULL,
         last_seen_at = EXCLUDED.last_seen_at,
+        title_raw = EXCLUDED.title_raw,
         updated_at = now()
     RETURNING id
 )
@@ -105,6 +106,7 @@ def _to_row(item: UnifiedListing) -> dict:
         "source": item.source,
         "source_id": item.source_id,
         "url": str(item.url),
+        "title_raw": item.title,
         "make": item.make,
         "model": item.model,
         "year": item.year,
@@ -133,7 +135,9 @@ async def save_listings(
 
     Возвращает счётчики {"new", "updated", "unchanged", "price_changed",
     "reactivated", "cross_dup"} + id-списки "price_changed_ids" /
-    "reactivated_ids" (аудитория статусных уведомлений, фаза 3).
+    "reactivated_ids" (аудитория статусных уведомлений, фаза 3) и
+    "translate_ids" — NEW + смена content_hash (триггер повторного
+    перевода тайтла, фаза 5).
     """
     stats = {
         "new": 0,
@@ -145,6 +149,7 @@ async def save_listings(
     }
     price_changed_ids: list[int] = []
     reactivated_ids: list[int] = []
+    translate_ids: list[int] = []
     for item in items:
         if redis is not None and await is_duplicate(redis, item):
             stats["cross_dup"] += 1
@@ -160,6 +165,7 @@ async def save_listings(
         )
         if row["old_id"] is None:  # NEW — первая точка цены
             stats["new"] += 1
+            translate_ids.append(row["listing_id"])  # фаза 5: перевод тайтла
             price_point = item.price is not None
         elif not row["was_active"]:  # вернулось в выдачу
             stats["reactivated"] += 1
@@ -169,6 +175,7 @@ async def save_listings(
             stats["unchanged"] += 1
             price_point = False
         else:  # контент изменился
+            translate_ids.append(row["listing_id"])  # тайтл мог измениться
             if price_changed:
                 stats["price_changed"] += 1
                 price_changed_ids.append(row["listing_id"])
@@ -191,6 +198,7 @@ async def save_listings(
     return stats | {
         "price_changed_ids": price_changed_ids,
         "reactivated_ids": reactivated_ids,
+        "translate_ids": translate_ids,
     }
 
 

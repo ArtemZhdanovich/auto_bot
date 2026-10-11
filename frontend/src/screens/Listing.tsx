@@ -85,6 +85,15 @@ export function ListingScreen() {
         <Cell after={listing.source}>Источник</Cell>
       </Section>
 
+      {/* Название с источника (PLAN.md, фаза 5): перевод, иначе оригинал */}
+      {(listing.title_ru ?? listing.title_raw) && (
+        <Section>
+          <Cell after={<b>{listing.title_ru ?? listing.title_raw}</b>}>
+            Название
+          </Cell>
+        </Section>
+      )}
+
       {/* История цен (PLAN.md, фаза 4): точки listing_price_history, новые сверху */}
       {listing.price_history && listing.price_history.length > 1 && (
         <Section header="История цен">

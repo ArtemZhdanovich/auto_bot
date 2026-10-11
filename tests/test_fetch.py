@@ -156,6 +156,32 @@ async def test_non_price_change_without_price_point():
     assert len(session.executed) == 1
 
 
+# ---------- перевод тайтлов (фаза 5): translate_ids ----------
+
+
+async def test_upsert_stores_title_raw_and_new_listing_queued_for_translation():
+    session = UpsertSession([NEW_ROW])
+    stats = await save_listings(session, None, [_item()])
+    assert stats["translate_ids"] == [7]  # NEW — перевод нужен
+    params = session.executed[0][1]
+    assert params["title_raw"] == "Hyundai Palisade 2022"  # title теперь в БД
+    assert "title_raw" in session.executed[0][0]
+
+
+async def test_unchanged_listing_not_queued_for_translation():
+    session = UpsertSession([_row(_item())])
+    stats = await save_listings(session, None, [_item()])
+    assert stats["translate_ids"] == []  # хэш не менялся
+
+
+async def test_content_change_requeues_translation():
+    # mileage изменился → хэш изменился → тайтл мог измениться, переводим снова
+    session = UpsertSession([_row(_item(mileage_km=60000), old_hash="b" * 64)])
+    stats = await save_listings(session, None, [_item(mileage_km=60000)])
+    assert stats["updated"] == 1
+    assert stats["translate_ids"] == [1]  # listing_id существующей строки
+
+
 async def test_reactivation_resets_disappeared_at():
     session = UpsertSession([_row(_item(), was_active=False)])
     stats = await save_listings(session, None, [_item()])

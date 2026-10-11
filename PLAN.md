@@ -46,7 +46,7 @@
 | 2 | `compute_content_hash` + upsert `save_listings` (CTE) | 2 дня | фаза 1 |
 | 3 | ✅ Stale-cron (с проверкой CB) + уведомления price_drop/gone/returned, `sent_log.kind` | 2–3 дня | фаза 2 |
 | 4 | ✅ История цен в UI (карточка, бейджи избранного) | 1 день | фаза 2 |
-| 5 | Перевод: `0011_translations`, title-only, NLLB | 3–4 дня | фаза 2 |
+| 5 | ✅ Перевод: `0011_translations`, title-only, NLLB (`services/translate`) | 3–4 дня | фаза 2 |
 | 6 | `raw_payload` → S3 (MinIO) + retention-крон | 1–2 дня | — |
 | 7 | Партиционирование `listing_price_history` (не `listings`!) | отложить | миллионы строк |
 
@@ -157,10 +157,15 @@ reactivated` (скан дешёвый, `sent_log`/Redis-дедуп отфиль�
 - **Фаза 3 (UX):** РЕШЕНО: `reactivated` → отдельный kind `returned`
   («снова в продаже»); аудитория статусных уведомлений — пользователи,
   уже получавшие карточку объявления (sent_log).
-- **Фаза 5:** куда NLLB — в RAG-сервис (ML уже там, но завязан на
-  Qdrant/RabbitMQ и не всегда поднят) или отдельный лёгкий микросервис?
-- **Фаза 5:** расширять ли `UnifiedListing.description` и отдают ли его
-  адаптеры вообще (у карточек списка может не быть).
+- **Фаза 5:** РЕШЕНО: NLLB — отдельный optional-микросервис
+  `services/translate` (FastAPI + nllb-200-distilled-600M), НЕ в RAG-сервисе:
+  изоляция отказа (перевод некритичен, RAG «не всегда поднят»), изоляция
+  памяти (~2 ГБ не в I/O-bound fetch-воркере), независимый деплой/своп модели.
+  Бэкенд: `TRANSLATE_ENABLED` + `TranslateClient` (батчи, Redis-кэш 30 дней,
+  retry, circuit breaker, fallback на оригинал).
+- **Фаза 5:** РЕШЕНО: `description` НЕ заводим — translation MVP title-only
+  (`title_raw`/`title_ru` в `0011_translations`); расширение контракта —
+  отдельно, с адаптерами.
 - **Фаза 6:** boto3 vs aioboto3 для S3/MinIO (в `app/` S3-клиента пока нет).
 - **Опционально:** перевод индексов `listings` в partial-версии
   (`WHERE is_active`) — мерить на реальных объёмах.

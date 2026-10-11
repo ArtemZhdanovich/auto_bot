@@ -229,6 +229,14 @@ class Listing(Base):
     disappeared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     price_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Перевод тайтла (PLAN.md, миграция 0011, фаза 5): title_raw — оригинал
+    # с источника, title_ru — перевод (NLLB, services/translate);
+    # смена content_hash — триггер повторного перевода.
+    title_raw: Mapped[str | None] = mapped_column(Text)
+    title_ru: Mapped[str | None] = mapped_column(Text)
+    source_language: Mapped[str | None] = mapped_column(String(16))
+    translated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class ListingPriceHistory(Base):
     """Точка цены: строка только при изменении (PLAN.md, миграция 0009)."""

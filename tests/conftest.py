@@ -29,6 +29,9 @@ class FakeRedis:
     async def get(self, key: str):
         return self.data.get(key)
 
+    async def mget(self, *keys: str) -> list[str | None]:
+        return [self.data.get(k) for k in keys]
+
     async def delete(self, *keys: str) -> int:
         removed = 0
         for key in keys:
@@ -84,6 +87,7 @@ class FakeSession:
         self.deleted: list[Any] = []
         self._rows: list[Any] = []
         self._row_queue: list[list[Any]] = []
+        self.executed_params: list[Any] = []
 
     def set_result(self, rows: list[Any]) -> None:
         """Один результат для всех последующих execute()."""
@@ -116,8 +120,10 @@ class FakeSession:
                 return obj
         return None
 
-    async def execute(self, stmt: Any) -> Any:
+    async def execute(self, stmt: Any, params: Any = None) -> Any:
         self.executed.append(stmt)
+        if params is not None:
+            self.executed_params.append(params)
         rows = self._row_queue.pop(0) if self._row_queue else self._rows
 
         class _Result:

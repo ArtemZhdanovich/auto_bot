@@ -98,6 +98,10 @@ class ListingOut(BaseModel):
     first_price: Optional[float] = None
     price_history: Optional[list[PricePointOut]] = None
 
+    # Перевод тайтла (PLAN.md, фаза 5): оригинал с источника + перевод (NLLB)
+    title_raw: Optional[str] = None
+    title_ru: Optional[str] = None
+
 
 class ListingListOut(BaseModel):
     total: int

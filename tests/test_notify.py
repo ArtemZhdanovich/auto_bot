@@ -162,6 +162,21 @@ def test_format_card_no_price():
     assert "цена по запросу" in card
     assert "км" not in card
 
+
+def test_format_card_prefers_translated_title():
+    # Перевод тайтла (PLAN.md, фаза 5): title_ru важнее «make model year»
+    listing = _listing(title_ru="Хёндэ Палисад 2022")
+    card = format_listing_card(listing)
+    assert "<b>Хёндэ Палисад 2022</b>" in card
+    assert "Hyundai Palisade 2022" not in card
+
+
+def test_format_card_without_title_field_keeps_make_model():
+    # title_ru не задан (NULL в БД или старый пейлоад) — как раньше
+    listing = _listing()
+    card = format_listing_card(listing)
+    assert "<b>Hyundai Palisade 2022</b>" in card
+
 async def test_mark_sent_with_kind(fake_redis, fake_session):
     from app.services.notify import event_audience
 

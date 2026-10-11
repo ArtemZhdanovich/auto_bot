@@ -306,3 +306,26 @@ docker compose up -d qdrant minio rag_worker rag_api
 docker compose exec rag_worker alembic upgrade head   # если rag_migrate_alembic не отработал
 uv run --project services/rag python scripts/ingest_kb.py --force
 ```
+
+## Перевод тайтлов (services/translate, фаза 5 PLAN.md)
+
+Optional-микросервис NLLB (`nllb-200-distilled-600M`, CPU, :8200): переводит
+`title` объявлений с корейского/китайского на русский. Перевод **некритичен**:
+сервис упал/выключен → UI показывает оригинальный тайтл (fallback).
+
+- Схема: `POST /translate {texts, source_lang, target_lang}` → `{translations}`
+  (батчи, `null` = не переведено; `source_lang="auto"` — детект по письменности);
+  `GET /health`. Bearer `API_TOKEN` — опционально.
+- Триггер — тот же `content_hash` (PLAN.md): NEW или смена хэша →
+  `save_listings.translate_ids` → задача `translate_listings` в очереди `fetch`
+  пишет `title_raw/title_ru/source_language/translated_at` (миграция `0011`).
+- Бэкенд-клиент `app/services/translate_client.py`: Redis-кэш
+  `tr:{tgt}:{src}:{sha1}` TTL 30 дней, retry, circuit breaker (3 ошибки →
+  пауза 5 мин + алерт), флаг `TRANSLATE_ENABLED` (по умолчанию выключен).
+
+Включение:
+```bash
+# .env: TRANSLATE_ENABLED=true, TRANSLATE_SERVICE_URL=http://localhost:8200
+docker compose up -d translate
+uv run alembic upgrade head   # 0011_translations
+```

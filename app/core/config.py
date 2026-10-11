@@ -92,6 +92,24 @@ class Settings(BaseSettings):
     # Отслеживание объявлений (миграция 0009, stale-cron фазы 3)
     stale_max_age_days: int = 3  # не виден N дней → is_active=false (CB-источники пропускаются)
 
+    # Перевод тайтлов (PLAN.md, фаза 5; сервис services/translate).
+    # Перевод некритичен: выключен флагом или пустым URL → показывается оригинал.
+    translate_enabled: bool = False  # feature flag
+    translate_service_url: str = ""  # напр. http://translate:8200
+    translate_api_token: str | None = None  # Bearer; = API_TOKEN сервиса
+    translate_timeout_sec: float = 30.0  # NLLB на CPU: батч может идти долго
+    translate_batch_size: int = 32
+    translate_cache_ttl_sec: int = 60 * 60 * 24 * 30  # tr:{tgt}:{src}:{sha1}, 30 дней
+    translate_cb_fail_threshold: int = 3  # circuit breaker: N ошибок подряд
+    translate_cb_cooldown_sec: int = 300
+    translate_target_lang: str = "rus_Cyrl"  # NLLB-код целевого языка
+    # NLLB-код исходного языка по источнику; "auto" — детект по письменности в сервисе
+    translate_source_langs: dict[str, str] = {
+        "encar": "kor_Hang",
+        "kcar": "kor_Hang",
+        "che168": "zho_Hans",
+    }
+
     # Прокси DataImpulse (опционально): шлюз для парсеров, если источники глушат.
     # Официальный формат: http://login__cr.cn;sessid.X:password@gw.dataimpulse.com:823
     # Задаёте user+pass → источники с capabilities.use_proxy=true ходят через шлюз.

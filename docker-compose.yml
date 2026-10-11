@@ -186,6 +186,24 @@ services:
       rag_worker: { condition: service_healthy }
     restart: unless-stopped
 
+  # ---------- Перевод тайтлов (PLAN.md, фаза 5; services/translate) ----------
+  # Optional-сервис: бэкенд включается TRANSLATE_ENABLED=true; упал →
+  # UI показывает оригинальные тайтлы (fallback обязателен).
+  translate:
+    build: ./services/translate
+    command: ["translate-api"]
+    environment:
+      API_TOKEN: ${TRANSLATE_API_TOKEN:-}
+      TRANSLATE_MODEL: ${TRANSLATE_MODEL:-facebook/nllb-200-distilled-600M}
+    ports:
+      - "8200:8200"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
 
 volumes:
   qdrant_storage:

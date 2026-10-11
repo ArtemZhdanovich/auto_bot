@@ -1,6 +1,36 @@
 
 # Auto Selection — PROGRESS
 
+## 31. Перевод тайтлов: NLLB-микросервис (фаза 5)
+
+- **Размещение NLLB (открытый вопрос PLAN) решено**: отдельный optional-сервис
+  `services/translate` (FastAPI + `nllb-200-distilled-600M`, CPU-образ, порт
+  8200), не в RAG: изоляция отказа (перевод некритичен) и памяти
+  (~2 ГБ RSS), независимый деплой/своп модели. Bearer `API_TOKEN` (опционально),
+  `GET /health`, warmup при старте, детект языка по письменности
+  (`kor_Hang`/`zho_Hans`/`rus_Cyrl`/`eng_Latn`) для `source_lang=auto`,
+  in-process кэш, батчи через transformers pipeline.
+- **Миграция `0011_translations`**: `listings.title_raw` (оригинал — до фазы 5
+  title вообще не персистился, только content_hash), `title_ru`,
+  `source_language`, `translated_at`. Upsert пишет `title_raw`.
+- **Триггер перевода — тот же `content_hash`**: `save_listings` возвращает
+  `translate_ids` (NEW + смена хэша) → fetch-воркер ставит задачу
+  `translate_listings` (та же очередь `fetch`), которая батчами
+  (TRANSLATE_BATCH_SIZE) зовёт сервис и пишет `title_ru/source_language/
+  translated_at` (executemany). Ошибка сервиса → title_ru остаётся NULL,
+  UI показывает оригинал.
+- **`TranslateClient`** (`app/services/translate_client.py`): батчевый
+  POST /translate, Redis-кэш `tr:{tgt}:{src}:{sha1}` TTL 30 дней,
+  retry с backoff (5xx не ретраим), circuit breaker (3 ошибки → пауза 5 мин +
+  алерт), `TRANSLATE_ENABLED` + `TRANSLATE_SERVICE_URL` (пусто = выключен),
+  `TRANSLATE_SOURCE_LANGS` (JSON: encar/kcar → kor_Hang, che168 → zho_Hans).
+- **UI**: `ListingOut` + `title_raw`/`title_ru`; Mini App — подзаголовок
+  с переводом на карточке, «Название» на экране объявления; карточка бота
+  предпочитает `title_ru`.
+- Тесты: **300 passed** (+15: клиент — кэш/batch/fallback/CB, задача
+  `translate_listings`, `translate_ids`, карточка с title_ru), ruff чист,
+  `alembic heads` → `0011`, `tsc`/`vite build` ОК.
+
 ## 30. Отслеживание объявлений: наличие, история цен, статусные уведомления (фазы 1-4)
 
 - **Миграция `0009_listing_tracking`**: `content_hash`, `is_active`,

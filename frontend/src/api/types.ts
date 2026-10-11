@@ -74,6 +74,9 @@ export interface Listing {
   first_price: number | null;
   /** Заполнена только в карточке GET /api/listings/{id} */
   price_history: PricePoint[] | null;
+  /** Перевод тайтла (PLAN.md, фаза 5): оригинал с источника + перевод (NLLB) */
+  title_raw: string | null;
+  title_ru: string | null;
 }
 
 export interface ListingList {

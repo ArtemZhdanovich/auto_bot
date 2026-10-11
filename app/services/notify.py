@@ -227,7 +227,11 @@ def _fmt_price(price: Any, currency: str | None) -> str:
 
 def format_listing_card(listing: Any) -> str:
     """HTML-карточка объявления (фото/кнопки добавляет отправитель)."""
-    title = " ".join(str(part) for part in (listing.make, listing.model, listing.year) if part)
+    # Переведённый тайтл (фаза 5) предпочтим «make model year»;
+    # в тестах/бот-пейлоадах поля может не быть — getattr.
+    title = getattr(listing, "title_ru", None) or " ".join(
+        str(part) for part in (listing.make, listing.model, listing.year) if part
+    )
     lines = [f"🚗 <b>{html.escape(title)}</b>" if title else "🚗 <b>Объявление</b>"]
     lines.append(f"💰 {_fmt_price(listing.price, listing.currency)}")
     if listing.mileage_km:
