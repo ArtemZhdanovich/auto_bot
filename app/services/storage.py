@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 _RAW_PREFIX = "raw/"
 
 
+def _is_access_denied(exc: Exception) -> bool:
+    """ClientError с кодом AccessDenied/403 (нет права на операцию)."""
+    resp = getattr(exc, "response", None) or {}
+    return (resp.get("Error") or {}).get("Code") in {"AccessDenied", "403", "Forbidden"}
+
+
 def build_raw_key(
     source: str,
     listing_id: int,
@@ -66,6 +72,33 @@ class S3Storage:
     @property
     def enabled(self) -> bool:
         return bool(self.endpoint_url)
+
+    async def ensure_bucket(self) -> bool:
+        """Создать bucket при отсутствии (DX; ошибка — только в лог).
+
+        Нет прав на CreateBucket (токен только PutObject/GetObject) —
+        отдельный warning «создайте вручную», не маскируем под общую ошибку.
+        """
+        if not self.enabled:
+            return False
+        try:
+            async with self._make_client() as s3:
+                try:
+                    await s3.head_bucket(Bucket=self.bucket)
+                except Exception as exc:  # noqa: BLE001
+                    if _is_access_denied(exc):
+                        logger.warning(
+                            "s3_bucket_missing_no_create_permission: bucket=%s "
+                            "— создайте бакет вручную или дайте право CreateBucket",
+                            self.bucket,
+                        )
+                        return False
+                    await s3.create_bucket(Bucket=self.bucket)
+                    logger.info("s3_bucket_created: %s", self.bucket)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("s3_ensure_bucket_failed: %s", exc)
+            return False
 
     def _make_client(self) -> Any:
         # Ленивый импорт: aioboto3/botocore тяжёлые, и модуль должен
@@ -125,14 +158,17 @@ class S3Storage:
             logger.warning("s3_presign_failed: %s: %s", key, exc)
             return None
 
-    async def delete_older_than(self, cutoff: datetime) -> int:
+    async def delete_older_than(self, cutoff: datetime) -> list[str]:
         """Retention: удалить объекты префикса raw/ старше cutoff.
 
         list_objects_v2 пагинацией → пакетный delete_objects (до 1000 ключей).
+        Возвращает ключи удалённых объектов: вызывающий (raw_retention_job)
+        обнуляет listings.raw_key, чтобы админка не генерила presigned URL
+        на несуществующие объекты (иначе — битые ссылки через 180 дней).
         """
         if not self.enabled:
-            return 0
-        deleted = 0
+            return []
+        deleted_keys: list[str] = []
         try:
             async with self._make_client() as s3:
                 stale: list[str] = []
@@ -155,12 +191,12 @@ class S3Storage:
                             "Objects": [{"Key": k} for k in batch],
                         },
                     )
-                    deleted += len(resp.get("Deleted", []))
+                    deleted_keys.extend(d["Key"] for d in resp.get("Deleted", []))
         except Exception as exc:  # noqa: BLE001
             logger.warning("s3_retention_failed: %s", exc)
-        if deleted:
-            logger.info("s3_retention_deleted: n=%d", deleted)
-        return deleted
+        if deleted_keys:
+            logger.info("s3_retention_deleted: n=%d", len(deleted_keys))
+        return deleted_keys
 
 
 def storage_from_settings() -> S3Storage:

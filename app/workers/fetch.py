@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from redis.asyncio import Redis
-from sqlalchemy import bindparam, func, select, update
+from sqlalchemy import bindparam, func, select, text, update
 
 from app.adapters.registry import AdapterRegistry
 from app.adapters.common.proxy import build_proxy_pool
@@ -278,16 +278,30 @@ async def translate_listings(
 
 async def raw_retention_job(ctx: dict[str, Any]) -> dict[str, Any]:
     """Cron 03:30 UTC (PLAN.md, фаза 6): удалить raw-объекты старше
-    RAW_RETENTION_DAYS. MinIO лежит → ошибка внутри storage, ничего не падает.
+    RAW_RETENTION_DAYS и обнулить listings.raw_key удалённых — иначе админка
+    генерит presigned URL на несуществующие объекты.
+
+    Гонка с fetch не страшна: save_listings ставит raw_key только для
+    NEW/смены content_hash, а ключ содержит yyyy/mm парсинга — совпасть с
+    удаляемым (>= RAW_RETENTION_DAYS назад) ключом он не может. Обнуляем
+    только точные совпадения ключей.
     """
     storage = ctx.get("storage")
     if storage is None or not storage.enabled:
         return {"deleted": 0, "skipped": True}
     settings = get_settings()
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.raw_retention_days)
-    deleted = await storage.delete_older_than(cutoff)
-    logger.info("raw_retention_done: deleted=%s cutoff=%s", deleted, cutoff.date())
-    return {"deleted": deleted}
+    keys = await storage.delete_older_than(cutoff)
+    if keys:
+        async with session_factory() as session:
+            for start in range(0, len(keys), 1000):
+                await session.execute(
+                    text("UPDATE listings SET raw_key = NULL WHERE raw_key = ANY(:keys)"),
+                    {"keys": keys[start : start + 1000]},
+                )
+            await session.commit()
+    logger.info("raw_retention_done: deleted=%d cutoff=%s", len(keys), cutoff.date())
+    return {"deleted": len(keys)}
 
 
 async def stale_check_job(ctx: dict[str, Any]) -> dict[str, Any]:

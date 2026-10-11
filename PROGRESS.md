@@ -29,10 +29,25 @@
   в compose; в docker-сети endpoint `http://minio:9000`). PLAN: открытый
   вопрос закрыт; фаза 7 — добавлен план (RANGE по `recorded_at`, PK обязан
   включать ключ, pg_partman, связка «горячее/холодное» с MinIO).
-- Тесты: **310 passed** (+10: формат ключа, загрузка NEW/raw_key-UPDATE,
-  unchanged без загрузки, fallback при ошибке S3, disabled, retention-крон,
-  admin presigned URL / 404), ruff чист, `alembic heads` → `0012`,
-  `docker compose config` ОК.
+- **Edge-кейсы (rev. 2)**: retention-крон возвращает ключи удалённых объектов
+  и обнуляет `listings.raw_key` (`UPDATE ... WHERE raw_key = ANY(:keys)`,
+  чанки по 1000) — иначе через 180 дней админка генерит presigned URL в
+  никуда. `ensure_bucket` различает `AccessDenied` (токен без CreateBucket →
+  warning «создайте вручную», не stack trace). Гонка retention × fetch
+  проанализирована и исключена: raw_key ставится только для NEW/смены хэша,
+  ключ содержит yyyy/mm парсинга — совпасть с удаляемым (≥180 дней) не может;
+  обнуление только по точному совпадению ключа. `downgrade()` 0012 возвращает
+  только схему, данные — нет (зафиксировано в миграции).
+- Тесты: **314 passed** (+14: формат ключа, загрузка NEW/raw_key-UPDATE,
+  unchanged без загрузки, fallback при ошибке S3, disabled, retention
+  (удаление + обнуление raw_key, no-op без БД), ensure_bucket
+  (создание / AccessDenied), admin presigned URL / 404), ruff чист,
+  `alembic heads` → `0012`, `docker compose config` ОК.
+- **⏳ Статус: код готов, e2e с живым MinIO НЕ проверен** (главный техдолг
+  фазы): реальный fetch → объект по ключу → presigned URL открывается →
+  повторный fetch не перезаписывает → retention с RAW_RETENTION_DAYS=0/1
+  удаляет и обнуляет raw_key → сценарий с токеном без CreateBucket.
+  Проверить на копии БД: `alembic downgrade -1` → `upgrade head`.
 
 ## 31. Перевод тайтлов: NLLB-микросервис (фаза 5)
 

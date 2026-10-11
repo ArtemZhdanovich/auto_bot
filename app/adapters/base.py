@@ -3,7 +3,8 @@
 Принципы (ТЗ п. 6.1):
 - Один адаптер = один источник.
 - Код адаптера в Git, конфиг — в БД (`sources`).
-- `raw_payload` сохраняется для перепарсинга.
+- `raw_payload` (сырой ответ адаптера) сохраняется в S3/MinIO для перепарсинга
+  (`listings.raw_key`, PLAN.md фаза 6).
 """
 
 from typing import Any, Protocol, runtime_checkable

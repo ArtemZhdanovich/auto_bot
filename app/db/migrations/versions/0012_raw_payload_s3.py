@@ -30,5 +30,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Возвращает только схему: содержимое raw_payload НЕ восстанавливается
+    # (к моменту отката данные уже в S3; восстановление — ручной реимпорт).
     op.drop_column("listings", "raw_key")
     op.add_column("listings", sa.Column("raw_payload", JSONB()))
