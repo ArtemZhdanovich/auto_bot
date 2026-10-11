@@ -17,6 +17,7 @@ import { ProfileScreen } from "./screens/Profile";
 import { OnboardingScreen } from "./screens/Onboarding";
 import { ToastProvider } from "./ui/Toast";
 import { PartnerApp } from "./partner/PartnerApp";
+import { AdminApp } from "./admin/AdminApp";
 import type { User as UserT } from "./api/types";
 
 /** Отдельные поверхности: партнёрский ЛК и админка — вне Telegram-гейта. */
@@ -26,6 +27,13 @@ function SurfaceRouter() {
     return (
       <ToastProvider>
         <PartnerApp />
+      </ToastProvider>
+    );
+  }
+  if (path.startsWith("/admin")) {
+    return (
+      <ToastProvider>
+        <AdminApp />
       </ToastProvider>
     );
   }
@@ -92,9 +100,12 @@ function useIsDesktop(): boolean {
   return isDesktop;
 }
 
-/** Точка входа: партнёрский ЛК (/partner/*) — своя поверхность без Telegram-авторизации. */
+/** Точка входа: партнёрский ЛК и админка — свои поверхности без Telegram-авторизации. */
 export function App() {
-  if (window.location.pathname.startsWith("/partner")) {
+  if (
+    window.location.pathname.startsWith("/partner") ||
+    window.location.pathname.startsWith("/admin")
+  ) {
     return <SurfaceRouter />;
   }
   return <MiniApp />;

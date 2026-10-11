@@ -5,14 +5,14 @@ CRUD источников с валидацией adapter_class по ADAPTER_CLA
 и просмотр здоровья источников.
 """
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.adapters import ADAPTER_CLASSES
 from app.core.deps import SessionDep
 from app.queue import enqueue_task
 from app.core.deps_internal import check_internal_token
-from app.db.models import Source, SourceHealth
+from app.db.models import Lead, Source, SourceHealth
 from app.schemas.criteria import SourceConfig
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -25,6 +25,43 @@ async def list_adapters(x_internal_token: str | None = InternalToken) -> dict[st
     """Доступные классы адаптеров (для валидации при создании источника)."""
     check_internal_token(x_internal_token)
     return {"adapters": sorted(ADAPTER_CLASSES)}
+
+
+@router.get("/leads")
+async def admin_leads(
+    session: SessionDep,
+    x_internal_token: str | None = InternalToken,
+    lead_status: str | None = Query(default=None, alias="status"),
+    partner_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    """Лиды для админ-панели (read-only, UI/UX ТЗ §3.6)."""
+    check_internal_token(x_internal_token)
+    conditions = []
+    if lead_status:
+        conditions.append(Lead.status == lead_status)
+    if partner_id is not None:
+        conditions.append(Lead.partner_id == partner_id)
+    query = select(Lead).order_by(Lead.id.desc()).limit(limit).offset(offset)
+    if conditions:
+        query = query.where(*conditions)
+    rows = (await session.execute(query)).scalars().all()
+    return [
+        {
+            "id": lead.id,
+            "user_id": lead.user_id,
+            "listing_id": lead.listing_id,
+            "source": lead.source,
+            "status": lead.status,
+            "partner_id": lead.partner_id,
+            "partner_status": lead.partner_status,
+            "comment": lead.comment,
+            "qualification": lead.qualification,
+            "created_at": lead.created_at,
+        }
+        for lead in rows
+    ]
 
 
 @router.get("/sources")
