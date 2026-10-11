@@ -11,3 +11,411 @@ body {
 main {
   padding-bottom: 72px;
 }
+
+/* ============================================================
+   Дизайн-токены (UI/UX ТЗ §1.2)
+   ============================================================ */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  --font-xs: 12px;
+  --font-sm: 14px;
+  --font-md: 16px;
+  --font-lg: 20px;
+  --font-xl: 24px;
+  --font-2xl: 32px;
+
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg-secondary: var(--tg-theme-secondary-bg-color, #f4f4f5);
+  --text: var(--tg-theme-text-color, #000000);
+  --text-secondary: var(--tg-theme-hint-color, #707579);
+  --accent: var(--tg-theme-button-color, #2481cc);
+  --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  --destructive: var(--tg-theme-destructive-text-color, #e53935);
+  --link: var(--tg-theme-link-color, #2481cc);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  --content-max: 1200px;
+  --tabbar-h: 56px;
+}
+
+/* ============================================================
+   Карточка объявления (ListingCard, ТЗ §2.2)
+   ============================================================ */
+.listing-card {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.listing-card:active {
+  transform: scale(0.985);
+}
+.listing-card__photo-wrap {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-secondary);
+}
+.listing-card__photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.listing-card__fav {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.listing-card__photos-count {
+  position: absolute;
+  bottom: var(--space-2);
+  right: var(--space-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: var(--font-xs);
+}
+.listing-card__body {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.listing-card__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+.listing-card__price {
+  font-size: var(--font-lg);
+  font-weight: 700;
+}
+.listing-card__meta {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+.listing-card__sub {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+
+/* ============================================================
+   Skeleton (ТЗ §1.5 — skeleton вместо Spinner)
+   ============================================================ */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.35),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s infinite;
+}
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.skeleton-card__photo {
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+.skeleton-card__line {
+  height: 14px;
+  margin: var(--space-2) var(--space-4);
+}
+.skeleton-card__line--short {
+  width: 55%;
+}
+
+/* ============================================================
+   Тосты (ТЗ §2.10)
+   ============================================================ */
+.toast-host {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h) + var(--space-4));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: 1000;
+  width: min(92vw, 480px);
+  pointer-events: none;
+}
+.toast {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(20, 20, 20, 0.92);
+  color: #fff;
+  font-size: var(--font-sm);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 0.18s ease;
+  text-align: center;
+}
+.toast--error {
+  background: rgba(178, 34, 34, 0.95);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   Чипсы фильтров (Feed, ТЗ §2.2)
+   ============================================================ */
+.chip-row {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-1) 0;
+  scrollbar-width: none;
+}
+.chip-row::-webkit-scrollbar {
+  display: none;
+}
+.chip {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--tg-theme-hint-color, #707579);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* ============================================================
+   Галерея (Listing, ТЗ §2.3)
+   ============================================================ */
+.gallery {
+  position: relative;
+}
+.gallery__track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  border-radius: var(--radius-lg);
+  scrollbar-width: none;
+}
+.gallery__track::-webkit-scrollbar {
+  display: none;
+}
+.gallery__slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+.gallery__counter {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: var(--font-xs);
+}
+
+/* ============================================================
+   Empty / Error states (ТЗ §2.2)
+   ============================================================ */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-secondary);
+}
+.state__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ============================================================
+   Feed-хедер (sticky)
+   ============================================================ */
+.feed-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding: var(--space-2) var(--space-4);
+}
+.feed-header__title {
+  font-size: var(--font-lg);
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+.feed-header__counter {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+/* ============================================================
+   Десктоп-адаптация (ТЗ §2.1, >= 768px)
+   ============================================================ */
+.app-shell {
+  display: block;
+}
+.app-content {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+@media (min-width: 768px) {
+  .app-shell--desktop {
+    display: flex;
+  }
+  .app-shell--desktop .app-sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--bg-secondary);
+    min-height: 100vh;
+    padding: var(--space-4) var(--space-2);
+  }
+  .app-shell--desktop .app-content {
+    flex: 1;
+    padding: 0 var(--space-5);
+  }
+  .app-shell--desktop main,
+  .app-shell--desktop #root > div {
+    padding-bottom: var(--space-4);
+  }
+  .app-shell--desktop .feed-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-4);
+  }
+  .app-shell--desktop .app-tabbar {
+    display: none !important;
+  }
+}
+.feed-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-4);
+}
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+.sidebar-item--active {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+/* Онбординг (ТЗ §2.8) */
+.onboarding {
+  padding: var(--space-6) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-height: 80vh;
+}
+.onboarding__dots {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+}
+.onboarding__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+}
+.onboarding__dot--active {
+  background: var(--accent);
+}
+.onboarding__roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.onboarding__role {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--bg-secondary);
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--font-md);
+  color: var(--text);
+}
+.onboarding__role--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.onboarding__role-sub {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  margin-top: var(--space-1);
+}
+.onboarding__countries {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+

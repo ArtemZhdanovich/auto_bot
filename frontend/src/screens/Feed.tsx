@@ -1,11 +1,12 @@
-/** Лента объявлений (ТЗ п. 9.2.4): фильтры-чипсы, бесконечный скролл. */
+/** Лента объявлений (UI/UX ТЗ §2.2): динамические чипсы, бесконечный скролл. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Card, Cell, Chip, Button, Spinner, Placeholder } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
-import type { Listing, ListingList } from "../api/types";
+import { ListingCard } from "../components/ListingCard";
+import { SkeletonList } from "../ui/Skeleton";
+import { EmptyState, ErrorState } from "../ui/States";
+import type { Listing, ListingList, UserFilter } from "../api/types";
 
 const PAGE_SIZE = 20;
 
@@ -15,17 +16,60 @@ interface FeedQuery {
   year_from?: string;
 }
 
+/** Быстрые пресеты (ТЗ §2.2) + сохранённые фильтры пользователя. */
+interface Chip {
+  key: string;
+  label: string;
+  query: FeedQuery;
+}
+
+function buildChips(filters: UserFilter[]): Chip[] {
+  const presets: Chip[] = [
+    { key: "all", label: "Все", query: {} },
+    { key: "p20k", label: "до $20 000", query: { price_max: "20000" } },
+    { key: "y2022", label: "2022+", query: { year_from: "2022" } },
+  ];
+  const saved: Chip[] = filters.map((f) => ({
+    key: `f${f.id}`,
+    label: f.name ?? `Фильтр #${f.id}`,
+    query: {
+      make: f.criteria.make,
+      price_max: f.criteria.price_max !== undefined ? String(f.criteria.price_max) : undefined,
+      year_from: f.criteria.year_from !== undefined ? String(f.criteria.year_from) : undefined,
+    },
+  }));
+  return [...presets, ...saved];
+}
+
+function sameQuery(a: FeedQuery, b: FeedQuery): boolean {
+  return a.make === b.make && a.price_max === b.price_max && a.year_from === b.year_from;
+}
+
 export function FeedScreen() {
   const [items, setItems] = useState<Listing[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [chips, setChips] = useState<Chip[]>([]);
   const [query, setQuery] = useState<FeedQuery>({});
   const offsetRef = useRef(0);
-  const navigate = useNavigate();
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const queryRef = useRef(query);
+  queryRef.current = query;
 
-  const load = useCallback(
-    async (q: FeedQuery, reset: boolean) => {
-      setLoading(true);
+  // Динамические чипсы: пресеты + сохранённые фильтры (ТЗ §2.2)
+  useEffect(() => {
+    api<UserFilter[]>("/filters")
+      .then((filters) => setChips(buildChips(filters)))
+      .catch(() => setChips(buildChips([])));
+  }, []);
+
+  const load = useCallback(async (q: FeedQuery, reset: boolean) => {
+    if (reset) setLoading(true);
+    else setLoadingMore(true);
+    setError(null);
+    try {
       const params = new URLSearchParams();
       if (q.make) params.set("make", q.make);
       if (q.price_max) params.set("price_max", q.price_max);
@@ -36,71 +80,96 @@ export function FeedScreen() {
       setTotal(data.total);
       setItems((prev) => (reset ? data.items : [...prev, ...data.items]));
       offsetRef.current = reset ? data.items.length : offsetRef.current + data.items.length;
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
       setLoading(false);
-    },
-    [],
-  );
+      setLoadingMore(false);
+    }
+  }, []);
 
   useEffect(() => {
     void load(query, true);
   }, [query, load]);
 
-  const hasMore = items.length < total;
+  // Бесконечный скролл (ТЗ §2.2) вместо кнопки «Ещё»
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loading && !loadingMore && !error) {
+          if (items.length < total) {
+            void load(queryRef.current, false);
+          }
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [items.length, total, loading, loadingMore, error, load]);
+
+  const activeChip = chips.find((c) => sameQuery(c.query, query))?.key ?? "";
+
+  const retry = useCallback(() => {
+    void load(queryRef.current, items.length === 0);
+  }, [load, items.length]);
 
   return (
-    <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-        <Chip
-          mode={query.make === "BMW" ? "elevated" : "outline"}
-          onClick={() => setQuery((q) => ({ ...q, make: q.make === "BMW" ? undefined : "BMW" }))}
-        >
-          BMW
-        </Chip>
-        <Chip
-          mode={query.make === "Audi" ? "elevated" : "outline"}
-          onClick={() => setQuery((q) => ({ ...q, make: q.make === "Audi" ? undefined : "Audi" }))}
-        >
-          Audi
-        </Chip>
-        <Chip
-          mode={query.price_max === "20000" ? "elevated" : "outline"}
-          onClick={() =>
-            setQuery((q) => ({ ...q, price_max: q.price_max === "20000" ? undefined : "20000" }))
-          }
-        >
-          до $20 000
-        </Chip>
+    <div>
+      <div className="feed-header">
+        <div className="feed-header__title">Лента</div>
+        {!loading && !error && (
+          <div className="feed-header__counter">
+            {total.toLocaleString("ru")} авто · новые сверху
+          </div>
+        )}
+        <div className="chip-row">
+          {chips.map((c) => (
+            <button
+              key={c.key}
+              className={c.key === activeChip ? "chip chip--active" : "chip"}
+              onClick={() => setQuery(c.query)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {items.map((l) => (
-        <Card key={l.id} onClick={() => navigate(`/listing/${l.id}`)} type="plain">
-          <Cell
-            subtitle={`${l.year ?? "—"} · ${l.mileage_km ? `${l.mileage_km.toLocaleString("ru")} км` : "пробег не указан"}`}
-            description={`${l.source} · ${new Date(l.parsed_at).toLocaleDateString("ru")}`}
-            after={
-              l.price !== null ? (
-                <b>
-                  {l.price.toLocaleString("ru")} {l.currency ?? ""}
-                </b>
-              ) : (
-                "—"
-              )
-            }
-          >
-            {l.make} {l.model}
-          </Cell>
-        </Card>
-      ))}
+      <div className="feed-grid">
+        {items.map((l) => (
+          <ListingCard key={l.id} listing={l} />
+        ))}
 
-      {loading && <Spinner size="m" />}
-      {!loading && items.length === 0 && (
-        <Placeholder header="Ничего не найдено" description="Попробуйте изменить фильтры" />
+        {loading && <SkeletonList count={4} />}
+
+        {!loading && error && items.length === 0 && (
+          <ErrorState description="Не удалось загрузить ленту" onRetry={retry} />
+        )}
+
+        {!loading && !error && items.length === 0 && (
+          <EmptyState
+            title="Ничего не найдено"
+            description="Попробуйте изменить фильтры"
+          />
+        )}
+      </div>
+
+      {/* Сентинел бесконечного скролла */}
+      <div ref={sentinelRef} style={{ height: 1 }} />
+      {loadingMore && (
+        <div style={{ padding: 16 }}>
+          <SkeletonList count={1} />
+        </div>
       )}
-      {!loading && hasMore && (
-        <Button mode="bezeled" size="l" onClick={() => void load(query, false)}>
-          Ещё ({total - items.length})
-        </Button>
+      {!loading && !error && items.length >= total && items.length > 0 && (
+        <div className="state" style={{ padding: 16 }}>
+          Показаны все найденные варианты
+        </div>
       )}
     </div>
   );
 }
+

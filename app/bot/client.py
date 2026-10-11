@@ -107,6 +107,10 @@ class BackendClient:
         """GET /api/users/{id}/subscription — тариф для /subscribe (ТЗ п. 8.7)."""
         return await self._get(f"/api/users/{user_id}/subscription")
 
+    async def get_listing(self, listing_id: int) -> dict | None:
+        """GET /api/listings/{id} — карточка для deep link listing_{id} (ТЗ §5.3)."""
+        return await self._get(f"/api/listings/{listing_id}")
+
     async def prepare_payment(
         self, user_id: int, tier: str, period_days: int
     ) -> dict | None:

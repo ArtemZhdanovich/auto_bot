@@ -1,11 +1,15 @@
-/** Карточка объявления (ТЗ п. 9.2.5). */
+/** Карточка объявления (UI/UX ТЗ §2.3): галерея, характеристики, избранное. */
 
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, Placeholder, Section, Cell, Spinner } from "@telegram-apps/telegram-ui";
+import { Button, Placeholder, Section, Cell } from "@telegram-apps/telegram-ui";
+import { Heart, ExternalLink } from "lucide-react";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
+import { useToast } from "../ui/Toast";
+import { SkeletonCard } from "../ui/Skeleton";
+import { ErrorState } from "../ui/States";
 import type { Listing } from "../api/types";
 
 export function ListingScreen() {
@@ -14,6 +18,7 @@ export function ListingScreen() {
   const [favorited, setFavorited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const toast = useToast();
 
   useEffect(() => {
     api<Listing>(`/listings/${id}`)
@@ -25,49 +30,72 @@ export function ListingScreen() {
   }, [id]);
 
   const toggleFavorite = async () => {
-    const r = await api<{ favorited: boolean }>(`/listings/${id}/favorite`, {
-      method: "POST",
-    });
-    setFavorited(r.favorited);
-    haptic();
+    haptic("medium");
+    try {
+      const r = await api<{ favorited: boolean }>(`/listings/${id}/favorite`, {
+        method: "POST",
+      });
+      setFavorited(r.favorited);
+      toast.show(r.favorited ? "❤️ Добавлено в избранное" : "Убрано из избранного");
+    } catch {
+      toast.show("Не удалось изменить избранное", { error: true });
+    }
   };
 
   if (error) {
-    return <Placeholder header="Ошибка" description={error} />;
+    return <ErrorState description={error} onRetry={() => navigate(-1)} />;
   }
   if (!listing) {
-    return <Spinner size="l" />;
+    return (
+      <div style={{ padding: 12 }}>
+        <SkeletonCard />
+        <SkeletonCard />
+      </div>
+    );
   }
+
+  const title = `${listing.make ?? ""} ${listing.model ?? ""}`.trim();
 
   return (
     <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
-      {listing.images.length > 0 && (
-        <img
-          src={listing.images[0]}
-          alt={`${listing.make} ${listing.model}`}
-          style={{ width: "100%", borderRadius: 12, maxHeight: 260, objectFit: "cover" }}
-        />
+      {/* Галерея: свайп + счётчик (ТЗ §2.3) */}
+      {listing.images.length > 0 ? (
+        <Gallery images={listing.images} alt={title} />
+      ) : (
+        <Placeholder description="Фото не загружены" />
       )}
-      <Section header={`${listing.make ?? ""} ${listing.model ?? ""}`.trim()}>
-        <Cell after={<b>{listing.price ? `${listing.price.toLocaleString("ru")} ${listing.currency ?? ""}` : "—"}</b>}>
+
+      <Section header={title}>
+        <Cell
+          after={
+            <b>
+              {listing.price
+                ? `${listing.price.toLocaleString("ru")} ${listing.currency ?? ""}`
+                : "—"}
+            </b>
+          }
+        >
           Цена
         </Cell>
-        <Cell>{listing.year ?? "—"}</Cell>
-        <Cell subtitle="Пробег">
-          {listing.mileage_km ? `${listing.mileage_km.toLocaleString("ru")} км` : "—"}
+        <Cell after={listing.year ?? "—"}>Год</Cell>
+        <Cell after={listing.mileage_km ? `${listing.mileage_km.toLocaleString("ru")} км` : "—"}>
+          Пробег
         </Cell>
-        <Cell subtitle="VIN">{listing.vin ?? "не указан"}</Cell>
-        <Cell subtitle="Источник">{listing.source}</Cell>
+        <Cell after={listing.vin ?? "не указан"}>VIN</Cell>
+        <Cell after={listing.source}>Источник</Cell>
       </Section>
+
       <Button
         size="l"
         mode={favorited ? "filled" : "outline"}
-        onClick={toggleFavorite}
+        before={<Heart size={18} fill={favorited ? "currentColor" : "none"} />}
+        onClick={() => void toggleFavorite()}
       >
-        {favorited ? "❤️ В избранном" : "🤍 В избранное"}
+        {favorited ? "В избранном" : "В избранное"}
       </Button>
       <Button
         size="l"
+        before={<ExternalLink size={18} />}
         onClick={() => {
           haptic();
           window.open(listing.url, "_blank");
@@ -81,3 +109,26 @@ export function ListingScreen() {
     </div>
   );
 }
+
+function Gallery({ images, alt }: { images: string[]; alt: string }) {
+  const [idx, setIdx] = useState(0);
+  return (
+    <div className="gallery">
+      <div
+        className="gallery__track"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setIdx(Math.round(el.scrollLeft / el.clientWidth));
+        }}
+      >
+        {images.map((src, i) => (
+          <img key={i} className="gallery__slide" src={src} alt={`${alt} — фото ${i + 1}`} loading="lazy" />
+        ))}
+      </div>
+      <span className="gallery__counter">
+        {idx + 1} / {images.length}
+      </span>
+    </div>
+  );
+}
+

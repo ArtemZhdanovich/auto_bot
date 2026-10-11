@@ -39,6 +39,7 @@ class UserOut(BaseModel):
     subscription_until: datetime | None
     created_at: datetime
     is_active: bool
+    onboarded_at: datetime | None = None
 
 
 class TokenPair(BaseModel):

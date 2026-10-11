@@ -11,6 +11,7 @@ export interface User {
   subscription_until: string | null;
   created_at: string;
   is_active: boolean;
+  onboarded_at: string | null;
 }
 
 export interface AuthResponse {

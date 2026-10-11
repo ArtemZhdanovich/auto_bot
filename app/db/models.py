@@ -44,6 +44,8 @@ class User(Base):
     # уведомления — только через привязанный Telegram (см. /start ref_ deep link).
     email: Mapped[str | None] = mapped_column(Text, unique=True)
     password_hash: Mapped[str | None] = mapped_column(Text)
+    # Онбординг Mini App пройден (UI/UX ТЗ §2.8); NULL — ещё не проходил.
+    onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class UserFilter(Base):

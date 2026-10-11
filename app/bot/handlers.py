@@ -76,9 +76,6 @@ async def cmd_start(message: Message, command: CommandObject | None, state: FSMC
     await state.clear()
 
     args = command.args if command else None
-    if args:
-        # Deep links (ТЗ п. 8.10): listing_{id}, filter_{id}, ref_{user_id}
-        logger.info("start_deep_link: %s", args)
 
     user = message.from_user
     if user:
@@ -90,10 +87,117 @@ async def cmd_start(message: Message, command: CommandObject | None, state: FSMC
             language_code=user.language_code,
         )
 
+    if args and await handle_deep_link(message, args):
+        return
+
     name = user.first_name if user and user.first_name else "друг"
     await message.answer(
         START_TEXT.format(name=name), reply_markup=build_main_menu_kb()
     )
+
+
+def _miniapp_url() -> str:
+    from app.core.config import get_settings
+
+    return get_settings().miniapp_url
+
+
+def build_listing_caption(listing: dict) -> str:
+    """Короткая карточка объявления для бота (UI/UX ТЗ §5.5)."""
+    title = " ".join(
+        x for x in [listing.get("make"), listing.get("model")] if x
+    ) or "Автомобиль"
+    price = listing.get("price")
+    price_str = (
+        f"{price:,.0f}".replace(",", " ") + f" {listing.get('currency') or ''}".rstrip()
+        if price
+        else "цена не указана"
+    )
+    details = []
+    if listing.get("year"):
+        details.append(str(listing["year"]))
+    if listing.get("mileage_km"):
+        details.append(f"{listing['mileage_km']:,.0f} км".replace(",", " "))
+    if listing.get("vin"):
+        details.append(f"VIN {listing['vin']}")
+    caption = f"<b>{html.escape(title)}</b>\n💰 {html.escape(price_str)}"
+    if details:
+        caption += "\n⚙️ " + html.escape(" · ".join(details))
+    if listing.get("source"):
+        caption += f"\n📍 Источник: {html.escape(listing['source'])}"
+    return caption[:1024]
+
+
+def build_listing_kb(url: str) -> InlineKeyboardMarkup:
+    """Кнопки карточки: приложение (фото/детали) + источник (UI/UX ТЗ §5.5)."""
+    from aiogram.types import WebAppInfo
+
+    rows: list[list[InlineKeyboardButton]] = []
+    miniapp = _miniapp_url()
+    if miniapp:
+        rows.append(
+            [InlineKeyboardButton(
+                text="📱 Фото и детали", web_app=WebAppInfo(url=miniapp)
+            )]
+        )
+    if url:
+        rows.append([InlineKeyboardButton(text="🔗 Открыть у источника", url=url)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def handle_deep_link(message: Message, args: str) -> bool:
+    """Deep links (UI/UX ТЗ §5.3): listing_{id}, filter_{id}, ref_, app.
+
+    True — deep link обработан и обычный онбординг не нужен.
+    """
+    if args.startswith("listing_"):
+        try:
+            listing_id = int(args.removeprefix("listing_"))
+        except ValueError:
+            return False
+        listing = await backend.get_listing(listing_id)
+        if listing is None:
+            await message.answer(
+                "Объявление не найдено или сервис временно недоступен."
+            )
+            return True
+        caption = build_listing_caption(listing)
+        kb = build_listing_kb(listing.get("url") or "")
+        images = listing.get("images") or []
+        if images:
+            await message.answer_photo(images[0], caption=caption, reply_markup=kb)
+        else:
+            await message.answer(caption, reply_markup=kb)
+        return True
+
+    if args.startswith("filter_"):
+        from aiogram.types import WebAppInfo
+
+        miniapp = _miniapp_url()
+        rows: list[list[InlineKeyboardButton]] = []
+        if miniapp:
+            rows.append(
+                [InlineKeyboardButton(
+                    text="📱 Открыть фильтр в приложении",
+                    web_app=WebAppInfo(url=miniapp),
+                )]
+            )
+        await message.answer(
+            "🔍 Фильтр найден — управление им в приложении.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+        return True
+
+    if args.startswith("ref_"):
+        # Реферальная программа — P4 (бэкенд), пока фиксируем переход в лог.
+        logger.info(
+            "referral_start: referrer=%s user=%s",
+            args.removeprefix("ref_"),
+            message.from_user.id if message.from_user else None,
+        )
+        return False
+
+    return False
 
 
 def build_main_menu_kb() -> InlineKeyboardMarkup:
