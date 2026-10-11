@@ -53,16 +53,15 @@ class Settings(BaseSettings):
     # Партнёрский API (P2-10): rate limit запросов на партнёрский ключ в минуту
     partner_rate_limit_per_min: int = 60
 
-    # LLM (этап 3): OpenAI-совместимые провайдеры; основной — GLM (Zhipu)
+    # LLM (этап 3): основной провайдер — GLM (Zhipu); OpenAI выпилен
     glm_api_key: str | None = None
     # Международный эндпоинт z.ai; для ключей open.bigmodel.cn задайте
     # GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
     glm_base_url: str = "https://api.z.ai/api/paas/v4"
-    openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     llm_default_model: str = "glm-4.6"
     llm_advanced_model: str = "glm-4.6"
-    # glm | openai | anthropic | ollama | mock ("mock" — для тестов/dev без LLM)
+    # glm | anthropic | ollama | mock ("mock" — для тестов/dev без LLM)
     llm_provider: str = "glm"
     llm_base_url: str | None = None  # переопределение (например, Ollama/прокси)
     llm_temperature: float = 0.2

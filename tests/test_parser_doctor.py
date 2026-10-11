@@ -208,9 +208,11 @@ async def test_no_source_row():
     assert result["status"] == "no_source"
 
 
-async def test_no_html_from_site():
+async def test_ban_403_triaged_without_llm():
+    """403 = бан/геоблок: врач ставит диагноз, LLM не зовёт, конфиг не трогает."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(403)  # геоблок — врачу нечего лечить
+        return httpx.Response(403)
 
     adapter = Che168HtmlAdapter(
         source_name="che168",
@@ -222,5 +224,90 @@ async def test_no_html_from_site():
     result = await repair_parser(
         "che168", adapter, session=session, redis=FakeRedis(), llm=llm
     )
-    assert result["status"] == "no_html"
+    assert result["status"] == "banned"
+    assert session.committed is False
     assert llm.calls == []  # до LLM дело не дошло
+
+
+async def test_server_down_5xx_triaged_without_llm():
+    """5xx = источник лежит: это не вёрстка, LLM-ремонт не запускаем."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    adapter = Che168HtmlAdapter(
+        source_name="che168",
+        config=OLD_CONFIG,
+        http_client=HttpClient(transport=httpx.MockTransport(handler), timeout=10),
+    )
+    llm = make_llm(json_of(NEW_SELECTORS))
+    session = make_session("auto")
+    result = await repair_parser(
+        "che168", adapter, session=session, redis=FakeRedis(), llm=llm
+    )
+    assert result["status"] == "server_down"
+    assert llm.calls == []
+    assert session.committed is False
+
+
+async def test_captcha_stub_page_triaged_banned():
+    """HTTP 200, но вместо списка — заглушка антибота с капчей: это бан."""
+    stub = "<html><body>请完成安全验证 to continue browsing" + "x" * 400 + "</body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=stub)
+
+    adapter = Che168HtmlAdapter(
+        source_name="che168",
+        config=OLD_CONFIG,
+        http_client=HttpClient(transport=httpx.MockTransport(handler), timeout=10),
+    )
+    llm = make_llm(json_of(NEW_SELECTORS))
+    session = make_session("auto")
+    result = await repair_parser(
+        "che168", adapter, session=session, redis=FakeRedis(), llm=llm
+    )
+    assert result["status"] == "banned"
+    assert llm.calls == []
+
+
+async def test_server_down_does_not_consume_cooldown():
+    """Бан/падение триажится каждый раз: cooldown ставится только перед LLM."""
+    redis = FakeRedis()
+
+    def down_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    down = Che168HtmlAdapter(
+        source_name="che168",
+        config=OLD_CONFIG,
+        http_client=HttpClient(transport=httpx.MockTransport(down_handler), timeout=10),
+    )
+    for _ in range(2):  # cooldown не мешает повторному триажу
+        result = await repair_parser(
+            "che168", down, session=make_session("auto"), redis=redis, llm=None
+        )
+        assert result["status"] == "server_down"
+    assert await redis.get("doctor:che168") is None  # cooldown не выставлен
+
+
+# --- unit: классификаторы триажа ----------------------------------------
+
+
+def test_classify_page_buckets():
+    from app.services.parser_doctor import classify_page
+
+    assert classify_page(NEW_LAYOUT) == "markup_change"
+    assert classify_page("Access Denied") == "banned"  # короче MIN_HTML_LEN
+    captcha = "captcha" + "y" * 400
+    assert classify_page(captcha) == "banned"  # маркер антибота
+
+
+def test_classify_fetch_error_buckets():
+    from app.services.parser_doctor import classify_fetch_error
+
+    assert classify_fetch_error("HTTP 403 for https://x") == "banned"
+    assert classify_fetch_error("HTTP 429 for https://x") == "banned"
+    assert classify_fetch_error("HTTP 502 for https://x") == "server_down"
+    assert classify_fetch_error("Failed to fetch https://x: timeout") == "server_down"
+    assert classify_fetch_error(None) == "server_down"

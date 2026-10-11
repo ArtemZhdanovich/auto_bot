@@ -7,19 +7,19 @@ import pytest
 
 from app.ai.llm_client import (
     AnthropicClient,
+    ChatCompletionsClient,
     LLMError,
     MockLLMClient,
-    OpenAICompatibleClient,
     ToolCall,
     LLMResult,
 )
 
 
-def _openai_transport() -> httpx.MockTransport:
+def _chat_completions_transport() -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer test-key"
         payload = json.loads(request.content)
-        assert payload["model"] == "gpt-test"
+        assert payload["model"] == "glm-test"
         assert payload["tools"][0]["function"]["name"] == "update_criteria"
         return httpx.Response(
             200,
@@ -47,12 +47,12 @@ def _openai_transport() -> httpx.MockTransport:
 
 
 @pytest.mark.asyncio
-async def test_openai_parses_tool_calls():
-    client = OpenAICompatibleClient(
+async def test_chat_completions_parses_tool_calls():
+    client = ChatCompletionsClient(
         api_key="test-key",
-        base_url="https://api.openai.com/v1",
-        model="gpt-test",
-        transport=_openai_transport(),
+        base_url="https://api.z.ai/api/paas/v4",
+        model="glm-test",
+        transport=_chat_completions_transport(),
     )
     result = await client.complete([{"role": "user", "content": "hi"}], tools=[{"name": "update_criteria"}])
     assert result.text is None
@@ -63,7 +63,7 @@ async def test_openai_parses_tool_calls():
 
 
 @pytest.mark.asyncio
-async def test_openai_invalid_json_args_raises():
+async def test_chat_completions_invalid_json_args_raises():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -80,7 +80,7 @@ async def test_openai_invalid_json_args_raises():
             },
         )
 
-    client = OpenAICompatibleClient(
+    client = ChatCompletionsClient(
         api_key="k",
         base_url="https://x/v1",
         model="m",
@@ -92,8 +92,8 @@ async def test_openai_invalid_json_args_raises():
 
 
 @pytest.mark.asyncio
-async def test_openai_http_error_raises_llm_error():
-    client = OpenAICompatibleClient(
+async def test_chat_completions_http_error_raises_llm_error():
+    client = ChatCompletionsClient(
         api_key="k",
         base_url="https://x/v1",
         model="m",
@@ -149,7 +149,7 @@ async def test_build_llm_client_glm_default():
     )
     client = build_llm_client(settings)
     try:
-        assert type(client) is OpenAICompatibleClient
+        assert type(client) is ChatCompletionsClient
         assert client._model == "glm-4.6"
         assert (
             str(client._client.base_url).rstrip("/")

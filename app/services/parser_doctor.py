@@ -1,6 +1,14 @@
 """ParserDoctor — ИИ-ремонтник SSR-парсеров.
 
-Когда парсер внезапно отдаёт 0 карточек (сайт сменил вёрстку), врач:
+Когда парсер внезапно отдаёт 0 карточек, врач сначала определяет ПРИЧИНУ
+(триаж) — лечатся они по-разному:
+0. Триаж живого ответа источника:
+   - banned       — 401/403/406/429, капча-маркеры или пустышка-страница:
+                    селекторы ни при чём, нужен прокси/хедеры, LLM не зовём;
+   - server_down  — 5xx, таймауты, ошибки сети/коннекта: ждём восстановления,
+                    LLM не зовём;
+   - markup_change — страница отдалась нормально, но карточек 0: это смена
+                    вёрстки, зовём LLM.
 1. Забирает живой HTML страницы списка.
 2. Просит LLM (GLM) предложить новые CSS-селекторы (card/title/price/link).
 3. **Валидирует** предложение локально: парсит тот же HTML новым адаптером,
@@ -11,14 +19,15 @@
 Безопасность (принцип «never break business flow»):
 - Любая ошибка (LLM недоступен, мусорный JSON, невалидные селекторы)
   не бросается наружу — лог + статус в результате + алерт при auto.
-- Cooldown в Redis (doctor:{source}, 6 ч) — LLM-вызовы стоят денег,
-  на каждый фетч врача не зовём.
+- Cooldown в Redis (doctor:{source}, 6 ч) — LLM-вызовы стоят денег; ставится
+  ТОЛЬКО перед LLM-ремонтом: бан и падение сервера триажатся каждый раз.
 - Валидация на реальном HTML — LLM не может «сломать» парсер плохим
   селектором: не прошёл проверку → конфиг не меняется.
 """
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,7 +46,17 @@ SELECTOR_KEYS = ("card_selector", "title_selector", "price_selector", "link_sele
 MIN_ITEMS = 3          # минимум карточек, чтобы принять ремонт
 MIN_PRICE_RATE = 0.5   # доля карточек с ценой
 HTML_LIMIT = 15_000    # сколько HTML показываем LLM
+MIN_HTML_LEN = 300     # короче — заглушка/антибот, а не список объявлений
 COOLDOWN_SEC = 6 * 3600
+
+# Маркеры антибота/капчи в HTML (сравнение в нижнем регистре):
+# chinese — che168/авито-подобные WAF-заглушки, латиница — общие случаи
+BAN_MARKERS = (
+    "captcha", "verify", "access denied", "forbidden", "unusual traffic",
+    "请完成验证", "安全验证", "滑动验证", "访问过于频繁", "punish", "waf",
+)
+# HttpClient ретраит и бросает FetchError строкой "HTTP <code> for <url>"
+HTTP_CODE_RE = re.compile(r"HTTP (\d{3})")
 
 PROMPT = """Ты помогаешь чинить парсер HTML-страницы со списком автомобилей.
 Текущие CSS-селекторы перестали работать — сайт сменил вёрстку.
@@ -69,6 +88,33 @@ def extract_json(text: str | None) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def classify_page(html: str) -> str:
+    """Триаж нормально отдавшейся страницы (HTTP 2xx).
+
+    banned — капча/заглушка антибота (короткая страница или маркеры);
+    markup_change — страница живая, карточек в ней нет: смена вёрстки.
+    """
+    low = html.lower()
+    if len(html.strip()) < MIN_HTML_LEN:
+        return "banned"  # пустышка-страница — типичное поведение антибота
+    if any(marker in low for marker in BAN_MARKERS):
+        return "banned"
+    return "markup_change"
+
+
+def classify_fetch_error(error: str | None) -> str:
+    """Триаж сетевого сбоя (HttpClient завернул 4xx/5xx в FetchError).
+
+    banned — 401/403/406/429 (бан, геоблок, лимит запросов);
+    server_down — 5xx, таймауты, DNS/коннект: источник лежит.
+    """
+    match = HTTP_CODE_RE.search(error or "")
+    code = int(match.group(1)) if match else None
+    if code in (401, 403, 406, 429):
+        return "banned"
+    return "server_down"
 
 
 def validate_selectors(cls: type, config: dict[str, Any], html: str) -> int | None:
@@ -130,17 +176,23 @@ async def _repair(
     if mode not in ("suggest", "auto"):
         return {"source": source_name, "status": "disabled"}
 
+    old_selectors = {key: config.get(key) for key in SELECTOR_KEYS}
+
+    # 0) живой ответ источника + триаж причины: бан, падение сервера и
+    #    смена вёрстки лечатся по-разному — LLM зовём только в последнем случае
+    status, html, fetch_error = await _fetch_list_page(adapter, config)
+    triage = classify_fetch_error(fetch_error) if status is None else classify_page(html)
+    if triage != "markup_change":
+        return await _triage_result(source_name, triage, status, fetch_error)
+
+    # Cooldown ставим только перед LLM-ремонтом: бан/падение сервера
+    # триажится при каждом запуске врача, без «остывания»
     if redis is not None:
         got = await redis.set(f"doctor:{source_name}", "1", nx=True, ex=COOLDOWN_SEC)
         if not got:
             return {"source": source_name, "status": "cooldown"}
 
-    old_selectors = {key: config.get(key) for key in SELECTOR_KEYS}
-
-    # 1) живой HTML той же страницы списка
-    html = await _fetch_list_html(adapter, config)
-    if not html:
-        return {"source": source_name, "status": "no_html"}
+    # 1) HTML уже получен на шаге триажа
 
     # 2) LLM предлагает новые селекторы
     if llm is None:
@@ -199,17 +251,56 @@ async def _repair(
     return {"source": source_name, "status": "suggested", "items": parsed}
 
 
-async def _fetch_list_html(adapter: Any, config: dict[str, Any]) -> str | None:
-    """Живой HTML страницы списка — тем же HttpClient (прокси/ретраи)."""
+async def _triage_result(
+    source_name: str, triage: str, status: int | None, error: str | None
+) -> dict[str, Any]:
+    """Алерт с причиной без вызова LLM: бан / недоступен / страница переехала."""
+    details = f"HTTP {status}" if status is not None else f"сеть: {(error or '')[:200]}"
+    if triage == "banned":
+        text = (
+            f"🚫 ParserDoctor {source_name}: похоже на бан/геоблок/капчу ({details}). "
+            f"Селекторы ни при чём — нужна ротация прокси/хедеров, LLM не звал."
+        )
+    elif triage == "server_down":
+        text = (
+            f"🛑 ParserDoctor {source_name}: источник недоступен ({details}). "
+            f"Ждём восстановления — LLM-ремонт не запускался."
+        )
+    else:  # http_error: 404/410 и т.п. — страница списка переехала
+        text = (
+            f"⚠️ ParserDoctor {source_name}: страница списка отвечает {details}. "
+            f"Проверьте base_url/list_path — селекторами это не лечится."
+        )
+    logger.warning(
+        "parser_doctor_triage: source=%s triage=%s (%s)", source_name, triage, details
+    )
+    await send_alert(text, dedup_key=f"doctor_triage_{triage}:{source_name}")
+    return {
+        "source": source_name,
+        "status": triage,
+        **({"http_status": status} if status is not None else {}),
+        **({"error": error} if error else {}),
+    }
+
+
+async def _fetch_list_page(
+    adapter: Any, config: dict[str, Any]
+) -> tuple[int | None, str | None, str | None]:
+    """Живой HTML страницы списка тем же HttpClient (прокси/ретраи).
+
+    Возвращает (status_code, html, error). Сетевой сбой → (None, None, err):
+    raise_for_status в HttpClient превращает 4xx/5xx в FetchError со строкой
+    "HTTP <code> for <url>" — код вытаскиваем для триажа бан/недоступен.
+    """
     from app.adapters.che168 import HEADERS
 
     base_url = str(config.get("base_url", "")).rstrip("/")
     list_path = str(config.get("list_path", ""))
     if not base_url:
-        return None
+        return None, None, "no base_url in source config"
     try:
         resp = await adapter.http.get(base_url + list_path, headers=HEADERS)
-    except Exception as exc:  # noqa: BLE001 — геоблок/сеть: врачу нечего лечить
-        logger.info("parser_doctor_no_html: %s", exc)
-        return None
-    return resp.text
+    except Exception as exc:  # noqa: BLE001 — триажим любую сетевую ошибку
+        logger.info("parser_doctor_fetch_failed: %s", exc)
+        return None, None, str(exc)
+    return resp.status_code, resp.text, None

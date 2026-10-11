@@ -198,7 +198,7 @@ AI-агент отвечает на фактические вопросы (ра�
 
 Свободный текст пользователя → `POST /api/dialog/message` (internal-токен) → agent loop:
 
-- **LLM-провайдеры** (`app/ai/llm_client.py`): OpenAI-совместимый (OpenAI/Ollama), Anthropic, Mock — через httpx, без SDK.
+- **LLM-провайдеры** (`app/ai/llm_client.py`): /chat/completions-совместимый (GLM/Ollama/DeepSeek), Anthropic, Mock — через httpx, без SDK. OpenAI выпилен.
 - **Tools** (`app/ai/tools.py`, ТЗ п. 7.3): `update_criteria`, `ask_clarification`, `answer_question`, `lookup_reference`, `preview_search`, `finalize_search`. Каждый патч критериев валидируется через Pydantic.
 - **Agent loop** (`app/ai/agent.py`): FAQ-ответы из кэша без LLM (п. 7.8), ранний выход при заполненных критичных полях (make/model + price_max + country/sources), история — последние 8 сообщений.
 - **DialogState** (`dialog:{user_id}` в Redis, TTL 24ч), архивация в `dialog_sessions` (п. 7.6).

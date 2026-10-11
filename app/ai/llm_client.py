@@ -1,6 +1,6 @@
-"""LLM-клиенты (ТЗ п. 4.5): OpenAI / Anthropic / Ollama через httpx.
+"""LLM-клиенты (ТЗ п. 4.5): GLM (Zhipu) / Anthropic / Ollama через httpx.
 
-Без тяжёлых SDK: OpenAI и Ollama используют совместимый /chat/completions,
+Без тяжёлых SDK: GLM и Ollama используют совместимый /chat/completions,
 Anthropic — /v1/messages. Transport-инъекция — для тестов.
 """
 
@@ -43,8 +43,8 @@ class BaseLLMClient:
         return None
 
 
-class OpenAICompatibleClient(BaseLLMClient):
-    """OpenAI / Ollama / любой /chat/completions-совместимый провайдер."""
+class ChatCompletionsClient(BaseLLMClient):
+    """GLM (Zhipu) / DeepSeek / Ollama — /chat/completions-совместимые."""
 
     def __init__(
         self,
@@ -197,7 +197,7 @@ class MockLLMClient(BaseLLMClient):
 def build_llm_client(
     settings: Settings, transport: httpx.AsyncBaseTransport | None = None
 ) -> BaseLLMClient:
-    """Фабрика по settings.llm_provider: openai | anthropic | ollama | mock."""
+    """Фабрика по settings.llm_provider: glm | anthropic | ollama | mock."""
     provider = settings.llm_provider
     model = settings.llm_default_model
     temperature = settings.llm_temperature
@@ -215,26 +215,24 @@ def build_llm_client(
             transport=transport,
         )
     if provider == "ollama":
-        return OpenAICompatibleClient(
+        return ChatCompletionsClient(
             api_key="ollama",
             base_url=base_url or "http://localhost:11434/v1",
             model=model,
             temperature=temperature,
             transport=transport,
         )
-    # по умолчанию glm (GLM/Zhipu, OpenAI-совместимый /chat/completions)
-    if provider in ("glm", "openai"):
-        api_key = settings.glm_api_key if provider == "glm" else settings.openai_api_key
-        if not api_key:
-            raise LLMError(
-                "GLM_API_KEY is not set" if provider == "glm"
-                else "OPENAI_API_KEY is not set"
-            )
-        default_base = settings.glm_base_url if provider == "glm" else "https://api.openai.com/v1"
-        return OpenAICompatibleClient(
-            api_key=api_key,
-            base_url=base_url or default_base,
+    # основной провайдер — GLM/Zhipu (/chat/completions-совместимый)
+    if provider == "glm":
+        if not settings.glm_api_key:
+            raise LLMError("GLM_API_KEY is not set")
+        return ChatCompletionsClient(
+            api_key=settings.glm_api_key,
+            base_url=base_url or settings.glm_base_url,
             model=model,
             temperature=temperature,
             transport=transport,
         )
+    raise LLMError(
+        f"Unknown llm_provider: {provider!r} (glm | anthropic | ollama | mock)"
+    )

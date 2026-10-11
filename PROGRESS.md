@@ -1,6 +1,29 @@
 
 # Auto Selection — PROGRESS
 
+## 29. OpenAI выпилен + ParserDoctor: триаж причин падения источника
+
+- **LLM только за Китай**: провайдер OpenAI удалён из фабрики
+  (`glm | anthropic | ollama | mock`), `OpenAICompatibleClient` →
+  `ChatCompletionsClient` (GLM/DeepSeek/Ollama), `openai_api_key` из
+  config/.env/.env.example убран, модели `gpt-4o*` → `glm-4.6`,
+  неизвестный провайдер → явный `LLMError`. Обновлены README/PROGRESS/тесты.
+- **ParserDoctor — триаж** (`classify_page` / `classify_fetch_error`):
+  - `banned` — HTTP 401/403/406/429 или 2xx-страница с маркерами антибота
+    (`captcha`, `安全验证`, `滑动验证`, `punish`, `waf`, …) или пустышка
+    < 300 символов → алерт «🚫 бан/геоблок — ротация прокси», LLM не зовём;
+  - `server_down` — 5xx, таймауты, ошибки коннекта (HttpClient заворачивает
+    их в `FetchError`, код парсится regex) → алерт «🛑 источник недоступен»;
+  - `http_error` — прочие 4xx (404/410: страница списка переехала) →
+    подсказка проверить `base_url/list_path`;
+  - `markup_change` — страница живая, карточек 0: только тут зовём GLM.
+- **Cooldown переставлен**: ключ `doctor:{source}` ставится только перед
+  LLM-ремонтом — бан и падение сервера триажатся при каждом запуске врача
+  (раньше cooldown 6 ч глотал бы повторные диагнозы).
+- Тесты: **264 passed** (+5: 403/5xx/капча-200/c cooldown/unit-классификаторы);
+  ruff чист.
+
+
 ## 28. Фаза 5 — deferred [бэкенд] items (UI/UX roadmap wrap-up)
 
 - **Batch-claim**: `POST /api/partner/leads/batch` `{"limit":1..10}` — атомарно
@@ -105,7 +128,7 @@ RAG по базе знаний, считает экономику «под кл�
 | Парсеры | httpx + selectolax/lexbor (SSR), общий HttpClient (ретраи, 429, прокси) |
 | Frontend | React 18 + Vite + TypeScript, @telegram-apps/telegram-ui, React Router |
 | RAG-сервис | FastAPI + RabbitMQ worker, Qdrant (гибрид vector+BM25/RRF), MinIO, multilingual-e5 |
-| LLM | GLM (Zhipu, основной), fallback: DeepSeek / OpenAI / Anthropic / Ollama / mock |
+| LLM | GLM (Zhipu, основной), fallback: DeepSeek / Anthropic / Ollama / mock (OpenAI выпилен) |
 | Криптография | PyJWT, PBKDF2-SHA256 (пароли сайта), гибрид ML-KEM-768 + X25519 + AES-256-GCM (документы) |
 | Инфра | Docker Compose (postgres, redis, rabbitmq, qdrant, minio, backend, bot, workers, miniapp, rag_*) |
 | Тесты | pytest + pytest-asyncio (**208 тестов** backend), контрактные тесты адаптеров, mypy, ruff |
