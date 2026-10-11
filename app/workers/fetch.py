@@ -36,9 +36,10 @@ async def fetch_source_task(
     ctx: dict[str, Any],
     source_name: str,
     criteria: dict[str, Any] | None = None,
-    max_pages: int = 3,
+    max_pages: int | None = None,
 ) -> dict[str, Any]:
     """Задача: выкачать порцию объявлений с источника и сохранить."""
+    max_pages = max_pages or 3  # None из очереди не должен рвать сравнение
     registry: AdapterRegistry = ctx["registry"]
     redis: Redis = ctx["redis"]
 

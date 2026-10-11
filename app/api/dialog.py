@@ -73,7 +73,10 @@ async def _enqueue_fetch(session: AsyncSession, criteria: SearchCriteria) -> lis
         return []
     for name in names:
         await enqueue_task(
-            "fetch_source_task", name, criteria.model_dump(mode="json"), None
+            "fetch_source_task",
+            name,
+            criteria.model_dump(mode="json"),
+            1,  # интерактивный поиск: 1 страница, юзер ждёт в диалоге
         )
     return names
 
