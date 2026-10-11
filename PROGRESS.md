@@ -426,8 +426,6 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   (+ `PROXY_DATAIMPULSE_GEO=cn` при геоблоке) в `.env`, рестарт воркера.
   Тесты: `tests/test_proxy.py` (11) + 2 в `tests/test_registry.py`.
 
-<!-- NEXT -->
-
 ---
 
 # Часть IV — долги и планы
