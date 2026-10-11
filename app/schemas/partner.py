@@ -84,6 +84,7 @@ class PartnerLeadOut(BaseModel):
     created_at: datetime
     partner_id: int | None = None
     partner_status: str | None = None
+    claimed_at: datetime | None = None
     user_id: int | None = None  # заполняется после claim
 
 

@@ -266,6 +266,26 @@ async def test_partner_leads_pool_hides_user_id(client, seq_session: SeqSession)
 
 
 @pytest.mark.asyncio
+async def test_partner_leads_mine_shows_user_id(client, seq_session: SeqSession):
+    # Мои лиды (UI/UX ТЗ 4.5): ПД доступны - лид захвачен эксклюзивно
+    claimed_at = datetime.now(UTC)
+    seq_session.add(make_account())
+    seq_session.set_queue(
+        [make_key()],
+        [make_lead(31, partner_id=1, partner_status="claimed", claimed_at=claimed_at)],
+    )
+    resp = await client.get(
+        "/api/partner/leads?mine=true", headers={"X-API-Key": RAW_KEY}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["user_id"] == 5
+    assert body[0]["partner_status"] == "claimed"
+    assert body[0]["claimed_at"] is not None
+
+
+@pytest.mark.asyncio
 async def test_claim_ok_returns_contact_and_event(client, seq_session: SeqSession):
     seq_session.add(make_account())
     seq_session.add(make_lead(77))

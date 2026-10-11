@@ -16,7 +16,22 @@ import { FavoritesScreen } from "./screens/Favorites";
 import { ProfileScreen } from "./screens/Profile";
 import { OnboardingScreen } from "./screens/Onboarding";
 import { ToastProvider } from "./ui/Toast";
+import { PartnerApp } from "./partner/PartnerApp";
 import type { User as UserT } from "./api/types";
+
+/** Отдельные поверхности: партнёрский ЛК и админка — вне Telegram-гейта. */
+function SurfaceRouter() {
+  const path = window.location.pathname;
+  if (path.startsWith("/partner")) {
+    return (
+      <ToastProvider>
+        <PartnerApp />
+      </ToastProvider>
+    );
+  }
+  return null;
+}
+
 
 type AuthState = "loading" | "ready";
 
@@ -77,7 +92,15 @@ function useIsDesktop(): boolean {
   return isDesktop;
 }
 
+/** Точка входа: партнёрский ЛК (/partner/*) — своя поверхность без Telegram-авторизации. */
 export function App() {
+  if (window.location.pathname.startsWith("/partner")) {
+    return <SurfaceRouter />;
+  }
+  return <MiniApp />;
+}
+
+function MiniApp() {
   const [auth, setAuth] = useState<AuthState>("loading");
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   const [authed, setAuthed] = useState(() => Boolean(getAccessToken()));

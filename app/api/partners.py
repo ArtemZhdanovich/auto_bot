@@ -140,11 +140,16 @@ async def partner_leads(
     auth: PartnerAuthDep,
     session: PartnerSessionDep,
     redis: RedisDep,
+    mine: bool = Query(default=False),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> list[PartnerLeadOut]:
     _, account = auth
     await check_rate_limit(redis, account.id)
+    if mine:
+        # «Мои лиды» (UI/UX ТЗ §4.5): ПД доступны — лид захвачен эксклюзивно
+        leads = await partners.my_leads(session, account.id, limit=limit, offset=offset)
+        return [PartnerLeadOut.model_validate(lead) for lead in leads]
     leads = await partners.available_leads(session, limit=limit, offset=offset)
     # ПД (user_id) в пуле не отдаём — только после claim
     return [

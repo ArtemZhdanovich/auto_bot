@@ -193,6 +193,20 @@ async def available_leads(
     )
     return list(result.scalars().all())
 
+
+async def my_leads(
+    session: AsyncSession, partner_id: int, limit: int = 20, offset: int = 0
+) -> list[Lead]:
+    """Лиды, захваченные партнёром (для ЛК «Мои лиды», UI/UX ТЗ §4.5)."""
+    result = await session.execute(
+        select(Lead)
+        .where(Lead.partner_id == partner_id)
+        .order_by(Lead.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(result.scalars().all())
+
     key = result.scalar_one_or_none()
     if key is None or key.status != "active":
         return None
