@@ -28,7 +28,7 @@
 | 6 | Адаптер Che168 (P2-10) | ⏳ | `alembic upgrade head`, сверка живого HTML/гео, `enabled=true` |
 | 7 | ParserDoctor (ИИ-ремонтник селекторов) | ⏳ | код готов, `doctor_mode=off`; включается в БД |
 | 8 | Прокси-шлюз DataImpulse (антибан) | ✅ | включается переменными `.env` при банах |
-| 9 | Миграции `0004_analytics_events`, `0005_add_che168_source` | ⏳ | `alembic upgrade head` |
+| 9 | Миграции `0004`–`0006` (аналитика, che168, партнёры) | ⏳ | `alembic upgrade head` |
 | 10 | Telegram Stars монетизация | ⏳ | код-путь полный; живой тестовый платёж |
 | 11 | Живой E2E RAG-стека (GLM + ingest + запрос) | ⏳ | creds + `ingest_kb.py --force` |
 | 12 | Token Bucket Telegram ~30 msg/s (P2-9) | 📋 | кандидат №1 следующего спринта |
@@ -38,6 +38,7 @@
 | 16 | Push `refactor/monorepo` (rag_service) | 📋 | ветка готова локально |
 | 17 | HTTPS `MINIAPP_URL` для прода | 📋 | домен/TLS |
 | 18 | Рефакторинг веб-авторизации (nullable telegram_id) | 📋 | порог ~30k веб-юзеров |
+| 19 | Партнёрский контур (P2-11): API ключей, claim лидов, CPL | ✅ | накатить `0006`, создать первого партнёра, веб-ЛК |
 
 ### Действия владельца (единственное, что мешает «зелёному» статусу)
 
@@ -46,6 +47,9 @@
       включить DataImpulse с `PROXY_DATAIMPULSE_GEO=cn`), затем
       `UPDATE sources SET enabled=true WHERE name='che168'` (п. 6).
 - [ ] Опционально: `"doctor_mode": "suggest"` в `sources.config` che168 (п. 7).
+- [ ] Партнёрский контур: после миграции создать партнёра
+  `POST /api/admin/partners` — ключ показывается один раз;
+  договориться с 2–3 салонами/брокерами о пилоте (п. 19).
 - [ ] Telegram Stars: тестовый платёж XTR (п. 10).
 - [ ] RAG E2E: `GLM_API_KEY`, PQ-ключи, `ingest_kb.py --force`, контрольный
       запрос к `rag-api` (п. 11).
@@ -369,6 +373,21 @@ RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   (тот же класс бага с column `default=`, что и у `SourceHealth`).
   `Literal`-валидация статуса. Тесты: `tests/test_leads.py`.
 
+### 20.1. ✅ Партнёрский контур (P2-11): CPL-продажа лидов
+
+- `partner_accounts` + `partner_api_keys` (миграция `0006`): план/квота,
+  статус; ключ хранится только SHA-256 хэшем, сырой `pi_…` показывается один раз.
+- Admin API (`X-Internal-Token`): `POST/GET /api/admin/partners`,
+  `POST /{id}/rotate` (мгновенная инвалидация старого ключа), `/{id}/revoke`, `PATCH /{id}`.
+- Partner API (`X-API-Key`): `GET /me` (ЛК-состояние), `GET /leads` (пул
+  квалифицированных лидов без ПД), `POST /leads/{id}/claim` (эксклюзивный
+  захват, 409 если занят, 429 по квоте), `POST /leads/{id}/feedback`
+  (accepted/returned/junk/deal — доказательство качества лида). Rate limit
+  fixed window в Redis (`PARTNER_RATE_LIMIT_PER_MIN`), fail-open при недоступном Redis.
+- События воронки: `partner_lead_claimed`, `partner_lead_feedback`.
+- `leads`: `partner_id`, `partner_status`, `claimed_at`, `qualification` (JSONB).
+- Тесты: `tests/test_partners.py` (28). Веб-ЛК партнёра — следующий шаг (бэкенд готов).
+
 ## 21. ⏳ Адаптер Китая Che168 (P2-10) — код готов, ждёт включения
 
 - `Che168HtmlAdapter` (kind='parser') — SSR-парсинг selectolax/lexbor через
@@ -439,6 +458,7 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 | 3 | Stars: тестовый платёж XTR | код-путь готов, живой оплаты не было |
 | 4 | RAG E2E: GLM/PQ-ключи, `ingest_kb.py --force`, контрольный запрос | живой контур ответов |
 | 5 | Опционально: `doctor_mode=suggest` | наблюдать за предложениями «врача» без авто-применения |
+| 6 | `alembic upgrade head` (+0006) и создание первого партнёра | партнёрский контур: ключ один раз через admin API |
 
 Уже сделано владельцем: **BOT_TOKEN отозван** через @BotFather (перевыпустить
 и обновить `.env` перед продом).
@@ -453,6 +473,10 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 2. **SQL-дашборды воронок** поверх `analytics_events`: retention D1/D7,
    конверсии search→dialog→lead→subscription; сейчас агрегаты ad-hoc,
    `events_24h` уже в `/metrics`.
+3. **Веб-ЛК партнёра** (страница на сайте): логин по ключу, пул лидов,
+   claim/фидбек, счётчик квоты — бэкенд `/api/partner/*` готов.
+4. **Биллинг партнёров**: тарифы/оплата за лид (CPL), начисление и
+   приостановка при исчерпании баланса.
 
 ### P3 — стратегическое
 
@@ -467,10 +491,11 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 ## 26. Тесты и качество
 
-- `uv run pytest` → **208 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
+- `uv run pytest` → **236 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
   кэш), агент, уведомления, адаптеры (контракты, дедуп, che168), auth,
   PQ-крипто, мониторинг/алерты, cron/планировщик, аналитика, лиды,
-  ParserDoctor, прокси (GatewayProxyPool, фабрика).
+  ParserDoctor, прокси (GatewayProxyPool, фабрика), партнёрский контур
+  (ключи/ротация, эксклюзивный claim, квоты, rate limit, фидбек).
 - `ruff check` — чисто; mypy настроен. Frontend: `tsc --noEmit` + `vite build`.
 - Тест-хелперы: `FakeSession` (строковые PK, `rollback()`, `get`),
   `FakeRedis` (`ttls`), `MockLLMClient` (`script`, `.calls`).
@@ -487,6 +512,7 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 | `3dbe08e` | Che168-адаптер (P2-10): парсер, нормализация 万, миграция 0005 |
 | `6a3f934` | ParserDoctor: GLM-ремонт селекторов, doctor_mode, reload_source |
 | `ffb50dd` | Прокси-шлюз DataImpulse (GatewayProxyPool, use_proxy) |
+| `ffe4a0e` | Партнёрский контур (P2-11): ключи с ротацией, claim лидов, квоты, rate limit |
 | (отд. репо) | rag_service monorepo: 361 тест, ветка `refactor/monorepo` (не запушена) |
 
 
