@@ -194,3 +194,24 @@ class Listing(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AnalyticsEvent(Base):
+    """Событие продуктовой воронки (P1-7): регистрация, поиск, диалог, оплата.
+
+    Только факты для воронок (активация, retention, конверсии) — без ПД в props.
+    """
+
+    __tablename__ = "analytics_events"
+    __table_args__ = (
+        Index("idx_analytics_name_created", "name", "created_at"),
+        Index("idx_analytics_user_name", "user_id", "name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    props: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

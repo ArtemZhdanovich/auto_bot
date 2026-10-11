@@ -69,6 +69,7 @@ async def _authenticate_via_init_data(
         first_name=tg_user.get("first_name"),
         last_name=tg_user.get("last_name"),
         language_code=tg_user.get("language_code"),
+        source="miniapp",
     )
 
 

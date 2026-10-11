@@ -283,10 +283,10 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
    оплата не проводилась. Протестировать тестовым платежом (чеклист ниже).
 5. Залить ветку `refactor/monorepo` rag_service (зеркалирование GLM + PQ).
 6. Публичный HTTPS `MINIAPP_URL` для прода; проверить кнопку меню в TG-клиенте.
-7. Продуктовые метрики воронки: таблица `analytics_events`
-   (user_id, name, props JSONB, created_at) + события
-   `search_completed / dialog_message / lead_created / subscription_activated`;
-   воронки активации/retention D1/D7/конверсий поверх.
+7. ~~Продуктовые метрики воронки~~ — **реализовано** (см. «Отработанные»):
+   осталось построить SQL-дашборды воронок (активация/retention D1/D7/
+   конверсии) поверх `analytics_events` и завести эндпоинт создания лидов
+   (тогда включится хук `lead_created`).
 
 ### 🟢 P2 — до первого трафика
 
@@ -347,4 +347,14 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   не для публичного доступа); порог CB вынесен в env
   (`SOURCE_CB_ERROR_STREAK`, по умолчанию 5); дедуп алертов с эскалацией —
   повторные глушатся экспоненциально (30 мин → 1 ч → 2 ч, cap 2 ч).
+- **Продуктовая аналитика (P1-7)**: таблица `analytics_events`
+  (миграция `0004`) + `app/services/analytics.py` — `track()` по принципу
+  alerting: ошибка записи не ломает бизнес-поток. Хуки: `user_registered`
+  (первый upsert, source: bot/miniapp), `search_completed` (только поиск
+  с фильтрами, не просмотр ленты; results/filters), `dialog_message`
+  (`/dialog/message`), `subscription_activated` (`/payments/success`,
+  tier/days/stars, только первая активация — идемпотентность сохранена).
+  `lead_created` зарезервирован (эндпоинта лидов ещё нет). Воронки
+  (активация/retention D1/D7/конверсии) — SQL-агрегаты поверх событий;
+  `events_24h` по именам — в `/metrics`. Тесты: `tests/test_analytics.py`.
 

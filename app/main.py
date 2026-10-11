@@ -26,7 +26,14 @@ from app.api import (
 from app.core.config import get_settings
 from app.core.deps import SessionDep
 from app.core.deps_internal import check_internal_token
-from app.db.models import Listing, SentLog, SourceHealth, User, UserFilter
+from app.db.models import (
+    AnalyticsEvent,
+    Listing,
+    SentLog,
+    SourceHealth,
+    User,
+    UserFilter,
+)
 from app.db.session import session_factory
 
 settings = get_settings()
@@ -177,6 +184,17 @@ async def metrics(session: SessionDep) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
+    events_24h: dict[str, int] = {}
+    try:
+        result = await session.execute(
+            select(AnalyticsEvent.name, func.count())
+            .where(AnalyticsEvent.created_at >= day_ago)
+            .group_by(AnalyticsEvent.name)
+        )
+        events_24h = {name: int(n) for name, n in result.all()}
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "users": {
             "total": users_total,
@@ -187,6 +205,7 @@ async def metrics(session: SessionDep) -> dict[str, Any]:
         "listings": {"total": listings_total, "new_24h": listings_new_24h},
         "notifications_sent_24h": notifications_sent_24h,
         "sources": sources,
+        "events_24h": events_24h,
     }
 
 

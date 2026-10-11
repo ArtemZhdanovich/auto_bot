@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from app.core.deps import SessionDep
 from app.db.models import Listing
 from app.schemas.listing import ListingListOut, ListingOut
+from app.services.analytics import EVENT_SEARCH_COMPLETED, track
 
 router = APIRouter(prefix="/api/listings", tags=["listings"])
 
@@ -59,6 +60,13 @@ async def list_listings(
         .offset(offset)
     )
     items = [ListingOut.model_validate(x) for x in result.scalars().all()]
+    if conditions:  # это именно поиск с фильтрами, а не просмотр ленты
+        await track(
+            session,
+            None,
+            EVENT_SEARCH_COMPLETED,
+            {"results": total, "filters": len(conditions)},
+        )
     return ListingListOut(total=total, items=items)
 
 

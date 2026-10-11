@@ -179,6 +179,7 @@ async def test_metrics_smoke(fake_session):
         "listings",
         "notifications_sent_24h",
         "sources",
+        "events_24h",
     }
     assert body["users"]["total"] == 0  # FakeSession: пусто → 0
 

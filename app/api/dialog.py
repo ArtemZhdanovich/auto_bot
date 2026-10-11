@@ -15,6 +15,7 @@ from app.db.models import Source
 from app.db.session import get_session
 from app.queue import enqueue_task
 from app.schemas.criteria import SearchCriteria
+from app.services.analytics import EVENT_DIALOG_MESSAGE, track
 from app.services.dialog import DialogStore, finalize_dialog, reset_dialog
 from redis.asyncio import Redis
 
@@ -100,6 +101,7 @@ async def dialog_message(
         )
     finally:
         await llm.aclose()
+    await track(session, body.user_id, EVENT_DIALOG_MESSAGE)
     return _to_response(reply)
 
 

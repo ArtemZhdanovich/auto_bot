@@ -26,6 +26,7 @@ from app.schemas.payment import (
     SubscriptionOut,
     UserSubscriptionOut,
 )
+from app.services.analytics import EVENT_SUBSCRIPTION_ACTIVATED, track
 from app.services.subscription import TIERS, activate_subscription, effective_tier
 
 logger = logging.getLogger(__name__)
@@ -227,6 +228,12 @@ async def payment_success(body: PaymentSuccessIn, session: SessionDep) -> dict:
     payment.provider_payment_id = body.provider_payment_id
     new_until = activate_subscription(user, payment.tier, payment.period_days)
     await session.commit()
+    await track(
+        session,
+        body.user_id,
+        EVENT_SUBSCRIPTION_ACTIVATED,
+        {"tier": payment.tier, "days": payment.period_days, "stars": float(payment.amount)},
+    )
     logger.info(
         "subscription_activated: user=%s tier=%s until=%s",
         body.user_id,
