@@ -241,6 +241,9 @@ auto_bot/
 
 ## 11. Frontend (Mini App + сайт) ✅
 
+UI/UX-ТЗ для всех поверхностей: `docs/UIUX_TZ.md` (v1.0 — дизайн-токены,
+Mini App, админка, партнёрский ЛК, бот, тон голоса, чеклист внедрения).
+
 - Экраны: `Onboarding`, `Feed` (лента с чипсами-фильтрами), `Filters`,
   `Listing`, `Favorites`, `Profile`, `AiSearch`, `Login` (email+пароль).
 - `api/`: `client.ts` (JWT, base `/api`), `auth.ts`, `ai.ts`, `types.ts`.
@@ -474,7 +477,8 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
    конверсии search→dialog→lead→subscription; сейчас агрегаты ad-hoc,
    `events_24h` уже в `/metrics`.
 3. **Веб-ЛК партнёра** (страница на сайте): логин по ключу, пул лидов,
-   claim/фидбек, счётчик квоты — бэкенд `/api/partner/*` готов.
+   claim/фидбек, счётчик квоты — бэкенд `/api/partner/*` готов; макеты в
+   `docs/UIUX_TZ.md` §4. (реализация в работе)
 4. **Биллинг партнёров**: тарифы/оплата за лид (CPL), начисление и
    приостановка при исчерпании баланса.
 
