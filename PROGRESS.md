@@ -285,8 +285,8 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
 6. Публичный HTTPS `MINIAPP_URL` для прода; проверить кнопку меню в TG-клиенте.
 7. ~~Продуктовые метрики воронки~~ — **реализовано** (см. «Отработанные»):
    осталось построить SQL-дашборды воронок (активация/retention D1/D7/
-   конверсии) поверх `analytics_events` и завести эндпоинт создания лидов
-   (тогда включится хук `lead_created`).
+   конверсии) поверх `analytics_events`; лиды и их воронка замкнуты
+   (`POST /api/leads` + `lead_created`).
 
 ### 🟢 P2 — до первого трафика
 
@@ -357,4 +357,12 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   `lead_created` зарезервирован (эндпоинта лидов ещё нет). Воронки
   (активация/retention D1/D7/конверсии) — SQL-агрегаты поверх событий;
   `events_24h` по именам — в `/metrics`. Тесты: `tests/test_analytics.py`.
+- **Лиды (воронка диалог → обращение)**: `POST /api/leads` (internal,
+  из бота/Mini App — user_id, listing_id?, source?, comment) пишет
+  событие `lead_created` → воронка search → dialog → lead замкнута;
+  `PATCH /api/leads/{id}` (internal) — статус new/in_progress/closed/
+  rejected + manager_id для менеджерского процесса. Таблица `leads`
+  была в `0001`. Явный `status="new"` при создании (колоночный
+  `default=` срабатывает только на flush — тот же класс бага, что
+  у `SourceHealth`). Тесты: `tests/test_leads.py`.
 

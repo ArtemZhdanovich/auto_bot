@@ -17,6 +17,7 @@ from app.api import (
     dialog,
     favorites,
     filters,
+    leads,
     listings,
     me,
     notifications,
@@ -220,3 +221,4 @@ app.include_router(admin.router)
 app.include_router(dialog.router)
 app.include_router(ai_search.router)
 app.include_router(notifications.router)
+app.include_router(leads.router)
