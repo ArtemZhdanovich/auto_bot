@@ -48,7 +48,13 @@ class SeqSession(FakeSession):
 
 
 def make_account(**kw) -> PartnerAccount:
-    defaults = dict(name="Партнёр", plan="pro", daily_quota=5, status="active")
+    defaults = dict(
+        name="Партнёр",
+        plan="pro",
+        daily_quota=5,
+        status="active",
+        balance=100.0,  # биллинг P2-14: с запасом, чтобы не блокировать claim
+    )
     defaults.update(kw)
     account = PartnerAccount(**defaults)
     account.id = 1

@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -84,6 +84,11 @@ class Settings(BaseSettings):
 
     # Уведомления (этап 4, ТЗ п. 4.6, 8.6)
     notify_rate_limit_sec: int = 30  # не чаще 1 сообщения / 30 сек (п. 8.6)
+    # Биллинг партнёров (P2-14): CPL-тарифы по планам, USD за лид.
+    # Индивидуальный cpl_rate партнёра перекрывает план.
+    partner_cpl_rates: dict[str, float] = Field(
+        default_factory=lambda: {"starter": 5.0, "pro": 3.0, "salon": 2.0}
+    )
     # Token Bucket Telegram (ТЗ п. 12.6): ~30 msg/s глобально, ~1 msg/s на чат.
     # 0 = лимитер выключен; Redis лежит → fail-open (429-обработка — страховка).
     telegram_rate_global_per_sec: float = 30.0

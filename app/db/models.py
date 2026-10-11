@@ -301,6 +301,36 @@ class PartnerAccount(Base):
     plan: Mapped[str] = mapped_column(Text, default="starter")
     daily_quota: Mapped[int] = mapped_column(Integer, default=10)
     status: Mapped[str] = mapped_column(Text, default="active")
+    # Биллинг (P2-14): CPL-списания с баланса; 0/недостаточно → приостановка
+    balance: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    cpl_rate: Mapped[float | None] = mapped_column(
+        Numeric(10, 2)
+    )  # NULL = тариф плана
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PartnerTransaction(Base):
+    """Журнал биллинга партнёра (P2-14): пополнения и CPL-списания.
+
+    amount: +пополнение / −списание; balance_after — аудит-трейл.
+    """
+
+    __tablename__ = "partner_transactions"
+    __table_args__ = (
+        Index("idx_partner_tx_partner_created", "partner_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    partner_id: Mapped[int] = mapped_column(
+        ForeignKey("partner_accounts.id")
+    )
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"))
+    amount: Mapped[float] = mapped_column(Numeric(12, 2))
+    kind: Mapped[str] = mapped_column(Text)  # topup / charge_lead / adjustment
+    balance_after: Mapped[float] = mapped_column(Numeric(12, 2))
+    comment: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -6,13 +6,18 @@ CPL-монетизация: квалифицированные лиды прод
 """
 
 import hashlib
+import logging
 import secrets
 from datetime import UTC, datetime, time
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Lead, PartnerAccount, PartnerApiKey
+from app.core.config import get_settings
+from app.db.models import AdminAction, Lead, PartnerAccount, PartnerApiKey, PartnerTransaction
+from app.services.alerting import send_alert
+
+logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "pi_"
 
@@ -38,10 +43,18 @@ async def create_partner(
     contact: str | None = None,
     plan: str = "starter",
     daily_quota: int = 10,
+    balance: float = 0.0,
+    cpl_rate: float | None = None,
 ) -> tuple[PartnerAccount, str]:
     """Создать партнёра и активный ключ. Возвращает (аккаунт, сырой_ключ)."""
     account = PartnerAccount(
-        name=name, contact=contact, plan=plan, daily_quota=daily_quota, status="active"
+        name=name,
+        contact=contact,
+        plan=plan,
+        daily_quota=daily_quota,
+        balance=balance,
+        cpl_rate=cpl_rate,
+        status="active",
     )
     session.add(account)
     await session.flush()
@@ -136,11 +149,17 @@ async def claim_lead(
 ) -> tuple[Lead | None, str]:
     """Эксклюзивный claim лида. Возвращает (лид|None, причина).
 
-    Причины: ok / not_found / taken / already_yours / quota_exceeded.
+    Причины: ok / not_found / taken / already_yours / quota_exceeded /
+    insufficient_balance (биллинг P2-14: CPL-списание с баланса).
     """
     used = await claimed_today(session, account.id)
     if used >= account.daily_quota:
         return None, "quota_exceeded"
+
+    cost = cpl_cost(account)
+    if account.balance < cost:
+        await _suspend_for_empty_balance(session, account)
+        return None, "insufficient_balance"
 
     lead = await session.get(Lead, lead_id)
     if lead is None:
@@ -154,6 +173,7 @@ async def claim_lead(
     lead.partner_status = "claimed"
     lead.claimed_at = datetime.now(UTC)
     lead.updated_at = lead.claimed_at
+    await _charge(session, account, cost, lead_id=lead.id)
     await session.commit()
     await session.refresh(lead)
     return lead, "ok"
@@ -213,14 +233,21 @@ async def claim_batch(
 ) -> tuple[list[Lead], str]:
     """Забрать до N доступных лидов одной операцией (кнопка «Взять 3» в ЛК).
 
-    Учитывает остаток дневной квоты: берём min(limit, quota_remaining).
-    Возвращает (захваченные лиды, статус): ok | quota_exceeded.
+    Учитывает остаток дневной квоты И баланс (CPL-списание за каждый лид):
+    берём min(limit, quota_remaining, affordable).
+    Возвращает (захваченные лиды, статус): ok | quota_exceeded |
+    insufficient_balance.
     """
     used = await claimed_today(session, account.id)
     remaining = account.daily_quota - used
     if remaining <= 0:
         return [], "quota_exceeded"
-    take = min(limit, remaining)
+    cost = cpl_cost(account)
+    affordable = int(account.balance // cost) if cost > 0 else remaining
+    if affordable <= 0:
+        await _suspend_for_empty_balance(session, account)
+        return [], "insufficient_balance"
+    take = min(limit, remaining, affordable)
     result = await session.execute(
         select(Lead)
         .where(
@@ -238,11 +265,100 @@ async def claim_batch(
         lead.partner_status = "claimed"
         lead.claimed_at = now
         lead.updated_at = now
+        await _charge(session, account, cost, lead_id=lead.id)
     if leads:
         await session.commit()
         for lead in leads:
             await session.refresh(lead)
     return leads, "ok"
+
+
+# --- Биллинг (P2-14): CPL-тарифы, баланс, приостановка ----------------------
+
+
+def cpl_cost(account: PartnerAccount) -> float:
+    """Цена лида: индивидуальный cpl_rate или тариф плана (fallback — starter)."""
+    if account.cpl_rate is not None:
+        return float(account.cpl_rate)
+    rates = get_settings().partner_cpl_rates
+    return float(rates.get(account.plan, rates.get("starter", 0.0)))
+
+
+def _round2(value: float) -> float:
+    return round(value + 1e-9, 2)
+
+
+async def _charge(
+    session: AsyncSession, account: PartnerAccount, cost: float, lead_id: int
+) -> None:
+    """Списать cost с баланса и записать транзакцию (commit на вызывающем)."""
+    account.balance = _round2(float(account.balance) - cost)
+    session.add(
+        PartnerTransaction(
+            partner_id=account.id,
+            lead_id=lead_id,
+            amount=_round2(-cost),
+            kind="charge_lead",
+            balance_after=account.balance,
+        )
+    )
+
+
+async def topup(
+    session: AsyncSession,
+    account: PartnerAccount,
+    amount: float,
+    comment: str | None = None,
+    kind: str = "topup",
+) -> PartnerAccount:
+    """Пополнение/корректировка баланса. Положительное пополнение снимает
+    suspended, выставленный при исчерпании баланса."""
+    account.balance = _round2(float(account.balance) + amount)
+    session.add(
+        PartnerTransaction(
+            partner_id=account.id,
+            amount=_round2(amount),
+            kind=kind,
+            balance_after=account.balance,
+            comment=comment,
+        )
+    )
+    if amount > 0 and account.status == "suspended":
+        account.status = "active"
+        await session.flush()
+        session.add(
+            AdminAction(
+                action="partner.reactivate",
+                entity="partner",
+                entity_id=str(account.id),
+                payload={"balance": account.balance},
+            )
+        )
+    await session.commit()
+    await session.refresh(account)
+    return account
+
+
+async def _suspend_for_empty_balance(
+    session: AsyncSession, account: PartnerAccount
+) -> None:
+    """Баланс исчерпан: приостановить (однократно) и алертить админу."""
+    if account.status == "suspended":
+        return
+    account.status = "suspended"
+    await session.commit()
+    await session.refresh(account)
+    logger.warning(
+        "partner_suspended_no_balance: partner_id=%s balance=%s",
+        account.id,
+        account.balance,
+    )
+    await send_alert(
+        f"⚠️ Партнёр #{account.id} «{account.name}» приостановлен: "
+        f"баланс {account.balance} < цены лида. Пополните баланс.",
+        dedup_key=f"partner_suspended:{account.id}",
+        dedup_ttl=86400,
+    )
 
 
 # --- Биллинг: каталог тарифов CPL (значения квот — дефолты при создании) -------

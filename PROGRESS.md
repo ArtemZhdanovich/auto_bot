@@ -647,17 +647,24 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 ### P2 — кандидаты следующего спринта
 
-1. **Token Bucket Telegram** (~30 msg/sec, п. 2.9 ТЗ): глобальный лимитер
-   отправки в Send Worker — защита от flood-ограничений при массовых
-   рассылках.
-2. **SQL-дашборды воронок** поверх `analytics_events`: retention D1/D7,
-   конверсии search→dialog→lead→subscription; сейчас агрегаты ad-hoc,
-   `events_24h` уже в `/metrics`.
+1. **Token Bucket Telegram** ✅ реализован (п. 12.6 ТЗ): Redis-бакеты
+   (Lua, атомарно) ~30 msg/s глобально + ~1 msg/s на чат, hook в
+   `send_telegram_message`; fail-open при недоступном Redis (429 —
+   страховка); `TELEGRAM_RATE_*_PER_SEC` (0 = выкл).
+2. **SQL-дашборды воронок** ✅ реализованы: `app/services/funnels.py` +
+   `GET /api/admin/analytics/funnel` (search→dialog→lead→subscription,
+   conv_prev/conv_first %) и `GET /api/admin/analytics/retention`
+   (когорты по дню `user_registered`, D1/D7).
 3. **Веб-ЛК партнёра** ✅ реализован (`/partner/*` во фронтенде): вход по
    ключу, дашборд, пул + claim (409/429), мои лиды + фидбек, API-ключ;
    ротация ключа — через менеджера/админку. Бэкенд: `?mine=1` в `/api/partner/leads`.
-4. **Биллинг партнёров**: тарифы/оплата за лид (CPL), начисление и
-   приостановка при исчерпании баланса.
+4. **Биллинг партнёров** ✅ реализован (миграция `0014`): CPL-списание
+   при claim (индивидуальный `cpl_rate` или тариф плана
+   `PARTNER_CPL_RATES`), журнал `partner_transactions` (+topup /
+   −charge_lead, balance_after), при исчерпании — suspended + алерт
+   (дедуп 24ч), пополнение `POST /api/admin/partners/{id}/billing`
+   снимает suspended; claim без денег → 402. Баланс и цена лида — в
+   `/api/partner/me` и `/api/partner/billing`.
 
 ### P3 — стратегическое
 
@@ -672,11 +679,13 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 ## 26. Тесты и качество
 
-- `uv run pytest` → **236 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
+- `uv run pytest` → **350 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
   кэш), агент, уведомления, адаптеры (контракты, дедуп, che168), auth,
   PQ-крипто, мониторинг/алерты, cron/планировщик, аналитика, лиды,
   ParserDoctor, прокси (GatewayProxyPool, фабрика), партнёрский контур
-  (ключи/ротация, эксклюзивный claim, квоты, rate limit, фидбек).
+  (ключи/ротация, эксклюзивный claim, квоты, rate limit, фидбек),
+  S3/MinIO storage, token bucket, воронки (funnel/retention),
+  партнёрский биллинг (CPL-списания, topup, suspended/reactivate).
 - `ruff check` — чисто; mypy настроен. Frontend: `tsc --noEmit` + `vite build`.
 - Тест-хелперы: `FakeSession` (строковые PK, `rollback()`, `get`),
   `FakeRedis` (`ttls`), `MockLLMClient` (`script`, `.calls`).
@@ -694,6 +703,9 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 | `6a3f934` | ParserDoctor: GLM-ремонт селекторов, doctor_mode, reload_source |
 | `ffb50dd` | Прокси-шлюз DataImpulse (GatewayProxyPool, use_proxy) |
 | `ffe4a0e` | Партнёрский контур (P2-11): ключи с ротацией, claim лидов, квоты, rate limit |
+| `8dc790f` | Token Bucket Telegram (P2-12): 30 msg/s глобально + 1 msg/s на чат, Redis/Lua |
+| `c987714` | SQL-дашборды воронок (P2-13): funnel + retention D1/D7 admin-эндпоинты |
+| (см. git) | Биллинг партнёров (P2-14): CPL-списания, баланс, suspended/reactivate, миграция 0014 |
 | (отд. репо) | rag_service monorepo: 361 тест, ветка `refactor/monorepo` (не запушена) |
 
 

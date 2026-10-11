@@ -20,6 +20,7 @@ from app.schemas.partner import (
     BatchClaimIn,
     BatchClaimOut,
     BillingOut,
+    BillingTopupIn,
     ClaimOut,
     FeedbackIn,
     PartnerCreateIn,
@@ -52,6 +53,8 @@ async def create_partner(body: PartnerCreateIn, session: SessionDep) -> PartnerK
         contact=body.contact,
         plan=body.plan,
         daily_quota=body.daily_quota,
+        balance=body.balance,
+        cpl_rate=body.cpl_rate,
     )
     await log_admin_action(
         session,
@@ -79,6 +82,10 @@ async def list_partners(session: SessionDep) -> list[PartnerWithStatsOut]:
                 plan=account.plan,
                 daily_quota=account.daily_quota,
                 status=account.status,
+                balance=float(account.balance),
+                cpl_rate=None
+                if account.cpl_rate is None
+                else float(account.cpl_rate),
                 created_at=account.created_at,
                 claimed_today=await partners.claimed_today(session, account.id),
                 key_prefix=None,
@@ -129,8 +136,33 @@ async def update_partner(
         account.daily_quota = body.daily_quota
     if body.status is not None:
         account.status = body.status
+    if body.reset_cpl_rate:
+        account.cpl_rate = None
+    elif body.cpl_rate is not None:
+        account.cpl_rate = body.cpl_rate
     await session.commit()
     await session.refresh(account)
+    return PartnerOut.model_validate(account)
+
+
+@admin_router.post("/{partner_id}/billing", response_model=PartnerOut)
+async def partner_topup(
+    partner_id: int, body: BillingTopupIn, session: SessionDep
+) -> PartnerOut:
+    """Пополнение/корректировка баланса (P2-14). >0 — topup (снимает
+    suspended), <0 — adjustment. Записывается в partner_transactions."""
+    account = await _get_account(session, partner_id)
+    kind = "topup" if body.amount > 0 else "adjustment"
+    account = await partners.topup(
+        session, account, body.amount, comment=body.comment, kind=kind
+    )
+    await log_admin_action(
+        session,
+        action=f"partner.{kind}",
+        entity="partner",
+        entity_id=str(account.id),
+        details={"amount": body.amount, "balance": account.balance},
+    )
     return PartnerOut.model_validate(account)
 
 
@@ -150,6 +182,8 @@ async def partner_me(auth: PartnerAuthDep, session: PartnerSessionDep) -> Partne
         daily_quota=account.daily_quota,
         claimed_today=used,
         quota_remaining=max(account.daily_quota - used, 0),
+        balance=float(account.balance),
+        cpl_cost=partners.cpl_cost(account),
         key_prefix=key.key_prefix,
     )
 
@@ -197,6 +231,11 @@ async def claim_leads_batch(
     leads, reason = await partners.claim_batch(session, account, body.limit)
     if reason == "quota_exceeded":
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Daily quota exceeded")
+    if reason == "insufficient_balance":
+        raise HTTPException(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            "Insufficient balance: top up to claim leads",
+        )
     for lead in leads:
         await track(
             session,
@@ -235,6 +274,8 @@ async def partner_billing(
         daily_quota=account.daily_quota,
         claimed_today=used,
         quota_remaining=max(account.daily_quota - used, 0),
+        balance=float(account.balance),
+        cpl_cost=partners.cpl_cost(account),
         plans=[
             PlanInfo(key=key, **data) for key, data in partners.PLAN_CATALOG.items()
         ],
@@ -257,6 +298,11 @@ async def claim_lead(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Lead not found")
     if reason == "quota_exceeded":
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Daily quota exceeded")
+    if reason == "insufficient_balance":
+        raise HTTPException(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            "Insufficient balance: top up to claim leads",
+        )
     assert lead is not None  # ok | already_yours
     await track(
         session,
