@@ -115,7 +115,7 @@ auto_bot/
 | `dialog` | `POST /dialog/message`, `POST /dialog/reset` |
 | `ai_search` | `POST /ai/message`, `POST /ai/reset`, `POST /ai/finalize` (JWT) |
 | `notifications` | `POST /notifications/settings` (instant/digest/off), `POST /notifications/scan` |
-| system | `GET /health` |
+| system | `GET /health`, `GET /health/detailed` (postgres/redis/rabbitmq, 503 при недоступной БД), `GET /metrics` (агрегаты: пользователи/фильтры/объявления/уведомления за 24 ч, health источников) |
 
 ## 7. Telegram-бот
 
@@ -291,15 +291,18 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
 
 ### 🟢 P2 — до первого трафика
 
-8. Мониторинг и алерты (этап 8 ТЗ): healthcheck всех сервисов, алерт в
-   Telegram (RAG недоступен, circuit breaker открыт, DLQ > 10), метрики
-   latency/error rate/cache hit rate. Сейчас есть только `/health` и `/metrics`.
+8. Мониторинг — базовая часть реализована (этап 8, см. «Отработанные»):
+   alerting в Telegram, DLQ-алертинг, алерты на circuit breaker'ы,
+   `/health/detailed`, `/metrics`. Осталось: внешняя uptime-проверка
+   (когда будет публичный URL), latency/error rate по HTTP-эндпоинтам
+   (middleware), cache hit rate RAG в метриках, Sentry-дэшборд.
 9. Circuit breaker по источникам реализован (`should_skip_source`:
    error_streak ≥ 5 → пауза 10 мин) — осталось добавить алертинг на него.
 10. Rate limiter Telegram: 429/retry_after обрабатывается в send-воркере
     (1 ретрай) и в адаптерах (ротация прокси), но общего Token Bucket
     (~30 msg/sec) в Redis нет.
-11. Адаптер Китая (Che168/аналог), далее ОАЭ/Япония/EU/US.
+11. Адаптер Китая (Che168/аналог) — приоритет, если целитесь в рынки
+    РБ/РФ/СНГ; далее ОАЭ/Япония/EU/US.
 12. Рефакторинг веб-авторизации: `telegram_id` → nullable, отдельный PK.
     Сейчас синтетические отрицательные id в диапазоне −(1×10⁸…9×10⁸),
     ретрай 5×; коллизии станут частыми после ~30k веб-пользователей.
@@ -322,10 +325,17 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   сохранена); настроено в `.env.example`, учитывается ботом и backend.
 - `Dockerfile`, `alembic.ini`, `frontend/*` закоммичены
   (кроме `tsconfig.tsbuildinfo` — в `.gitignore`).
-4. Живой E2E RAG-стека (compose up → ingest → вопрос через rag-api).
-5. Залить ветку `refactor/monorepo` rag_service в удалённый репозиторий.
-6. Этап 8 (ТЗ): мониторинг и алерты, DLQ-алертинг.
-7. Незакоммиченные файлы (`Dockerfile`, `alembic.ini`, `frontend/*`) —
-   решить, включать ли в репозиторий.
-8. Отражение PQ-шифрования и GLM-провайдера в монорепо rag_service.
+- **Этап 8 (мониторинг/алерты) — реализован**: `app/services/alerting.py`
+  (алерты в Telegram на `ADMIN_CHAT_ID`, дедуп Redis `alert:{key}`,
+  `ALERTS_ENABLED`); DLQ-монитор в `TaskWorker` (`_monitor_loop`: глубина
+  `dead_letter` ≥ `DLQ_ALERT_THRESHOLD` → алерт, период
+  `HEALTH_CHECK_INTERVAL_SEC`); алерты на открытие/восстановление
+  circuit breaker'а источников (`source_health`, порог `CB_ERROR_STREAK=5`
+  вынесен в константу) и RAG-CB (`rag_client`); `GET /health/detailed`
+  (postgres/redis/rabbitmq, 503 при недоступной БД) и `GET /metrics`
+  (пользователи/по tier/за 24 ч, фильтры, объявления, уведомления,
+  latency источников). Переменные — в `.env.example`.
+  Заодно исправлен латентный баг: `error_streak`/`total_fetched` в
+  `source_health` были `None` до первого flush → `TypeError` на первом
+  инциденте нового источника. Тесты: `tests/test_monitoring.py` (146 passed).
 

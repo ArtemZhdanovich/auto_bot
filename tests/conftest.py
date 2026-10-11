@@ -90,6 +90,7 @@ class FakeSession:
             if obj.__class__ is model and (
                 getattr(obj, "id", None) == pk
                 or getattr(obj, "telegram_id", None) == pk
+                or getattr(obj, "source_name", None) == pk
             ):
                 return obj
         return None

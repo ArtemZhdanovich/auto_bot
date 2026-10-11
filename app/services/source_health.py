@@ -5,6 +5,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import SourceHealth
+from app.services.alerting import fire, send_alert
+
+CB_ERROR_STREAK = 5  # порог circuit breaker: N ошибок подряд (ТЗ п. 6.8)
+CB_COOLDOWN = timedelta(minutes=10)  # пауза после открытия
 
 
 async def record_success(
@@ -13,40 +17,63 @@ async def record_success(
     health = await session.get(SourceHealth, source_name)
     if health is None:
         health = SourceHealth(source_name=source_name)
+        # default= у колонок применяется только при INSERT — до flush атрибуты
+        # None, поэтому инициализируем явно (иначе total_fetched += упадёт)
+        health.error_streak = 0
+        health.total_fetched = 0
         session.add(health)
+    prev_streak = health.error_streak or 0
     health.last_success_at = datetime.now(UTC)
     health.error_streak = 0
     health.last_error = None
-    health.total_fetched += fetched
+    health.total_fetched = (health.total_fetched or 0) + fetched
     # скользящее среднее латентности
     if health.avg_latency_ms is None:
         health.avg_latency_ms = latency_ms
     else:
         health.avg_latency_ms = int(health.avg_latency_ms * 0.8 + latency_ms * 0.2)
     await session.commit()
+    if prev_streak >= CB_ERROR_STREAK:  # восстановление после открытия CB
+        fire(
+            send_alert(
+                f"🟢 Источник <b>{source_name}</b> восстановился "
+                f"(был circuit breaker, streak={prev_streak}).",
+                dedup_key=f"cb_recovery:{source_name}",
+            )
+        )
 
 
 async def record_error(session: AsyncSession, source_name: str, error: str) -> None:
     health = await session.get(SourceHealth, source_name)
     if health is None:
         health = SourceHealth(source_name=source_name)
+        health.error_streak = 0  # см. record_success: дефолт только при INSERT
         session.add(health)
     health.last_error_at = datetime.now(UTC)
-    health.error_streak += 1
+    health.error_streak = (health.error_streak or 0) + 1
     health.last_error = error[:2000]
     await session.commit()
+    if health.error_streak == CB_ERROR_STREAK:  # момент открытия CB
+        fire(
+            send_alert(
+                f"🔴 Circuit breaker: источник <b>{source_name}</b> отключён "
+                f"на {CB_COOLDOWN} ({CB_ERROR_STREAK} ошибок подряд): "
+                f"{error[:200]}",
+                dedup_key=f"cb:{source_name}",
+            )
+        )
 
 
 async def should_skip_source(session: AsyncSession, source_name: str) -> bool:
-    """Circuit breaker (ТЗ п. 6.8): >= 5 ошибок подряд и ошибка свежее 10 минут."""
+    """Circuit breaker (ТЗ п. 6.8): >= N ошибок подряд и ошибка свежее cooldown."""
     health = await session.get(SourceHealth, source_name)
     if health is None:
         return False
-    if health.error_streak >= 5:
-        cooldown = timedelta(minutes=10)
+    if (health.error_streak or 0) >= CB_ERROR_STREAK:
         if (
             health.last_error_at
-            and datetime.now(UTC) - health.last_error_at < cooldown
+            and datetime.now(UTC) - health.last_error_at < CB_COOLDOWN
         ):
             return True
     return False
+

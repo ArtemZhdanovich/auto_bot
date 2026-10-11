@@ -22,6 +22,8 @@ from typing import Any, Awaitable, Callable
 import aio_pika
 from aio_pika import DeliveryMode, ExchangeType
 
+from app.core.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 EXCHANGE = "tasks"
@@ -272,6 +274,31 @@ class TaskWorker:
             except Exception:
                 logger.exception("cron_job_failed: %s", spec.name)
 
+    # --- monitoring (этап 8) -------------------------------------------------
+
+    async def _monitor_loop(self, interval: int) -> None:
+        """Мониторинг DLQ: глубина >= порога → алерт (дедуп Redis в alerting)."""
+        from app.services.alerting import send_alert
+
+        threshold = get_settings().dlq_alert_threshold
+        while not self._stop.is_set():
+            if await self._stop.wait(timeout=interval):
+                return
+            try:
+                assert self._connection is not None
+                channel = await self._connection.channel()
+                dlq = await channel.declare_queue(DLQ, durable=True, passive=True)
+                depth = dlq.declaration_result.message_count
+                if depth >= threshold:
+                    await send_alert(
+                        f"🔴 DLQ: {depth} задач в dead_letter (порог {threshold}). "
+                        f"Проверьте логи воркеров.",
+                        dedup_key="dlq_depth",
+                    )
+                    logger.error("dlq_alert: depth=%s threshold=%s", depth, threshold)
+            except Exception:  # noqa: BLE001 — мониторинг не роняет воркер
+                logger.warning("dlq_monitor_failed", exc_info=True)
+
     # --- lifecycle ----------------------------------------------------------
 
     async def run(self) -> None:
@@ -283,10 +310,15 @@ class TaskWorker:
         for queue_name, jobs in self._bindings.items():
             await self._consume_queue(queues[queue_name], jobs)
         cron_task = asyncio.create_task(self._cron_loop()) if self._cron_jobs else None
+        interval = get_settings().health_check_interval_sec
+        monitor_task = (
+            asyncio.create_task(self._monitor_loop(interval)) if interval > 0 else None
+        )
         logger.info("task_worker_started: queues=%s", list(self._bindings))
         await self._stop.wait()
-        if cron_task:
-            cron_task.cancel()
+        for task in (cron_task, monitor_task):
+            if task:
+                task.cancel()
         if self._connection and not self._connection.is_closed:
             await self._connection.close()
 

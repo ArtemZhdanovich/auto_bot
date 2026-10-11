@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     digest_max_cards: int = 5  # 3–5 карточек в дайджесте
     notify_quiet_hours_default: str | None = None  # глобальные тихие часы "23:00-08:00"
 
+    # Alerting / мониторинг (этап 8, ТЗ п. 10)
+    alerts_enabled: bool = True  # алерты в Telegram на ADMIN_CHAT_ID
+    alert_dedup_ttl_sec: int = 1800  # подавление повторов alert:{key}, 30 мин
+    dlq_alert_threshold: int = 10  # глубина dead_letter для алерта
+    health_check_interval_sec: int = 300  # период мониторинга DLQ в воркерах
+
 
     # Monitoring
     sentry_dsn: str | None = None

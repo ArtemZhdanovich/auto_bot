@@ -24,6 +24,7 @@ import httpx
 from redis.asyncio import Redis
 
 from app.schemas.rag import RAGAnswer, RAGAskRequest, RAGIngestResult
+from app.services.alerting import fire, send_alert
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,13 @@ class RAGClient:
             self._open_until = time.monotonic() + cooldown
             self._consecutive_failures = 0
             logger.warning("rag_circuit_breaker_open: cooldown=%ss", cooldown)
+            fire(
+                send_alert(
+                    f"🔴 RAG circuit breaker открыт на {cooldown}s "
+                    f"({fail_threshold} ошибок подряд) — ответы через LLM.",
+                    dedup_key="cb:rag",
+                )
+            )
 
     def _record_success(self) -> None:
         self._consecutive_failures = 0
