@@ -49,6 +49,25 @@
   удаляет и обнуляет raw_key → сценарий с токеном без CreateBucket.
   Проверить на копии БД: `alembic downgrade -1` → `upgrade head`.
 
+## 33. Подготовка `listing_price_history` к партиционированию (фаза 7, без включения)
+
+- Партиционирование в PG не выключается флагом: `PARTITION BY RANGE` — сразу
+  партиционированная таблица. Поэтому схема готовится заранее (вариант «B»),
+  включение — строго по триггеру (1–2 млн строк).
+- **Миграция `0013_price_history_partition_ready`**: PK `(id)` →
+  `(id, recorded_at)` (ключ RANGE обязан входить в PK; `id` оставлен как
+  tiebreaker `ORDER BY recorded_at, id`) + `recorded_at` NOT NULL. Данные не
+  переносятся, таблица не партиционируется. Индекс
+  `idx_price_history_listing (listing_id, recorded_at)` уже содержал ключ.
+- **Аудит запросов** (PLAN §6): favorites first_price / listings график —
+  полная история по `listing_id` (границы по `recorded_at` не добавлены —
+  сломали бы семантику; при триггере — опциональный `since`), send
+  `_old_price` — `LIMIT 2` по индексу. Все запросы — через
+  `idx(listing_id, recorded_at)` → per-partition index scans.
+- ORM: `ListingPriceHistory.recorded_at` — `primary_key=True, nullable=False`
+  (композит с `id`); вставка идёт raw SQL — поведение не меняется.
+- Тесты: 314 passed, `alembic heads` → `0013`.
+
 ## 31. Перевод тайтлов: NLLB-микросервис (фаза 5)
 
 - **Размещение NLLB (открытый вопрос PLAN) решено**: отдельный optional-сервис

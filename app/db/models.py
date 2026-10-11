@@ -241,7 +241,12 @@ class Listing(Base):
 
 
 class ListingPriceHistory(Base):
-    """Точка цены: строка только при изменении (PLAN.md, миграция 0009)."""
+    """Точка цены: строка только при изменении (PLAN.md, миграция 0009).
+
+    Подготовка к партиционированию (миграция 0013, PLAN фаза 7): PK —
+    (id, recorded_at), т.к. ключ будущего RANGE (recorded_at) обязан входить
+    в PK; recorded_at NOT NULL. Таблица пока НЕ партиционирована.
+    """
 
     __tablename__ = "listing_price_history"
     __table_args__ = (Index("idx_price_history_listing", "listing_id", "recorded_at"),)
@@ -253,7 +258,10 @@ class ListingPriceHistory(Base):
     price: Mapped[float] = mapped_column(Numeric, nullable=False)
     currency: Mapped[str | None] = mapped_column(String(8))
     recorded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        primary_key=True,
     )
 
 
