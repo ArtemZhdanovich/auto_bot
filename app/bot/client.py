@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 class BackendClient:
+    # LLM-ход диалога на reasoning-моделях (glm-5-turbo) идёт 15-60 с —
+    # обычный таймаут 10 с рвал соединение раньше ответа → «AI недоступен».
+    DIALOG_TIMEOUT = 120.0
+
     def __init__(self, base_url: str | None = None, timeout: float = 10.0):
         settings = get_settings()
         self._base_url = (base_url or settings.app_base_url).rstrip("/")
@@ -47,10 +51,12 @@ class BackendClient:
             logger.error("backend_upsert_user_failed: %s", exc)
             return None
 
-    async def _post(self, path: str, payload: dict) -> dict | None:
+    async def _post(
+        self, path: str, payload: dict, timeout: float | None = None
+    ) -> dict | None:
         """POST с internal-токеном. None — backend недоступен/ошибка."""
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout or self._timeout) as client:
                 resp = await client.post(
                     f"{self._base_url}{path}",
                     json=payload,
@@ -63,9 +69,11 @@ class BackendClient:
             return None
 
     async def dialog_message(self, user_id: int, text: str) -> dict | None:
-        """POST /api/dialog/message — ход AI-диалога."""
+        """POST /api/dialog/message — ход AI-диалога (долгий LLM-вызов)."""
         return await self._post(
-            "/api/dialog/message", {"user_id": user_id, "text": text}
+            "/api/dialog/message",
+            {"user_id": user_id, "text": text},
+            timeout=self.DIALOG_TIMEOUT,
         )
 
     async def dialog_reset(self, user_id: int) -> dict | None:

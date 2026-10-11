@@ -23,8 +23,9 @@ def build_listing_query(criteria: SearchCriteria) -> Select:
         stmt = stmt.where(Listing.price <= criteria.price_max)
     if criteria.mileage_max:
         stmt = stmt.where(Listing.mileage_km <= criteria.mileage_max)
-    if criteria.fuel:
-        stmt = stmt.where(Listing.fuel == criteria.fuel)
+    # fuel/transmission/body и пр. спеки в listings не хранятся (этап 5) —
+    # фильтры по ним здесь недоступны; критерий учитывается при финальном
+    # парсинге источников, а не в preview-поиске.
     if criteria.country:
         # источник знает страну через capabilities; в listings страна не хранится —
         # фильтруем по источникам (encar/kcar = KR), уточняется в этапе 5
