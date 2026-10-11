@@ -93,9 +93,19 @@ async def send_alert(
     if dedup_key:
         redis = _get_redis()
         if redis is not None:
-            ttl = dedup_ttl or settings.alert_dedup_ttl_sec
+            base_ttl = dedup_ttl or settings.alert_dedup_ttl_sec
+            # эскалация: каждый повторный алерт глушится вдвое дольше
+            # (30 мин → 1 ч → 2 ч → далее cap 2 ч), счётчик живёт сутки
+            prev = await redis.get(f"alert_count:{dedup_key}")
+            ttl = min(base_ttl * (2 ** int(prev or 0)), 2 * 3600)
             got = await redis.set(f"alert:{dedup_key}", "1", nx=True, ex=ttl)
             if not got:
                 return False  # недавно уже отправляли
+            sent = await _send_telegram(settings.bot_token, chat_id, text)
+            if sent:
+                await redis.setex(
+                    f"alert_count:{dedup_key}", 24 * 3600, int(prev or 0) + 1
+                )
+            return sent
 
     return await _send_telegram(settings.bot_token, chat_id, text)

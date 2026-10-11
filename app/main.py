@@ -5,7 +5,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ from app.api import (
 )
 from app.core.config import get_settings
 from app.core.deps import SessionDep
+from app.core.deps_internal import check_internal_token
 from app.db.models import Listing, SentLog, SourceHealth, User, UserFilter
 from app.db.session import session_factory
 
@@ -115,7 +116,11 @@ async def _scalar(session: AsyncSession, stmt: Any) -> int | None:
         return None
 
 
-@app.get("/metrics", tags=["system"])
+@app.get(
+    "/metrics",
+    tags=["system"],
+    dependencies=[Depends(check_internal_token)],  # агрегаты — не для публичного доступа
+)
 async def metrics(session: SessionDep) -> dict[str, Any]:
     """Базовые метрики для мониторинга (этап 8): пользователи, объявления,
     уведомления, health источников. Счётчики: агрегаты, без персональных данных."""

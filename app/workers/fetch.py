@@ -10,15 +10,19 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from redis.asyncio import Redis
+from sqlalchemy import select
 
 from app.adapters.registry import AdapterRegistry
 from app.core.config import get_settings
+from app.db.models import Source
 from app.db.session import session_factory
-from app.queue import QUEUE_FETCH, TaskWorker, enqueue_task
+from app.queue import QUEUE_FETCH, IntervalSpec, TaskWorker, enqueue_task
 from app.schemas.criteria import SearchCriteria
+from app.services.cron import cron_matches
 from app.services.fetch import save_listings
 from app.services.source_health import record_error, record_success, should_skip_source
 
@@ -92,6 +96,45 @@ async def fetch_source_task(
         }
 
 
+async def schedule_fetch_due(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Планировщик парсинга (ТЗ п. 4.6): sources.schedule_cron → очередь fetch.
+
+    Запускается каждую минуту (IntervalSpec): источники enabled с schedule_cron,
+    подходящим под текущую минуту UTC, ставятся в очередь `fetch`.
+    - circuit breaker проверяется внутри fetch_source_task → упавшие
+      источники не фетчатся и не всплывают в алертах лишний раз;
+    - дубли между воркерами и повторные прогоны в ту же минуту отсечены
+      Redis-локом `sched:{source}:{YYYYMMDDHHMM}`.
+    """
+    redis: Redis | None = ctx.get("redis")
+    now = datetime.now(timezone.utc)
+    scheduled = 0
+    session = session_factory()
+    try:
+        result = await session.execute(
+            select(Source).where(
+                Source.enabled.is_(True), Source.schedule_cron.is_not(None)
+            )
+        )
+        for src in result.scalars().all():
+            if not src.enabled or not src.schedule_cron:
+                continue  # защита на случай фильтрации только на уровне SQL-заглушки в тестах
+            if not cron_matches(src.schedule_cron, now):
+                continue
+            lock_key = f"sched:{src.name}:{now.strftime('%Y%m%d%H%M')}"
+            if redis is not None:
+                got = await redis.set(lock_key, "1", nx=True, ex=120)
+                if not got:
+                    continue
+            await enqueue_task("fetch_source_task", src.name)
+            scheduled += 1
+    finally:
+        await session.close()
+    if scheduled:
+        logger.info("schedule_fetch_due: scheduled=%s", scheduled)
+    return {"scheduled": scheduled}
+
+
 async def enqueue_notify_scan(ctx: dict[str, Any], source_name: str) -> bool:
     """После парсинга — скан фильтров уведомлений (ТЗ п. 8.6 instant).
 
@@ -141,6 +184,7 @@ async def main() -> None:
         ctx=ctx,
         concurrency=3,   # как arq max_jobs=3
         job_timeout=120,  # как arq job_timeout
+        interval_jobs=[IntervalSpec(schedule_fetch_due, every_sec=60)],
     )
     try:
         await worker.run()

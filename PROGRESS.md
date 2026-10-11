@@ -115,7 +115,7 @@ auto_bot/
 | `dialog` | `POST /dialog/message`, `POST /dialog/reset` |
 | `ai_search` | `POST /ai/message`, `POST /ai/reset`, `POST /ai/finalize` (JWT) |
 | `notifications` | `POST /notifications/settings` (instant/digest/off), `POST /notifications/scan` |
-| system | `GET /health`, `GET /health/detailed` (postgres/redis/rabbitmq, 503 при недоступной БД), `GET /metrics` (агрегаты: пользователи/фильтры/объявления/уведомления за 24 ч, health источников) |
+| system | `GET /health`, `GET /health/detailed` (postgres/redis/rabbitmq, 503 при недоступной БД), `GET /metrics` (агрегаты; **требует X-Internal-Token**) |
 
 ## 7. Telegram-бот
 
@@ -280,38 +280,35 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
 
 4. Telegram Stars E2E: код-путь полный (sendInvoice XTR → pre_checkout →
    successful_payment → `/payments/success` → активация tier), но реальная
-   оплата не проводилась. Протестировать тестовым платежом.
-5. Автоматическое расписание парсинга: колонка `sources.schedule_cron`
-   хранится, но нигде не консьюмится — парсинг запускается вручную
-   (`POST /admin/sources/{name}/fetch`). Инфраструктура готова (`CronSpec`
-   в `app/queue/rabbit.py`, Redis-лок от дублей) — добавить cron-job,
-   который ставит `fetch_source_task` для источников с `schedule_cron`.
-6. Залить ветку `refactor/monorepo` rag_service (зеркалирование GLM + PQ).
-7. Публичный HTTPS `MINIAPP_URL` для прода; проверить кнопку меню в TG-клиенте.
+   оплата не проводилась. Протестировать тестовым платежом (чеклист ниже).
+5. Залить ветку `refactor/monorepo` rag_service (зеркалирование GLM + PQ).
+6. Публичный HTTPS `MINIAPP_URL` для прода; проверить кнопку меню в TG-клиенте.
+7. Продуктовые метрики воронки: таблица `analytics_events`
+   (user_id, name, props JSONB, created_at) + события
+   `search_completed / dialog_message / lead_created / subscription_activated`;
+   воронки активации/retention D1/D7/конверсий поверх.
 
 ### 🟢 P2 — до первого трафика
 
 8. Мониторинг — базовая часть реализована (этап 8, см. «Отработанные»):
    alerting в Telegram, DLQ-алертинг, алерты на circuit breaker'ы,
-   `/health/detailed`, `/metrics`. Осталось: внешняя uptime-проверка
-   (когда будет публичный URL), latency/error rate по HTTP-эндпоинтам
-   (middleware), cache hit rate RAG в метриках, Sentry-дэшборд.
-9. Circuit breaker по источникам реализован (`should_skip_source`:
-   error_streak ≥ 5 → пауза 10 мин) — осталось добавить алертинг на него.
-10. Rate limiter Telegram: 429/retry_after обрабатывается в send-воркере
+   `/health/detailed`, `/metrics` (за internal-токеном). Осталось:
+   внешняя uptime-проверка (когда будет публичный URL), latency/error rate
+   по HTTP-эндпоинтам (middleware), cache hit rate RAG, Sentry-дэшборд.
+9. Rate limiter Telegram: 429/retry_after обрабатывается в send-воркере
     (1 ретрай) и в адаптерах (ротация прокси), но общего Token Bucket
     (~30 msg/sec) в Redis нет.
-11. Адаптер Китая (Che168/аналог) — приоритет, если целитесь в рынки
+10. Адаптер Китая (Che168/аналог) — приоритет, если целитесь в рынки
     РБ/РФ/СНГ; далее ОАЭ/Япония/EU/US.
-12. Рефакторинг веб-авторизации: `telegram_id` → nullable, отдельный PK.
+11. Рефакторинг веб-авторизации: `telegram_id` → nullable, отдельный PK.
     Сейчас синтетические отрицательные id в диапазоне −(1×10⁸…9×10⁸),
     ретрай 5×; коллизии станут частыми после ~30k веб-пользователей.
 
 ### 🟢 P3 — стратегическое
 
-13. Метрики воронки (активация, retention, конверсия в лид/Pro).
-14. Мониторинг стоимости LLM (unit-экономика GLM).
-15. Ротация PQ-ключей и разделение доступа к приватному ключу.
+12. Мониторинг стоимости LLM (unit-экономика GLM): счётчик токенов/стоимости
+    в `DialogSession` или отдельная таблица, сводка в `/metrics`.
+13. Ротация PQ-ключей и разделение доступа к приватному ключу.
 
 ### Отработанные пункты ревью (факты по коду)
 
@@ -338,4 +335,16 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   Заодно исправлен латентный баг: `error_streak`/`total_fetched` в
   `source_health` были `None` до первого flush → `TypeError` на первом
   инциденте нового источника. Тесты: `tests/test_monitoring.py` (146 passed).
+- **`schedule_cron` консьюмится** (P1 закрыт): `app/services/cron.py` —
+  матчер 5-полей (*/n, диапазоны, списки; dom+dow — OR по стандарту cron);
+  `IntervalSpec` в `TaskWorker` (интервальные задачи с Redis-локом
+  `interval:{name}:{slot}`); fetch-воркер запускает `schedule_fetch_due`
+  каждую минуту — источники `enabled` с подходящим `schedule_cron` ставятся
+  в очередь `fetch` (лок `sched:{source}:{YYYYMMDDHHMM}` от дублей;
+  circuit breaker проверяется внутри `fetch_source_task`). Тесты:
+  `tests/test_cron.py`, `tests/test_scheduler.py`.
+- **Уточнения по ревью**: `/metrics` закрыт `X-Internal-Token` (агрегаты
+  не для публичного доступа); порог CB вынесен в env
+  (`SOURCE_CB_ERROR_STREAK`, по умолчанию 5); дедуп алертов с эскалацией —
+  повторные глушатся экспоненциально (30 мин → 1 ч → 2 ч, cap 2 ч).
 

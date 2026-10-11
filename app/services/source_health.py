@@ -4,10 +4,16 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.models import SourceHealth
 from app.services.alerting import fire, send_alert
 
-CB_ERROR_STREAK = 5  # порог circuit breaker: N ошибок подряд (ТЗ п. 6.8)
+
+def _cb_streak() -> int:
+    """Порог CB: N ошибок подряд (env SOURCE_CB_ERROR_STREAK, по умолчанию 5)."""
+    return get_settings().source_cb_error_streak
+
+
 CB_COOLDOWN = timedelta(minutes=10)  # пауза после открытия
 
 
@@ -33,7 +39,7 @@ async def record_success(
     else:
         health.avg_latency_ms = int(health.avg_latency_ms * 0.8 + latency_ms * 0.2)
     await session.commit()
-    if prev_streak >= CB_ERROR_STREAK:  # восстановление после открытия CB
+    if prev_streak >= _cb_streak():  # восстановление после открытия CB
         fire(
             send_alert(
                 f"🟢 Источник <b>{source_name}</b> восстановился "
@@ -53,11 +59,11 @@ async def record_error(session: AsyncSession, source_name: str, error: str) -> N
     health.error_streak = (health.error_streak or 0) + 1
     health.last_error = error[:2000]
     await session.commit()
-    if health.error_streak == CB_ERROR_STREAK:  # момент открытия CB
+    if health.error_streak == _cb_streak():  # момент открытия CB
         fire(
             send_alert(
                 f"🔴 Circuit breaker: источник <b>{source_name}</b> отключён "
-                f"на {CB_COOLDOWN} ({CB_ERROR_STREAK} ошибок подряд): "
+                f"на {CB_COOLDOWN} ({_cb_streak()} ошибок подряд): "
                 f"{error[:200]}",
                 dedup_key=f"cb:{source_name}",
             )
@@ -69,7 +75,7 @@ async def should_skip_source(session: AsyncSession, source_name: str) -> bool:
     health = await session.get(SourceHealth, source_name)
     if health is None:
         return False
-    if (health.error_streak or 0) >= CB_ERROR_STREAK:
+    if (health.error_streak or 0) >= _cb_streak():
         if (
             health.last_error_at
             and datetime.now(UTC) - health.last_error_at < CB_COOLDOWN

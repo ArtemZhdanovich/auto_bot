@@ -124,6 +124,9 @@ class FakeSession:
     async def delete(self, obj: Any) -> None:
         self.deleted.append(obj)
 
+    async def close(self) -> None:
+        return None
+
 
 @pytest.fixture
 def fake_redis() -> FakeRedis:

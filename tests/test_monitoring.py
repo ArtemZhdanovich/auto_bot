@@ -69,7 +69,7 @@ async def test_source_cb_alert_on_open_and_recovery(monkeypatch, fake_session, a
 
     monkeypatch.setattr(source_health, "send_alert", _recorder)
 
-    for _ in range(source_health.CB_ERROR_STREAK):
+    for _ in range(source_health._cb_streak()):
         await source_health.record_error(fake_session, "encar", "boom")
         await asyncio.sleep(0)  # даём fire()-задаче исполниться
 
@@ -89,7 +89,7 @@ async def test_source_cb_alert_on_open_and_recovery(monkeypatch, fake_session, a
 
 @pytest.mark.asyncio
 async def test_should_skip_source_after_threshold(fake_session):
-    for _ in range(source_health.CB_ERROR_STREAK):
+    for _ in range(source_health._cb_streak()):
         await source_health.record_error(fake_session, "kcar", "fail")
     assert await source_health.should_skip_source(fake_session, "kcar") is True
     assert await source_health.should_skip_source(fake_session, "other") is False
@@ -144,7 +144,7 @@ async def test_health_detailed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_metrics_smoke(fake_session):
+async def test_metrics_requires_internal_token(fake_session):
     from httpx import ASGITransport, AsyncClient
 
     app.dependency_overrides[get_session] = lambda: fake_session
@@ -153,6 +153,22 @@ async def test_metrics_smoke(fake_session):
             transport=ASGITransport(app=app), base_url="http://test"
         ) as http:
             resp = await http.get("/metrics")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_metrics_smoke(fake_session):
+    from httpx import ASGITransport, AsyncClient
+
+    HEADERS = {"X-Internal-Token": get_settings().app_secret_key}
+    app.dependency_overrides[get_session] = lambda: fake_session
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as http:
+            resp = await http.get("/metrics", headers=HEADERS)
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 200
@@ -165,6 +181,23 @@ async def test_metrics_smoke(fake_session):
         "sources",
     }
     assert body["users"]["total"] == 0  # FakeSession: пусто → 0
+
+
+@pytest.mark.asyncio
+async def test_alert_escalation(alert_env):
+    """Повторные алерты глушатся экспоненциально дольше: 30 мин → 1 ч → 2 ч."""
+    r = alert_env["redis"]
+    assert await alerting.send_alert("x", dedup_key="esc") is True
+    assert r.ttls["alert:esc"] == 1800
+    await r.delete("alert:esc")  # имитируем истечение окна подавления
+    assert await alerting.send_alert("x2", dedup_key="esc") is True
+    assert r.ttls["alert:esc"] == 3600
+    await r.delete("alert:esc")
+    assert await alerting.send_alert("x3", dedup_key="esc") is True
+    assert r.ttls["alert:esc"] == 7200
+    await r.delete("alert:esc")
+    assert await alerting.send_alert("x4", dedup_key="esc") is True
+    assert r.ttls["alert:esc"] == 7200  # cap 2 ч
 
 
 @pytest.mark.asyncio

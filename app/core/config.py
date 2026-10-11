@@ -89,9 +89,10 @@ class Settings(BaseSettings):
 
     # Alerting / мониторинг (этап 8, ТЗ п. 10)
     alerts_enabled: bool = True  # алерты в Telegram на ADMIN_CHAT_ID
-    alert_dedup_ttl_sec: int = 1800  # подавление повторов alert:{key}, 30 мин
+    alert_dedup_ttl_sec: int = 1800  # базовое подавление повторов alert:{key}
     dlq_alert_threshold: int = 10  # глубина dead_letter для алерта
     health_check_interval_sec: int = 300  # период мониторинга DLQ в воркерах
+    source_cb_error_streak: int = 5  # ошибок подряд до открытия CB источника
 
 
     # Monitoring

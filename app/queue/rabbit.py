@@ -134,6 +134,22 @@ class CronSpec:
         return self.func.__name__
 
 
+@dataclass
+class IntervalSpec:
+    """Периодическая задача с фиксированным интервалом (каждые every_sec).
+
+    Исполнение в воркере, защита от дублей между воркерами — Redis-лок
+    `interval:{name}:{slot}` (слот = epoch // every_sec).
+    """
+
+    func: Callable[..., Awaitable[Any]]
+    every_sec: int
+
+    @property
+    def name(self) -> str:
+        return self.func.__name__
+
+
 JobHandler = Callable[..., Awaitable[Any]]
 
 
@@ -157,6 +173,7 @@ class TaskWorker:
         concurrency: int = 5,
         job_timeout: int = 120,
         cron_jobs: list[CronSpec] | None = None,
+        interval_jobs: list[IntervalSpec] | None = None,
     ) -> None:
         self._amqp_url = amqp_url
         self._bindings = bindings
@@ -165,6 +182,7 @@ class TaskWorker:
         self._concurrency = concurrency
         self._job_timeout = job_timeout
         self._cron_jobs = cron_jobs or []
+        self._interval_jobs = interval_jobs or []
         self._connection = None
         self._stop = asyncio.Event()
         self._sem: asyncio.Semaphore | None = None
@@ -299,6 +317,29 @@ class TaskWorker:
             except Exception:  # noqa: BLE001 — мониторинг не роняет воркер
                 logger.warning("dlq_monitor_failed", exc_info=True)
 
+    # --- interval jobs -------------------------------------------------------
+
+    async def _interval_loop(self, spec: IntervalSpec) -> None:
+        from datetime import datetime, timezone
+
+        while not self._stop.is_set():
+            if await self._stop.wait(timeout=max(spec.every_sec, 1)):
+                return
+            slot = int(datetime.now(timezone.utc).timestamp()) // spec.every_sec
+            lock_key = f"interval:{spec.name}:{slot}"
+            redis = self._ctx.get("redis")
+            if redis is not None:
+                got = await redis.set(lock_key, "1", nx=True, ex=spec.every_sec * 2)
+                if not got:
+                    continue  # слот уже исполнил другой воркер
+            try:
+                await asyncio.wait_for(
+                    spec.func(self._ctx), timeout=self._job_timeout
+                )
+                logger.info("interval_job_done: %s", spec.name)
+            except Exception:
+                logger.exception("interval_job_failed: %s", spec.name)
+
     # --- lifecycle ----------------------------------------------------------
 
     async def run(self) -> None:
@@ -310,13 +351,17 @@ class TaskWorker:
         for queue_name, jobs in self._bindings.items():
             await self._consume_queue(queues[queue_name], jobs)
         cron_task = asyncio.create_task(self._cron_loop()) if self._cron_jobs else None
+        interval_tasks = [
+            asyncio.create_task(self._interval_loop(spec))
+            for spec in self._interval_jobs
+        ]
         interval = get_settings().health_check_interval_sec
         monitor_task = (
             asyncio.create_task(self._monitor_loop(interval)) if interval > 0 else None
         )
         logger.info("task_worker_started: queues=%s", list(self._bindings))
         await self._stop.wait()
-        for task in (cron_task, monitor_task):
+        for task in (cron_task, monitor_task, *interval_tasks):
             if task:
                 task.cancel()
         if self._connection and not self._connection.is_closed:

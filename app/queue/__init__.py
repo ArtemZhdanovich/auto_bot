@@ -2,6 +2,7 @@ from app.queue.rabbit import (
     CronSpec,
     DLQ,
     EXCHANGE,
+    IntervalSpec,
     QUEUE_FETCH,
     QUEUE_SEND,
     TaskPublisher,
@@ -12,6 +13,7 @@ from app.queue.rabbit import (
 
 __all__ = [
     "CronSpec",
+    "IntervalSpec",
     "DLQ",
     "EXCHANGE",
     "QUEUE_FETCH",
