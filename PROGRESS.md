@@ -1,20 +1,68 @@
-# Auto Selection — полное описание проекта (от А до Я)
+# Auto Selection — PROGRESS
 
 > Экосистема подбора автомобилей из-за рубежа (Корея, Китай, ОАЭ и др.) для
 > пользователей из РБ / РФ / СНГ: Telegram-бот + WebApp (Mini App) + сайт
 > с AI-диалогом, парсингом источников, RAG-базой знаний и монетизацией.
-> Реализация ТЗ (`TZ.md`), этапы 0–7 выполнены. Обновлено: 11.10.2026.
+> Реализация ТЗ (`TZ.md`). Обновлено: 11.10.2026 · **208 тестов backend** ·
+> дерево чистое.
+
+**Легенда статусов:**
+
+| Метка | Значение |
+|---|---|
+| ✅ | Готово, покрыто тестами, в кодовой базе |
+| ⏳ | Код готов — **ждёт действия владельца** (миграция, creds, живая проверка) |
+| 📋 | Бэклог, не начато |
 
 ---
+
+## 0. Статус-дашборд
+
+| # | Блок | Статус | Что осталось |
+|---|---|---|---|
+| 1 | Этапы ТЗ 0–7: бот, backend, AI-агент, RAG, Mini App | ✅ | — |
+| 2 | Этап 8: мониторинг, алерты, `/health/detailed`, `/metrics` | ✅ | — |
+| 3 | Планировщик: `schedule_cron` + интервальные задачи | ✅ | — |
+| 4 | Продуктовая аналитика (P1-7): `analytics_events`, хуки | ✅ | — |
+| 5 | Лиды: `POST /api/leads`, `PATCH /api/leads/{id}` | ✅ | — |
+| 6 | Адаптер Che168 (P2-10) | ⏳ | `alembic upgrade head`, сверка живого HTML/гео, `enabled=true` |
+| 7 | ParserDoctor (ИИ-ремонтник селекторов) | ⏳ | код готов, `doctor_mode=off`; включается в БД |
+| 8 | Прокси-шлюз DataImpulse (антибан) | ✅ | включается переменными `.env` при банах |
+| 9 | Миграции `0004_analytics_events`, `0005_add_che168_source` | ⏳ | `alembic upgrade head` |
+| 10 | Telegram Stars монетизация | ⏳ | код-путь полный; живой тестовый платёж |
+| 11 | Живой E2E RAG-стека (GLM + ingest + запрос) | ⏳ | creds + `ingest_kb.py --force` |
+| 12 | Token Bucket Telegram ~30 msg/s (P2-9) | 📋 | кандидат №1 следующего спринта |
+| 13 | SQL-дашборды воронок (retention D1/D7, конверсии) | 📋 | кандидат №2 |
+| 14 | LLM cost tracking (P3) | 📋 | — |
+| 15 | Ротация PQ-ключей (P3) | 📋 | — |
+| 16 | Push `refactor/monorepo` (rag_service) | 📋 | ветка готова локально |
+| 17 | HTTPS `MINIAPP_URL` для прода | 📋 | домен/TLS |
+| 18 | Рефакторинг веб-авторизации (nullable telegram_id) | 📋 | порог ~30k веб-юзеров |
+
+### Действия владельца (единственное, что мешает «зелёному» статусу)
+
+- [ ] `uv run alembic upgrade head` — накатить `0004` + `0005` (пп. 6, 9).
+- [ ] Che168: сверить селекторы с живым HTML и гео-доступность (403 из РБ →
+      включить DataImpulse с `PROXY_DATAIMPULSE_GEO=cn`), затем
+      `UPDATE sources SET enabled=true WHERE name='che168'` (п. 6).
+- [ ] Опционально: `"doctor_mode": "suggest"` в `sources.config` che168 (п. 7).
+- [ ] Telegram Stars: тестовый платёж XTR (п. 10).
+- [ ] RAG E2E: `GLM_API_KEY`, PQ-ключи, `ingest_kb.py --force`, контрольный
+      запрос к `rag-api` (п. 11).
+
+---
+
+# Часть I — обзор проекта
 
 ## 1. Что это и для кого
 
 Пользователь заходит в Telegram-бота или Mini App и на естественном языке
 описывает, какой автомобиль хочет (марка/модель, бюджет, год, город).
-AI-агент собирает критерии, ищет варианты по агрегаторам (Encar, KCar),
-показывает карточки, отвечает на вопросы о доставке/растаможке через RAG
-по базе знаний, считает экономику «под ключ» в USD и подписывает пользователя
-на уведомления о новых вариантах. Монетизация — Pro-подписка через Telegram Stars.
+AI-агент собирает критерии, ищет варианты по агрегаторам (Encar, KCar,
+Che168), показывает карточки, отвечает на вопросы о доставке/растаможке через
+RAG по базе знаний, считает экономику «под ключ» в USD и подписывает
+пользователя на уведомления о новых вариантах. Монетизация — Pro-подписка
+через Telegram Stars; лиды из диалога отдаются менеджерам.
 
 ## 2. Технологический стек
 
@@ -22,15 +70,16 @@ AI-агент собирает критерии, ищет варианты по 
 |---|---|
 | Backend | Python 3.13, FastAPI, uvicorn, Pydantic v2 / pydantic-settings |
 | Бот | aiogram 3 (FSM в Redis), long polling |
-| БД | PostgreSQL + SQLAlchemy 2 (async) + Alembic |
+| БД | PostgreSQL + SQLAlchemy 2 (async) + Alembic (0001–0005) |
 | Очереди | RabbitMQ (aio-pika), producer/TaskWorker/DLQ/cron |
-| Кэш/состояние | Redis (FSM, DialogState, кэши, прокси-пул, антидубли) |
+| Кэш/состояние | Redis (FSM, DialogState, кэши, прокси-пул, антидубли, cooldown'ы) |
+| Парсеры | httpx + selectolax/lexbor (SSR), общий HttpClient (ретраи, 429, прокси) |
 | Frontend | React 18 + Vite + TypeScript, @telegram-apps/telegram-ui, React Router |
 | RAG-сервис | FastAPI + RabbitMQ worker, Qdrant (гибрид vector+BM25/RRF), MinIO, multilingual-e5 |
-| LLM | GLM (Zhipu, основной), fallback: DeepSeek / OpenAI / Anthropic / Ollama / mock — все через OpenAI-совместимый `/chat/completions` (Anthropic — `/v1/messages`) |
+| LLM | GLM (Zhipu, основной), fallback: DeepSeek / OpenAI / Anthropic / Ollama / mock |
 | Криптография | PyJWT, PBKDF2-SHA256 (пароли сайта), гибрид ML-KEM-768 + X25519 + AES-256-GCM (документы) |
 | Инфра | Docker Compose (postgres, redis, rabbitmq, qdrant, minio, backend, bot, workers, miniapp, rag_*) |
-| Тесты | pytest + pytest-asyncio (137 тестов backend), контрактные тесты адаптеров, mypy, ruff |
+| Тесты | pytest + pytest-asyncio (**208 тестов** backend), контрактные тесты адаптеров, mypy, ruff |
 
 ## 3. Архитектура
 
@@ -41,19 +90,26 @@ AI-агент собирает критерии, ищет варианты по 
                     AI-агент ─────┤  └─ RAG API (:8100) ─► RabbitMQ ─► RAG Worker (:8101)
                     (tool loop)   │                          │
                                   ▼                          ├─ Qdrant (гибридный поиск)
-                          Fetch Worker ─► адаптеры ─► listings (дедуп по VIN)
+                  Scheduler (schedule_cron) ─► Fetch Worker ─► адаптеры ─► listings
+                                                     │  ▲
+                                                     │  └─ ParserDoctor (GLM чинит селекторы)
+                                                     └─ ProxyPool / DataImpulse (антибан)
                                   ▲
                           Send Worker ─► уведомления в Telegram
 ```
 
 Потоки:
-- **Диалог**: пользователь → агент (LLM + tools) → поиск/вопрос → ответ.
-- **Парсинг**: cron/ручной запуск → очередь fetch → адаптеры (Encar/KCar) →
-  нормализация → кросс-дедуп → `listings`.
+- **Диалог**: пользователь → агент (LLM + tools) → поиск/вопрос → ответ;
+  заинтересованность → `POST /api/leads` → менеджер.
+- **Парсинг**: cron/ручной запуск → очередь fetch → адаптеры
+  (Encar API / KCar API / Che168 HTML) → нормализация → кросс-дедуп →
+  `listings`; при смене вёрстки — ParserDoctor, при банах — прокси-шлюз.
 - **Уведомления**: новые листинги → матчинг активных фильтров → Send Worker →
   instant или digest (тихие часы, антидубли).
 - **RAG**: `POST /api/v1/ask` (rag_api) → JWT → RPC `query_queue` → worker →
   гибридный поиск Qdrant + LLM-генерация → ответ с источниками и confidence.
+- **Аналитика**: хуки в API/боте → `analytics_events` → SQL-агрегаты,
+  `events_24h` в `/metrics`.
 
 ## 4. Структура репозитория
 
@@ -62,18 +118,20 @@ auto_bot/
 ├── app/                      # Backend
 │   ├── api/                  # HTTP-роутеры (см. §6)
 │   ├── ai/                   # агент, LLM-клиенты, RAG-клиент, промпты, tools
-│   ├── adapters/             # источники: encar, kcar, registry, прокси, дедуп
+│   ├── adapters/             # encar, kcar, che168, registry, прокси, дедуп
 │   ├── bot/                  # aiogram: handlers, button_flow, __main__
 │   ├── core/                 # config, security (initData/JWT), deps, pq_crypto
-│   ├── db/                   # models, session, migrations (alembic)
+│   ├── db/                   # models, session, migrations 0001–0005 (alembic)
 │   ├── queue/                # RabbitMQ: producer, TaskWorker, DLQ, cron
-│   ├── schemas/              # Pydantic-контракты (UnifiedListing, SearchCriteria…)
-│   ├── services/             # users, dialog, search, notify, subscription, fetch…
+│   ├── schemas/              # Pydantic-контракты (UnifiedListing, Lead…)
+│   ├── services/             # users, dialog, search, notify, subscription,
+│   │                         # fetch, analytics, alerting, source_health,
+│   │                         # cron, parser_doctor
 │   ├── workers/              # fetch, send
 │   └── main.py               # FastAPI app (uvicorn app.main:app)
 ├── frontend/                 # Mini App + сайт (React/Vite/TS)
 ├── services/rag/             # RAG-микросервис (rag_core/rag_worker/rag_api + kb/)
-├── tests/                    # pytest (137 тестов)
+├── tests/                    # pytest (208 тестов)
 ├── docker-compose.yml        # весь стек
 ├── pyproject.toml            # uv-проект backend
 ├── TZ.md                     # техническое задание
@@ -87,18 +145,23 @@ auto_bot/
   **email (unique)** + password_hash (сайт), синтетические отрицательные
   telegram_id для веб-пользователей (PK/FK сквозной).
 - **Filter** — SearchCriteria пользователя (марка/модель/цена/год/источники/город).
-- **Listing (UnifiedListing)** — нормализованное объявление: VIN, источник,
-  цена (валюта источника), год/пробег/объём, страна.
+- **Listing (UnifiedListing)** — нормализованное объявление: VIN (у Che168
+  скрыт → None), источник, цена (валюта источника), год/пробег/объём, страна.
 - **Favorite** — избранное (миграция `0002_favorites`).
 - **Subscription/Payment** — Pro через Telegram Stars.
 - **DialogSession** — архивация DialogState из Redis.
-- **Source (админ)** — реестр источников: adapter_class, приоритеты,
-  rate limits, capabilities.
-- Миграции: `0001_initial`, `0002_favorites`, `0003_web_auth` (email unique).
+- **Lead** — обращение из диалога: user_id, listing_id?, статус
+  new/in_progress/closed/rejected, manager_id (таблица в `0001`).
+- **AnalyticsEvent** — сырые события воронки (`0004_analytics_events`).
+- **Source (админ)** — реестр источников: adapter_class, kind (api/parser),
+  приоритеты, rate limits, `schedule_cron`, capabilities, `enabled`,
+  `credentials_ref`; миграция `0005` добавляет `che168` (enabled=false).
+- Миграции: `0001_initial`, `0002_favorites`, `0003_web_auth` (email unique),
+  `0004_analytics_events`, `0005_add_che168_source`.
 
 ---
 
-# Часть II — подробное описание подсистем
+# Часть II — подсистемы
 
 ## 6. HTTP API (FastAPI, prefix `/api`)
 
@@ -110,44 +173,41 @@ auto_bot/
 | `filters` | CRUD: `GET/POST /filters`, `PATCH/DELETE /filters/{id}` |
 | `listings` | `GET /listings` (поиск/пагинация), `GET /listings/{id}` |
 | `favorites` | `GET/POST/DELETE /favorites…` |
-| `payments` | `POST /payments/stars` (Telegram Stars) |
+| `leads` | `POST /leads` (internal), `PATCH /leads/{id}` (internal: статус, manager) |
+| `payments` | `POST /payments/stars` (Telegram Stars), `POST /payments/success` |
 | `admin` | `GET/PUT /admin/sources…`, `POST /admin/sources/{name}/fetch`, health источников (X-Internal-Token) |
-| `dialog` | `POST /dialog/message`, `POST /dialog/reset` |
+| `dialog` | `POST /dialog/message`, `POST /dialog/reset` (+ хуки аналитики) |
 | `ai_search` | `POST /ai/message`, `POST /ai/reset`, `POST /ai/finalize` (JWT) |
 | `notifications` | `POST /notifications/settings` (instant/digest/off), `POST /notifications/scan` |
-| system | `GET /health`, `GET /health/detailed` (postgres/redis/rabbitmq, 503 при недоступной БД), `GET /metrics` (агрегаты; **требует X-Internal-Token**) |
+| system | `GET /health`, `GET /health/detailed` (postgres/redis/rabbitmq, 503 при недоступной БД), `GET /metrics` (агрегаты + `events_24h`; **X-Internal-Token**) |
 
-## 7. Telegram-бот
+## 7. Telegram-бот ✅
 
-- Команды (регистрируются при старте через `set_my_commands`, scope: личные
-  чаты): `/start`, `/menu`, `/reset`, `/help`, `/stop`.
-- **Кнопка-меню с WebApp**: при старте `set_chat_menu_button` → «🚗 Поиск авто»
-  открывает Mini App прямо из клиента Telegram (`MINIAPP_URL`, HTTPS в проде).
+- Команды (`set_my_commands`, личные чаты): `/start`, `/menu`, `/reset`,
+  `/help`, `/stop`.
+- **Кнопка-меню с WebApp**: «🚗 Поиск авто» открывает Mini App (`MINIAPP_URL`,
+  HTTPS в проде).
 - Inline-меню `/menu`: AI-подбор, «📱 Открыть приложение» (WebAppInfo),
   уведомления (мгновенно/дайджест/выкл), подписка, сброс диалога.
-- FSM хранится в Redis (`fsm:{user_id}`), кнопочный fallback-режим
-  (`button_flow.py`) при недоступности LLM.
+- FSM в Redis (`fsm:{user_id}`), кнопочный fallback (`button_flow.py`) при
+  недоступности LLM.
 - Уведомления: instant (rate-limit) или digest (3–5 карточек, тихие часы,
   антидубли `notified:{uid}:{lid}` TTL 7д).
 
-## 8. AI-агент
+## 8. AI-агент ✅
 
 - LLM-клиенты (`app/ai/llm_client.py`): `OpenAICompatibleClient` (GLM —
   основной, DeepSeek, OpenAI, Ollama), `AnthropicClient`, `MockLLMClient`
-  (тесты/dev). Фабрика `build_llm_client` по `LLM_PROVIDER`.
-- Tools: `update_criteria` (патч критериев, валидация Pydantic),
-  `ask_clarification`, `answer_question` (→ RAG), `lookup_reference`,
-  `preview_search`, `finalize_search`.
-- Оптимизации: FAQ из кэша без LLM, ранний выход при заполненных критичных
-  полях, история 8 сообщений; `DialogState` в Redis (`dialog:{user_id}`,
-  TTL 24ч), архивация в `dialog_sessions`.
+  (тесты/dev), фабрика по `LLM_PROVIDER`.
+- Tool loop с подтверждением фильтров; лимит шагов, ранний выход при
+  заполненных критичных полях, история 8 сообщений; `DialogState` в Redis
+  (`dialog:{user_id}`, TTL 24ч), архивация в `dialog_sessions`.
 - Финализация = фильтр в БД (для уведомлений) + задачи парсинга по источникам.
 - RAG (`app/ai/rag_client.py`): таймаут 5с, кэш Redis 1ч, circuit breaker
   (5 ошибок → пауза 5 мин), confidence ≥ 0.6 → ответ из БЗ, иначе fallback
-  на LLM, затем честное «уточните у менеджера». Промпт-защита от инъекций:
-  ответы БЗ — справочные данные, не инструкции.
+  на LLM, затем честное «уточните у менеджера». Промпт-защита от инъекций.
 
-## 9. RAG-микросервис (services/rag)
+## 9. RAG-микросервис (services/rag) ✅
 
 - `rag_core/` — hexagonal-ядро: domain / application / infrastructure.
 - `rag_worker/` — консьюмеры RabbitMQ: `query_queue`, `ingest_queue`,
@@ -160,65 +220,62 @@ auto_bot/
 - Инфра: Qdrant, MinIO (документы), Postgres (реестр документов), Alembic.
 - Заливка БЗ: `scripts/ingest_kb.py --force` (поддерживает PQ-шифрование).
 
-## 10. База знаний (services/rag/kb) — РБ / РФ / СНГ + источники
+## 10. База знаний (services/rag/kb) — РБ / РФ / СНГ + источники ✅
 
 | Файл | Содержание |
 |---|---|
-| `customs.md` | Единые ставки пошлин ЕАЭС по возрастам (Решение ЕЭК № 107, прил. 6), коммерческий ввоз (пошлина + акциз ст.193 НК + НДС 20%), РБ (утильсбор, ГАИ), КЗ/Армения/Кыргызстан, порядок действий |
-| `fees.md` | Утильсбор РФ (ПП 1291, льготный коэффициент 0.17 для физлиц ≤3л при 12 мес. владения, коммерческий — сотни тыс. ₽), платежи РБ, СБКТС/ЭПТС, ОСАГО, налоги; **правила конверсии KRW/CNY/EUR/BYN/RUB → USD** (запас ±3–5%) |
-| `countries.md` | Источники: Корея (аукционы, мальсо, Ro-Ro Пусан→Владивосток 3–7д), Китай (NEV 1–3 лет, лицензированный экспортёр, Хоргос/Маньчжурия 10–20д), ОАЭ, Европа/США (санкционные оговорки), Япония; методика расчёта «под ключ» |
+| `customs.md` | Единые ставки пошлин ЕАЭС по возрастам (Решение ЕЭК № 107, прил. 6), коммерческий ввоз, РБ (утильсбор, ГАИ), КЗ/Армения/Кыргызстан, порядок действий |
+| `fees.md` | Утильсбор РФ (ПП 1291), платежи РБ, СБКТС/ЭПТС, ОСАГО, налоги; **правила конверсии KRW/CNY/EUR/BYN/RUB → USD** (запас ±3–5%) |
+| `countries.md` | Источники: Корея (аукционы, Ro-Ro Пусан→Владивосток), Китай (NEV, лицензированный экспортёр, Хоргос/Маньчжурия), ОАЭ, Европа/США, Япония; методика расчёта «под ключ» |
 | `delivery.md` | Таблица маршрутов/сроков, что входит во фрахт, фотофиксация, трекинг |
-| `risks.md` | Юридические (санкции, залоги, «утильсбор с продажей», «растаможка в КЗ»), технические (аукционные листы Кореи, залоги Китая), финансовые; чек-лист сделки |
-| `legal.md` | Правовая база РФ/РБ/ЕАЭС, экспортные ограничения стран-источников (ЕС 833/2014, США EAR, Корея), compliance-политика: обход санкций и серые схемы не поддерживаются |
-| `faq.md` | FAQ: регистрация, валюты и курсы, растаможка по возрастам, Корея/Китай/Европа, уведомления, документы |
+| `risks.md` | Юридические, технические, финансовые риски; чек-лист сделки |
+| `legal.md` | Правовая база РФ/РБ/ЕАЭС, экспортные ограничения стран-источников, compliance: обход санкций не поддерживается |
+| `faq.md` | FAQ: регистрация, валюты, растаможка по возрастам, уведомления, документы |
 
 Все ставки помечены «проверять на дату ввоза» — зафиксированы только
 устойчивые нормы, летучие цифры — с явными оговорками.
 
-## 11. Frontend (Mini App + сайт)
+## 11. Frontend (Mini App + сайт) ✅
 
 - Экраны: `Onboarding`, `Feed` (лента с чипсами-фильтрами), `Filters`,
-  `Listing` (карточка), `Favorites`, `Profile`, `AiSearch` (AI-подбор),
-  `Login` (email+пароль — для неавторизованных веб-пользователей).
-- `api/`: `client.ts` (JWT, base `/api`), `auth.ts` (telegramLogin,
-  webRegister, webLogin, magicLink), `ai.ts`, `types.ts`.
-- Telegram-интеграция: `telegram-web-app.js`, initData → JWT,
-  тема `--tg-theme-*`; в проде — HTTPS-URL через `MINIAPP_URL`.
+  `Listing`, `Favorites`, `Profile`, `AiSearch`, `Login` (email+пароль).
+- `api/`: `client.ts` (JWT, base `/api`), `auth.ts`, `ai.ts`, `types.ts`.
+- Telegram-интеграция: `telegram-web-app.js`, initData → JWT, тема
+  `--tg-theme-*`; в проде — HTTPS `MINIAPP_URL`.
 - Вне Telegram — read-only лента + Login для полного доступа.
 
-## 12. Безопасность
+## 12. Безопасность ✅
 
-- **Telegram initData**: HMAC-SHA256-валидация на бэкенде, max age 24ч.
+- **Telegram initData**: HMAC-SHA256-валидация, max age 24ч.
 - **JWT**: access 1ч + refresh 30д (`APP_SECRET_KEY`, HS256).
 - **Пароли сайта**: PBKDF2-SHA256, 240k итераций; email — regex-валидация.
 - **Веб-пользователи**: синтетические отрицательные telegram_id (PK/FK),
-  ретрай до 5× при коллизии.
-- **Внутренние эндпоинты**: `X-Internal-Token` (`INTERNAL_TOKEN`;
-  пустое значение — обратная совместимость с `APP_SECRET_KEY`).
-- **RAG**: internal token между backend и rag_api, JWT между rag_api и
-  worker, ротация ключей HS/RS/ES, PII-редакция перед записью диалогов.
+  ретрай 5× при коллизии (долг: отдельный PK, см. бэклог).
+- **Внутренние эндпоинты**: `X-Internal-Token` (`INTERNAL_TOKEN`; пустое —
+  обратная совместимость с `APP_SECRET_KEY`).
+- **RAG**: internal token backend↔rag_api, JWT rag_api↔worker, ротация
+  ключей HS/RS/ES, PII-редакция перед записью диалогов.
 - **Постквантовое шифрование документов**: гибрид ML-KEM-768 (FIPS 203) +
   X25519 → HKDF-SHA256 → AES-256-GCM, контейнер `AUPQ1`, AAD = ключ объекта.
   `EncryptedFileStorage` над MinIO; включение `ENCRYPT_DOCUMENTS=true` +
-  `PQ_ENCRYPTION_PUBLIC_KEY/PRIVATE_KEY`. Устойчиво к «harvest now,
-  decrypt later»; legacy-объекты читаются без шифрования.
+  PQ-ключи. Устойчиво к «harvest now, decrypt later».
 
 ## 13. Конфигурация (.env)
 
 Основные переменные (полный список — `.env.example`):
-`APP_ENV`, `APP_SECRET_KEY`, `APP_BASE_URL`, `MINIAPP_URL`, `BOT_TOKEN`,
-`ADMIN_CHAT_ID`, `MANAGER_CHAT_ID`, `DATABASE_URL`, `DB_PASSWORD`,
-`REDIS_URL`, `RABBITMQ_URL`; LLM: `LLM_PROVIDER=glm`, `GLM_API_KEY`,
-`GLM_BASE_URL`, `LLM_DEFAULT_MODEL=glm-4.6`, `LLM_ADVANCED_MODEL`,
-`LLM_TEMPERATURE` (опц. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`DEEPSEEK_API_KEY`); RAG: `RAG_SERVICE_URL`, `RAG_API_TOKEN`,
-`RAG_JWT_SECRET`, `RAG_EMBEDDING_MODEL`, `RAG_LLM_PROVIDER=glm`,
-`RAG_LLM_MODEL=glm-4.6`, `RAG_CONFIDENCE_THRESHOLD`; PQ:
-`ENCRYPT_DOCUMENTS`, `PQ_ENCRYPTION_PUBLIC_KEY`, `PQ_ENCRYPTION_PRIVATE_KEY`.
+`APP_ENV`, `APP_SECRET_KEY`, `INTERNAL_TOKEN`, `APP_BASE_URL`, `MINIAPP_URL`,
+`BOT_TOKEN`, `ADMIN_CHAT_ID`, `MANAGER_CHAT_ID`, `DATABASE_URL`, `REDIS_URL`,
+`RABBITMQ_URL`; LLM: `LLM_PROVIDER=glm`, `GLM_API_KEY`, `GLM_BASE_URL`,
+`LLM_DEFAULT_MODEL=glm-4.6`; RAG: `RAG_SERVICE_URL`, `RAG_API_TOKEN`,
+`RAG_JWT_SECRET`, `RAG_CONFIDENCE_THRESHOLD`; алерты: `ALERTS_ENABLED`,
+`DLQ_ALERT_THRESHOLD`, `SOURCE_CB_ERROR_STREAK`; PQ: `ENCRYPT_DOCUMENTS`,
+`PQ_ENCRYPTION_PUBLIC_KEY/PRIVATE_KEY`; прокси: `PROXY_DATAIMPULSE_USER`,
+`PROXY_DATAIMPULSE_PASS`, `PROXY_DATAIMPULSE_GEO`, `PROXY_DATAIMPULSE_PORT`
+(823 HTTPS / 824 SOCKS5), `PROXY_DATAIMPULSE_STICKY_TTL_SEC`.
 
 ## 14. Docker Compose — сервисы
 
-`postgres`, `redis`, `rabbitmq`, `qdrant`, `minio`, `rag_migrate*` (Alembic
+`postgres`, `redis`, `rabbitmq`, `qdrant`, `minio`, `rag_migrate` (Alembic
 rag), `rag_worker` (:8101), `rag_api` (:8100), backend, bot, `worker_fetch`,
 `worker_send`, `miniapp` (:8080). Тома: pg_data, redis_data, qdrant_storage,
 minio_data.
@@ -231,8 +288,8 @@ uv sync && cp .env.example .env   # заполнить BOT_TOKEN, APP_SECRET_KEY
 docker compose up -d postgres redis rabbitmq
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload        # :8000
-uv run python -m app.bot                    # бот (регистрирует команды и меню-кнопку)
-uv run python -m app.workers.fetch
+uv run python -m app.bot                    # бот (команды + меню-кнопка)
+uv run python -m app.workers.fetch          # cron-планировщик + парсинг
 uv run python -m app.workers.send
 cd frontend && npm install && npm run dev   # :8080
 ```
@@ -244,176 +301,194 @@ uv run --project services/rag python scripts/ingest_kb.py --force
 ```
 
 Прод-деплой: `docker compose build` → `up -d` → `alembic upgrade head`
-(основная + rag БД) → ingest KB → выставить секреты (GLM_API_KEY,
-RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
+(основная + rag БД) → ingest KB → секреты (GLM_API_KEY, RAG_API_TOKEN,
+RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
 
-## 16. Тесты и качество
+---
 
-- `uv run pytest` — 137 passed: LLM-клиенты (tool_calls, GLM-фабрика),
-  RAG-клиент (fallback, circuit breaker, кэш), агент (tool loop, DialogState),
-  уведомления (антидубли, дайджест), адаптеры (контракты, дедуп), auth
-  (initData, PBKDF2, регистрация), PQ-крипто (roundtrip, AAD, чужой ключ).
-- `uv run ruff check` — чисто; mypy настроен.
-- Frontend: `tsc --noEmit` + `vite build` — без ошибок.
+# Часть III — журнал реализации (что наворотили)
 
-## 17. История коммитов
+Все крупные изменения спринтов «ревью → сейчас». Метки: ✅ закрыто и
+протестировано; ⏳ код готов, ждёт владельца.
+
+## 16. ✅ Этап 8 — мониторинг и алерты
+
+- `app/services/alerting.py`: алерты в Telegram на `ADMIN_CHAT_ID`, дедуп
+  Redis `alert:{key}` с **эскалацией** (повторы глушатся экспоненциально:
+  30 мин → 1 ч → 2 ч, cap 2 ч), `ALERTS_ENABLED`.
+- DLQ-монитор в `TaskWorker` (глубина `dead_letter` ≥ `DLQ_ALERT_THRESHOLD` →
+  алерт, период `HEALTH_CHECK_INTERVAL_SEC`).
+- Алерты на открытие/восстановление circuit breaker'а источников и RAG-CB.
+- `GET /health/detailed` (postgres/redis/rabbitmq, 503 при недоступной БД),
+  `GET /metrics` (пользователи по tier, объявления, уведомления, latency
+  источников, `events_24h`) — закрыт `X-Internal-Token`.
+- Попутно исправлен латентный баг: `error_streak`/`total_fetched` в
+  `source_health` были `None` до первого flush → `TypeError` на первом
+  инциденте нового источника (SQLAlchemy column `default=` срабатывает только
+  на flush — инстанцировать с явными значениями).
+
+## 17. ✅ Планировщик (schedule_cron)
+
+- `app/services/cron.py` — матчер 5-полей (*/n, диапазоны, списки; dom+dow —
+  OR по стандарту cron).
+- `IntervalSpec` в `TaskWorker` (интервальные задачи с Redis-локом
+  `interval:{name}:{slot}`).
+- Fetch-воркер каждую минуту: `schedule_fetch_due` → источники `enabled` с
+  подходящим `schedule_cron` ставятся в очередь (лок
+  `sched:{source}:{YYYYMMDDHHMM}` от дублей; CB проверяется внутри задачи).
+
+## 18. ✅ Закрытые пункты ревью (факты по коду)
+
+- Fuzzy-дедуп: `app/adapters/common/dedup.py` — VIN + fuzzy-хэш
+  (make|model|year|mileage|price), TTL 48 ч, Redis SET NX.
+- Circuit breaker источников: `source_health.py` + проверка в fetch-воркере;
+  порог `SOURCE_CB_ERROR_STREAK=5` вынесен в env.
+- Callback'и уведомлений бот↔backend совпадают (`instant/digest/off`).
+- `INTERNAL_TOKEN` выделен из `APP_SECRET_KEY` (обратная совместимость).
+- `Dockerfile`, `alembic.ini`, `frontend/*` закоммичены.
+
+## 19. ✅ Продуктовая аналитика (P1-7)
+
+- Таблица `analytics_events` (миграция `0004`) + `app/services/analytics.py` —
+  `track()` по принципу alerting: ошибка записи не ломает бизнес-поток.
+- Хуки: `user_registered` (первый upsert, `source: bot|miniapp`),
+  `search_completed` (только поиск с фильтрами, не просмотр ленты;
+  results/filters), `dialog_message` (`/dialog/message`),
+  `subscription_activated` (`/payments/success`, tier/days/stars, только
+  первая активация — идемпотентность сохранена).
+- `lead_created` → воронка search → dialog → lead замкнута.
+- `events_24h` по именам — в `/metrics`. Тесты: `tests/test_analytics.py`.
+
+## 20. ✅ Лиды (воронка диалог → обращение)
+
+- `POST /api/leads` (internal, из бота/Mini App: user_id, listing_id?,
+  source?, comment) → событие `lead_created`.
+- `PATCH /api/leads/{id}` (internal): статус new/in_progress/closed/rejected
+  + manager_id — менеджерский процесс.
+- Таблица `leads` была в `0001`. Явный `status="new"` при создании
+  (тот же класс бага с column `default=`, что и у `SourceHealth`).
+  `Literal`-валидация статуса. Тесты: `tests/test_leads.py`.
+
+## 21. ⏳ Адаптер Китая Che168 (P2-10) — код готов, ждёт включения
+
+- `Che168HtmlAdapter` (kind='parser') — SSR-парсинг selectolax/lexbor через
+  общий `HttpClient` (ретраи, 429, прокси-ротация, MockTransport-инъекция).
+- Нормализация: «23.80万» → 238000 CNY, «5.2万公里» → 52000 км, марка
+  иероглифами (丰田 → Toyota) — ~50 CJK-марок в `MAKE_MAP`; топливо/КПП
+  поиском подстроки (`detect_fuel`/`detect_transmission` — точный
+  `normalize_*` на тексте карточки не работает).
+- Селекторы/путь списка — в `sources.config` (смена вёрстки правится в БД
+  без деплоя); `raw_payload` хранит HTML карточки; VIN=None (скрыт) → общий
+  fuzzy-дедуп. Healthcheck = 200 + контейнер списка (капча/вёрстка → False).
+- Миграция `0005` вставляет источник `che168` (cron `*/30 * * * *`,
+  **enabled=false**), capabilities содержат `use_proxy=true`.
+- Зависимость `selectolax` (в venv 1.0.0 — импорт из `selectolax.lexbor`,
+  Modest deprecated). Тесты: `tests/test_che168_adapter.py` (13).
+- **Для включения:** `alembic upgrade head` → сверить селекторы с живым HTML
+  и гео (403 из РБ → DataImpulse, `PROXY_DATAIMPULSE_GEO=cn`) →
+  `UPDATE sources SET enabled=true WHERE name='che168'`.
+
+## 22. ⏳ ParserDoctor — ИИ-ремонтник парсеров
+
+Когда источник отвечает, но парсер отдал 0 карточек (смена вёрстки),
+fetch-воркер (fire-and-forget) зовёт `app/services/parser_doctor.py`:
+живой HTML → GLM предлагает CSS-селекторы (card/title/price/link) →
+**локальная валидация** на том же HTML (≥3 карточек, уникальные ID, цены у
+половины+) → режим `doctor_mode` в `sources.config`:
+
+| Режим | Поведение |
+|---|---|
+| `auto` | применить к БД + `AdapterRegistry.reload_source` + алерт «было/стало» |
+| `suggest` | только алерт владельцу с проверенным предложением |
+| `off` (default) | выключен |
+
+Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой (LLM
+недоступен, мусорный JSON, невалидные селекторы, геоблок) не ломает фетч и
+не меняет конфиг. Тесты: `tests/test_parser_doctor.py` (12).
+**Включение:** `"doctor_mode": "auto"` (или `suggest`) в `sources.config`.
+
+## 23. ✅ Прокси-шлюз DataImpulse (антибан, опционально)
+
+- Формат по официальным докам: `http://login__cr.cn;sessid.X:pass@gw.dataimpulse.com:823`
+  (823 HTTPS / 824 SOCKS5; `cr.*` — страна выхода, `sessid.*` — sticky ~30 мин).
+- `GatewayProxyPool` (`app/adapters/common/proxy.py`): ротацию IP делает
+  провайдер (per request или детерминированное sessid-окно
+  `PROXY_DATAIMPULSE_STICKY_TTL_SEC`, 0 = ротация на каждый запрос);
+  `mark_bad` не выбрасывает шлюз навсегда — N ошибок соединения подряд
+  усыпляют его на cooldown, `get()` возвращает None → HttpClient ходит
+  напрямую (обрыв шлюза не убивает парсинг).
+- Фабрика `build_proxy_pool(settings, redis)`: user+pass заданы → шлюз,
+  иначе статический `ProxyPool` из Redis.
+- Подключается в `AdapterRegistry` только к источникам с
+  `capabilities.use_proxy=true` (che168 — да, encar API — нет: платный
+  трафик не жжётся).
+- **Включение:** `PROXY_DATAIMPULSE_USER` + `PROXY_DATAIMPULSE_PASS`
+  (+ `PROXY_DATAIMPULSE_GEO=cn` при геоблоке) в `.env`, рестарт воркера.
+  Тесты: `tests/test_proxy.py` (11) + 2 в `tests/test_registry.py`.
+
+<!-- NEXT -->
+
+---
+
+# Часть IV — долги и планы
+
+## 24. ⏳ Ожидает действий владельца
+
+| # | Действие | Зачем |
+|---|---|---|
+| 1 | `alembic upgrade head` (0004+0005) | аналитика + источник che168 |
+| 2 | Сверка che168 с живым HTML + гео | перед `enabled=true`; 403 → DataImpulse `GEO=cn` |
+| 3 | Stars: тестовый платёж XTR | код-путь готов, живой оплаты не было |
+| 4 | RAG E2E: GLM/PQ-ключи, `ingest_kb.py --force`, контрольный запрос | живой контур ответов |
+| 5 | Опционально: `doctor_mode=suggest` | наблюдать за предложениями «врача» без авто-применения |
+
+Уже сделано владельцем: **BOT_TOKEN отозван** через @BotFather (перевыпустить
+и обновить `.env` перед продом).
+
+## 25. 📋 Бэклог (приоритизирован)
+
+### P2 — кандидаты следующего спринта
+
+1. **Token Bucket Telegram** (~30 msg/sec, п. 2.9 ТЗ): глобальный лимитер
+   отправки в Send Worker — защита от flood-ограничений при массовых
+   рассылках.
+2. **SQL-дашборды воронок** поверх `analytics_events`: retention D1/D7,
+   конверсии search→dialog→lead→subscription; сейчас агрегаты ad-hoc,
+   `events_24h` уже в `/metrics`.
+
+### P3 — стратегическое
+
+3. LLM cost tracking: токены/стоимость GLM в `DialogSession` или отдельной
+   таблице, сводка в `/metrics` (unit-экономика).
+4. Ротация PQ-ключей и разделение доступа к приватному ключу.
+5. Push ветки `refactor/monorepo` (rag_service: uv-workspace, 361 тест —
+   ветка готова локально).
+6. Публичный HTTPS `MINIAPP_URL` для прода + проверка кнопки меню.
+7. Рефакторинг веб-авторизации: `telegram_id` → nullable, отдельный PK
+   (синтетические отрицательные id — коллизии после ~30k веб-юзеров).
+
+## 26. Тесты и качество
+
+- `uv run pytest` → **208 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
+  кэш), агент, уведомления, адаптеры (контракты, дедуп, che168), auth,
+  PQ-крипто, мониторинг/алерты, cron/планировщик, аналитика, лиды,
+  ParserDoctor, прокси (GatewayProxyPool, фабрика).
+- `ruff check` — чисто; mypy настроен. Frontend: `tsc --noEmit` + `vite build`.
+- Тест-хелперы: `FakeSession` (строковые PK, `rollback()`, `get`),
+  `FakeRedis` (`ttls`), `MockLLMClient` (`script`, `.calls`).
+
+## 27. История коммитов (последние)
 
 | Commit | Что вошло |
 |---|---|
 | `1c898e4` | ТЗ (TZ.md) |
-| `b448c76` | Локальный RAG-микросервис (services/rag), /api/ai, AI-поиск в Mini App, inline-меню бота, compose-сервисы |
-| `a1d39c7` | Регистрация/логин сайта (email+пароль, PBKDF2), Login-экран, гейтинг поиска, миграция 0003_web_auth |
-| `46a7eb4` | GLM как основной LLM, расширенная БЗ РБ/РФ/СНГ + страны-источники, TG-кнопка меню WebApp, PQ-шифрование документов |
-| (этот коммит) | PROGRESS.md — полное описание проекта |
-| (отдельный репо) | rag_service: uv-workspace монорепо (rag-core/rag-worker/rag-api), 361 тест, ветка `refactor/monorepo` |
+| `b448c76` | RAG-микросервис, /api/ai, AI-поиск в Mini App, inline-меню, compose |
+| `a1d39c7` | Регистрация/логин сайта, Login-экран, миграция 0003 |
+| `46a7eb4` | GLM основной, БЗ РБ/РФ/СНГ, TG-кнопка WebApp, PQ-шифрование |
+| `7489aec`, `7a29eb3` | Аналитика (P1-7) + лиды: хуки, `POST/PATCH /api/leads`, `events_24h` |
+| `3dbe08e` | Che168-адаптер (P2-10): парсер, нормализация 万, миграция 0005 |
+| `6a3f934` | ParserDoctor: GLM-ремонт селекторов, doctor_mode, reload_source |
+| `ffb50dd` | Прокси-шлюз DataImpulse (GatewayProxyPool, use_proxy) |
+| (отд. репо) | rag_service monorepo: 361 тест, ветка `refactor/monorepo` (не запушена) |
 
-## 18. Известные долги и next steps
-
-### 🔴 P0 — инциденты/блокеры
-
-1. **Отозвать BOT_TOKEN через @BotFather** (утечка) и перевыпустить, обновить `.env`.
-2. Пользователь 809464979: tier=pro — сбросить на Free (решение владельца).
-3. Живой E2E RAG-стека: задать `GLM_API_KEY` + PQ-ключи, `docker compose build
-   rag_worker rag_api`, `ingest_kb.py --force`, контрольный запрос к rag-api.
-
-### 🟡 P1 — на этой неделе
-
-4. Telegram Stars E2E: код-путь полный (sendInvoice XTR → pre_checkout →
-   successful_payment → `/payments/success` → активация tier), но реальная
-   оплата не проводилась. Протестировать тестовым платежом (чеклист ниже).
-5. Залить ветку `refactor/monorepo` rag_service (зеркалирование GLM + PQ).
-6. Публичный HTTPS `MINIAPP_URL` для прода; проверить кнопку меню в TG-клиенте.
-7. ~~Продуктовые метрики воронки~~ — **реализовано** (см. «Отработанные»):
-   осталось построить SQL-дашборды воронок (активация/retention D1/D7/
-   конверсии) поверх `analytics_events`; лиды и их воронка замкнуты
-   (`POST /api/leads` + `lead_created`).
-
-### 🟢 P2 — до первого трафика
-
-8. Мониторинг — базовая часть реализована (этап 8, см. «Отработанные»):
-   alerting в Telegram, DLQ-алертинг, алерты на circuit breaker'ы,
-   `/health/detailed`, `/metrics` (за internal-токеном). Осталось:
-   внешняя uptime-проверка (когда будет публичный URL), latency/error rate
-   по HTTP-эндпоинтам (middleware), cache hit rate RAG, Sentry-дэшборд.
-9. Rate limiter Telegram: 429/retry_after обрабатывается в send-воркере
-    (1 ретрай) и в адаптерах (ротация прокси), но общего Token Bucket
-    (~30 msg/sec) в Redis нет.
-10. ~~Адаптер Китая (Che168/аналог)~~ — **код готов** (см. «Отработанные»):
-    `Che168HtmlAdapter` + миграция `0005` (источник `che168`, enabled=false).
-    Для включения: сверить селекторы с живым HTML (curl из браузера/через
-    прокси, F12), проверить гео-доступность с IP РБ, при отличии вёрстки
-    поправить `sources.config` (без деплоя), затем `UPDATE sources SET
-    enabled=true WHERE name='che168'`.
-11. Рефакторинг веб-авторизации: `telegram_id` → nullable, отдельный PK.
-    Сейчас синтетические отрицательные id в диапазоне −(1×10⁸…9×10⁸),
-    ретрай 5×; коллизии станут частыми после ~30k веб-пользователей.
-
-### 🟢 P3 — стратегическое
-
-12. Мониторинг стоимости LLM (unit-экономика GLM): счётчик токенов/стоимости
-    в `DialogSession` или отдельная таблица, сводка в `/metrics`.
-13. Ротация PQ-ключей и разделение доступа к приватному ключу.
-
-### Отработанные пункты ревью (факты по коду)
-
-- Fuzzy-дедуп **есть**: `app/adapters/common/dedup.py` — VIN + fuzzy-хэш
-  (make|model|year|mileage|price), TTL 48 ч, Redis SET NX.
-- Circuit breaker источников **есть**: `app/services/source_health.py` +
-  проверка в fetch-воркере.
-- Callback'и уведомлений **совпадают**: бот шлёт `instant/digest/off`,
-  backend ждёт `Literal["instant","digest","off"]`.
-- `INTERNAL_TOKEN` выделен из `APP_SECRET_KEY` (обратная совместимость
-  сохранена); настроено в `.env.example`, учитывается ботом и backend.
-- `Dockerfile`, `alembic.ini`, `frontend/*` закоммичены
-  (кроме `tsconfig.tsbuildinfo` — в `.gitignore`).
-- **Этап 8 (мониторинг/алерты) — реализован**: `app/services/alerting.py`
-  (алерты в Telegram на `ADMIN_CHAT_ID`, дедуп Redis `alert:{key}`,
-  `ALERTS_ENABLED`); DLQ-монитор в `TaskWorker` (`_monitor_loop`: глубина
-  `dead_letter` ≥ `DLQ_ALERT_THRESHOLD` → алерт, период
-  `HEALTH_CHECK_INTERVAL_SEC`); алерты на открытие/восстановление
-  circuit breaker'а источников (`source_health`, порог `CB_ERROR_STREAK=5`
-  вынесен в константу) и RAG-CB (`rag_client`); `GET /health/detailed`
-  (postgres/redis/rabbitmq, 503 при недоступной БД) и `GET /metrics`
-  (пользователи/по tier/за 24 ч, фильтры, объявления, уведомления,
-  latency источников). Переменные — в `.env.example`.
-  Заодно исправлен латентный баг: `error_streak`/`total_fetched` в
-  `source_health` были `None` до первого flush → `TypeError` на первом
-  инциденте нового источника. Тесты: `tests/test_monitoring.py` (146 passed).
-- **`schedule_cron` консьюмится** (P1 закрыт): `app/services/cron.py` —
-  матчер 5-полей (*/n, диапазоны, списки; dom+dow — OR по стандарту cron);
-  `IntervalSpec` в `TaskWorker` (интервальные задачи с Redis-локом
-  `interval:{name}:{slot}`); fetch-воркер запускает `schedule_fetch_due`
-  каждую минуту — источники `enabled` с подходящим `schedule_cron` ставятся
-  в очередь `fetch` (лок `sched:{source}:{YYYYMMDDHHMM}` от дублей;
-  circuit breaker проверяется внутри `fetch_source_task`). Тесты:
-  `tests/test_cron.py`, `tests/test_scheduler.py`.
-- **Уточнения по ревью**: `/metrics` закрыт `X-Internal-Token` (агрегаты
-  не для публичного доступа); порог CB вынесен в env
-  (`SOURCE_CB_ERROR_STREAK`, по умолчанию 5); дедуп алертов с эскалацией —
-  повторные глушатся экспоненциально (30 мин → 1 ч → 2 ч, cap 2 ч).
-- **Продуктовая аналитика (P1-7)**: таблица `analytics_events`
-  (миграция `0004`) + `app/services/analytics.py` — `track()` по принципу
-  alerting: ошибка записи не ломает бизнес-поток. Хуки: `user_registered`
-  (первый upsert, source: bot/miniapp), `search_completed` (только поиск
-  с фильтрами, не просмотр ленты; results/filters), `dialog_message`
-  (`/dialog/message`), `subscription_activated` (`/payments/success`,
-  tier/days/stars, только первая активация — идемпотентность сохранена).
-  `lead_created` зарезервирован (эндпоинта лидов ещё нет). Воронки
-  (активация/retention D1/D7/конверсии) — SQL-агрегаты поверх событий;
-  `events_24h` по именам — в `/metrics`. Тесты: `tests/test_analytics.py`.
-- **Лиды (воронка диалог → обращение)**: `POST /api/leads` (internal,
-  из бота/Mini App — user_id, listing_id?, source?, comment) пишет
-  событие `lead_created` → воронка search → dialog → lead замкнута;
-  `PATCH /api/leads/{id}` (internal) — статус new/in_progress/closed/
-  rejected + manager_id для менеджерского процесса. Таблица `leads`
-  была в `0001`. Явный `status="new"` при создании (колоночный
-  `default=` срабатывает только на flush — тот же класс бага, что
-  у `SourceHealth`). Тесты: `tests/test_leads.py`.
-- **Адаптер Китая Che168 (P2-10)**: `Che168HtmlAdapter` (kind='parser')
-  — SSR-парсинг `selectolax`/lexbor через общий `HttpClient` (ретраи,
-  429, прокси-ротация, MockTransport-инъекция). Нормализация: «23.80万»
-  → 238000 CNY, «5.2万公里» → 52000 км, марка иероглифами (丰田 → Toyota)
-  — справочник ~50 CJK-марок в `MAKE_MAP`, топливо/КПП поиском подстроки
-  (`detect_fuel`/`detect_transmission`, т.к. `normalize_fuel` — точный
-  lookup). Селекторы/путь списка — в `sources.config` (смена вёрстки
-  правится в БД без деплоя); `raw_payload` хранит HTML карточки для
-  перепарсинга; VIN=None (в Китае скрыт) → дедуп общий fuzzy.
-  `healthcheck` = 200 + контейнер списка (вёрстка сломана/капча → False
-  → алерты CB). Миграция `0005` вставляет источник `che168`
-  (schedule_cron `*/30 * * * *`, **enabled=false** до сверки с живым
-  HTML и проверки гео). Зависимость `selectolax` (в venv стоит 1.0.0 —
-  импорт из `selectolax.lexbor`, Modest deprecated). Тесты:
-  `tests/test_che168_adapter.py` (13).
-- **ParserDoctor — ИИ-ремонтник парсеров**: когда источник отвечает,
-  но парсер отдал 0 карточек (смена вёрстки), fetch-воркер (fire-and-forget)
-  зовёт `app/services/parser_doctor.py`: живой HTML → GLM предлагает
-  новые CSS-селекторы (card/title/price/link) → **локальная валидация**
-  на том же HTML (≥3 карточек, уникальные ID, цены у половины+) →
-  `doctor_mode` в `sources.config`: `auto` = применить к БД + reload
-  адаптера в реестре (`AdapterRegistry.reload_source`, новый метод) +
-  алерт «было/стало»; `suggest` = только алерт владельцу с проверенным
-  предложением; `off` (default) = не работает. Cooldown Redis 6 ч
-  (LLM платный), без него — дедуп алертов. Любой сбой (LLM недоступен,
-  мусорный JSON, невалидные селекторы, геоблок) не ломает фетч и не
-  меняет конфиг. Тесты: `tests/test_parser_doctor.py` (12). Включение:
-  `"doctor_mode": "auto"` в `sources.config` источника (GLM_API_KEY
-  уже используется диалогом).
-- **Прокси DataImpulse (опционально, «если глушить будут»)**: шлюз
-  резидентских прокси по официальному формату доков
-  `http://login__cr.cn;sessid.X:pass@gw.dataimpulse.com:823` (823 HTTPS /
-  824 SOCKS5; `cr.*` — страна выхода, `sessid.*` — sticky ~30 мин).
-  `GatewayProxyPool` в `app/adapters/common/proxy.py`: ротацию IP делает
-  провайдер (per request или детерминированное sessid-окно
-  `PROXY_DATAIMPULSE_STICKY_TTL_SEC`, 0 = ротация на каждый запрос);
-  `mark_bad` не выбрасывает шлюз навсегда — N ошибок соединения подряд
-  усыпляют его на cooldown, после которого `get()` возвращает None и
-  HttpClient ходит напрямую (обрыв шлюза не убивает парсинг). Фабрика
-  `build_proxy_pool(settings, redis)`: заданы user+pass → шлюз, иначе
-  статический `ProxyPool` из Redis. Подключается в `AdapterRegistry`
-  только к источникам с `capabilities.use_proxy=true` (che168 — да,
-  encar API — нет, платный трафик не жжётся); флаг добавлен в миграцию
-  `0005` (до `alembic upgrade head` — просто перезапустить миграции).
-  Включение: `PROXY_DATAIMPULSE_USER` + `PROXY_DATAIMPULSE_PASS`
-  (+ опц. `PROXY_DATAIMPULSE_GEO=cn`) в `.env`. Тесты:
-  `tests/test_proxy.py` (11) + 2 в `tests/test_registry.py`.
 
