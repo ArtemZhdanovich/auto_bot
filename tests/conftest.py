@@ -91,6 +91,7 @@ class FakeSession:
                 getattr(obj, "id", None) == pk
                 or getattr(obj, "telegram_id", None) == pk
                 or getattr(obj, "source_name", None) == pk
+                or getattr(obj, "name", None) == pk  # Source.name и др. строковые PK
             ):
                 return obj
         return None

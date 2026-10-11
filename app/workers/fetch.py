@@ -55,6 +55,7 @@ async def fetch_source_task(
         saved = in_source_dup = cross_dup = 0
         cursor: str | None = None
         pages = 0
+        parsed_total = 0
         try:
             while pages < max_pages:
                 started = time.perf_counter()
@@ -65,6 +66,7 @@ async def fetch_source_task(
                 saved += stats["saved"]
                 in_source_dup += stats["in_source_dup"]
                 cross_dup += stats["cross_dup"]
+                parsed_total += len(result.items)
 
                 await record_success(
                     session, source_name, latency_ms=latency_ms, fetched=len(result.items)
@@ -87,6 +89,11 @@ async def fetch_source_task(
         if saved:
             await enqueue_notify_scan(ctx, source_name)
 
+        if pages and parsed_total == 0:
+            # Источник отвечает, но карточек 0 — вероятнее всего сменилась
+            # вёрстка. Зовём ИИ-ремонтника (fire-and-forget, не ломает фетч).
+            _fire_doctor(ctx, source_name, adapter)
+
         return {
             "source": source_name,
             "pages": pages,
@@ -94,6 +101,24 @@ async def fetch_source_task(
             "in_source_dup": in_source_dup,
             "cross_dup": cross_dup,
         }
+
+
+def _fire_doctor(ctx: dict[str, Any], source_name: str, adapter: Any) -> None:
+    """Запуск ParserDoctor без блокировки фетча: ошибки — только в лог."""
+    try:
+        from app.services.alerting import fire
+        from app.services.parser_doctor import repair_parser
+
+        fire(
+            repair_parser(
+                source_name,
+                adapter,
+                registry=ctx.get("registry"),
+                redis=ctx.get("redis"),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("parser_doctor_spawn_failed: %s", exc)
 
 
 async def schedule_fetch_due(ctx: dict[str, Any]) -> dict[str, Any]:

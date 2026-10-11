@@ -48,25 +48,44 @@ class AdapterRegistry:
 
         self._cache.clear()
         for row in rows:
-            cls = ADAPTER_CLASSES.get(row.adapter_class)
-            if cls is None:
-                logger.error(
-                    "adapter_class_not_found: name=%s cls=%s",
-                    row.name,
-                    row.adapter_class,
-                )
-                continue
-            creds = None
-            if row.credentials_ref:
-                creds = await self._secrets.get(row.credentials_ref)
-            self._cache[row.name] = cls(
-                source_name=row.name,
-                config=row.config or {},
-                credentials=creds,
-                rate_limit=row.rate_limit_per_min,
-                timeout=row.timeout_sec,
-                capabilities=row.capabilities or {},
+            try:
+                self._cache[row.name] = await self._build(row)
+            except KeyError as exc:
+                logger.error("%s", exc)
+
+    async def _build(self, row: Source) -> BaseApiAdapter:
+        cls = ADAPTER_CLASSES.get(row.adapter_class)
+        if cls is None:
+            raise KeyError(
+                f"adapter_class_not_found: name={row.name} cls={row.adapter_class}"
             )
+        creds = None
+        if row.credentials_ref:
+            creds = await self._secrets.get(row.credentials_ref)
+        return cls(
+            source_name=row.name,
+            config=row.config or {},
+            credentials=creds,
+            rate_limit=row.rate_limit_per_min,
+            timeout=row.timeout_sec,
+            capabilities=row.capabilities or {},
+        )
+
+    async def reload_source(self, name: str) -> BaseApiAdapter | None:
+        """Пересобрать один адаптер из БД (после смены sources.config).
+
+        Используется ParserDoctor: repaired-конфиг подхватывается без
+        рестарта воркера. Источник, не найденный в БД, удаляется из кэша.
+        """
+        async with self._session_factory() as session:
+            row = await session.get(Source, name)
+        if row is None or not row.enabled:
+            self._cache.pop(name, None)
+            return None
+        adapter = await self._build(row)
+        self._cache[name] = adapter
+        return adapter
+
 
     def get(self, name: str) -> BaseApiAdapter:
         if name not in self._cache:

@@ -384,4 +384,18 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   HTML и проверки гео). Зависимость `selectolax` (в venv стоит 1.0.0 —
   импорт из `selectolax.lexbor`, Modest deprecated). Тесты:
   `tests/test_che168_adapter.py` (13).
+- **ParserDoctor — ИИ-ремонтник парсеров**: когда источник отвечает,
+  но парсер отдал 0 карточек (смена вёрстки), fetch-воркер (fire-and-forget)
+  зовёт `app/services/parser_doctor.py`: живой HTML → GLM предлагает
+  новые CSS-селекторы (card/title/price/link) → **локальная валидация**
+  на том же HTML (≥3 карточек, уникальные ID, цены у половины+) →
+  `doctor_mode` в `sources.config`: `auto` = применить к БД + reload
+  адаптера в реестре (`AdapterRegistry.reload_source`, новый метод) +
+  алерт «было/стало»; `suggest` = только алерт владельцу с проверенным
+  предложением; `off` (default) = не работает. Cooldown Redis 6 ч
+  (LLM платный), без него — дедуп алертов. Любой сбой (LLM недоступен,
+  мусорный JSON, невалидные селекторы, геоблок) не ломает фетч и не
+  меняет конфиг. Тесты: `tests/test_parser_doctor.py` (12). Включение:
+  `"doctor_mode": "auto"` в `sources.config` источника (GLM_API_KEY
+  уже используется диалогом).
 
