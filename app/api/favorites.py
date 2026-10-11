@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.core.deps import CurrentUserDep, SessionDep
-from app.db.models import Favorite, Listing
+from app.db.models import Favorite, Listing, ListingPriceHistory
 from app.schemas.listing import ListingOut
 
 router = APIRouter(prefix="/api", tags=["favorites"])
@@ -19,7 +19,27 @@ async def list_favorites(user: CurrentUserDep, session: SessionDep) -> list[List
         .where(Favorite.user_id == user.telegram_id)
         .order_by(Favorite.created_at.desc())
     )
-    return [ListingOut.model_validate(item) for item in result.scalars().all()]
+    listings = result.scalars().all()
+    out = [ListingOut.model_validate(item) for item in listings]
+    # Бейдж «цена снизилась»: первая точка истории по каждому объявлению —
+    # одним батч-запросом (вместо N запросов на карточку)
+    ids = [item.id for item in listings]
+    if ids:
+        history = await session.execute(
+            select(ListingPriceHistory.listing_id, ListingPriceHistory.price)
+            .where(ListingPriceHistory.listing_id.in_(ids))
+            .order_by(
+                ListingPriceHistory.listing_id,
+                ListingPriceHistory.recorded_at,
+                ListingPriceHistory.id,
+            )
+        )
+        first_price: dict[int, float] = {}
+        for row in history.all():
+            first_price.setdefault(row.listing_id, row.price)
+        for item in out:
+            item.first_price = first_price.get(item.id)
+    return out
 
 
 @router.get("/favorites/{listing_id}")

@@ -246,8 +246,21 @@ async def test_favorite_unknown_listing_404(client):
 
 @pytest.mark.asyncio
 async def test_list_favorites(client):
+    """Список избранного + first_price для бейджа «цена снизилась» (фаза 4)."""
     http, session = client
-    session.set_result([_listing(1), _listing(2)])
+    now = datetime.now(UTC)
+    session.set_results(
+        [
+            [_listing(1), _listing(2)],
+            [  # история цен: у №1 цена снизилась (первая точка 18000)
+                SimpleNamespace(listing_id=1, price=18000.0, recorded_at=now),
+                SimpleNamespace(listing_id=1, price=17000.0, recorded_at=now),
+            ],
+        ]
+    )
     resp = await http.get("/api/favorites")
     assert resp.status_code == 200
-    assert [item["id"] for item in resp.json()] == [1, 2]
+    body = resp.json()
+    assert [item["id"] for item in body] == [1, 2]
+    assert body[0]["first_price"] == 18000.0
+    assert body[1]["first_price"] is None

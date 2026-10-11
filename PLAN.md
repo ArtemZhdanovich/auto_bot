@@ -45,7 +45,7 @@
 | 1 | Миграция `0009_listing_tracking` + ORM | 1 день | — |
 | 2 | `compute_content_hash` + upsert `save_listings` (CTE) | 2 дня | фаза 1 |
 | 3 | ✅ Stale-cron (с проверкой CB) + уведомления price_drop/gone/returned, `sent_log.kind` | 2–3 дня | фаза 2 |
-| 4 | История цен в UI (карточка, бейджи избранного) | 1 день | фаза 2 |
+| 4 | ✅ История цен в UI (карточка, бейджи избранного) | 1 день | фаза 2 |
 | 5 | Перевод: `0011_translations`, title-only, NLLB | 3–4 дня | фаза 2 |
 | 6 | `raw_payload` → S3 (MinIO) + retention-крон | 1–2 дня | — |
 | 7 | Партиционирование `listing_price_history` (не `listings`!) | отложить | миллионы строк |

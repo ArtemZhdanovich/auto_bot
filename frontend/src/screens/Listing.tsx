@@ -85,6 +85,31 @@ export function ListingScreen() {
         <Cell after={listing.source}>Источник</Cell>
       </Section>
 
+      {/* История цен (PLAN.md, фаза 4): точки listing_price_history, новые сверху */}
+      {listing.price_history && listing.price_history.length > 1 && (
+        <Section header="История цен">
+          {[...listing.price_history].reverse().map((p, i) => (
+            <Cell
+              key={`${p.recorded_at}-${i}`}
+              after={
+                <b>
+                  {p.price.toLocaleString("ru")} {p.currency ?? ""}
+                </b>
+              }
+            >
+              {new Date(p.recorded_at).toLocaleDateString("ru")}
+              {i === 0 ? " · текущая" : ""}
+            </Cell>
+          ))}
+        </Section>
+      )}
+      {listing.is_active === false && (
+        <Placeholder
+          header="🔴 Исчезло с продажи"
+          description="Объявления больше нет на источнике"
+        />
+      )}
+
       <Button
         size="l"
         mode={favorited ? "filled" : "outline"}

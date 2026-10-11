@@ -83,9 +83,18 @@ class FakeSession:
         self.committed = False
         self.deleted: list[Any] = []
         self._rows: list[Any] = []
+        self._row_queue: list[list[Any]] = []
 
     def set_result(self, rows: list[Any]) -> None:
+        """Один результат для всех последующих execute()."""
         self._rows = rows
+        self._row_queue = []
+
+    def set_results(self, groups: list[list[Any]]) -> None:
+        """Результаты на несколько последовательных execute()
+        (последняя группа — на все остальные)."""
+        self._row_queue = [list(group) for group in groups]
+        self._rows = groups[-1] if groups else []
 
     def add(self, obj: Any) -> None:
         # Имитация серверных дефолтов БД (после flush появились бы id/created_at)
@@ -109,7 +118,7 @@ class FakeSession:
 
     async def execute(self, stmt: Any) -> Any:
         self.executed.append(stmt)
-        rows = self._rows
+        rows = self._row_queue.pop(0) if self._row_queue else self._rows
 
         class _Result:
             def scalars(self) -> "_Result":

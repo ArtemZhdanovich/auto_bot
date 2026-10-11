@@ -46,6 +46,13 @@ export interface UserFilter {
   updated_at: string | null;
 }
 
+/** Точка истории цен (GET /api/listings/{id}, PLAN.md фаза 4). */
+export interface PricePoint {
+  price: number;
+  currency: string | null;
+  recorded_at: string;
+}
+
 export interface Listing {
   id: number;
   source: string;
@@ -60,6 +67,13 @@ export interface Listing {
   vin: string | null;
   images: string[];
   parsed_at: string;
+  /** Отслеживание (PLAN.md, фаза 4) */
+  is_active: boolean;
+  first_seen_at: string | null;
+  /** Первая точка истории цен — для бейджа «цена снизилась» (избранное) */
+  first_price: number | null;
+  /** Заполнена только в карточке GET /api/listings/{id} */
+  price_history: PricePoint[] | null;
 }
 
 export interface ListingList {

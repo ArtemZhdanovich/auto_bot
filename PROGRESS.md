@@ -1,7 +1,7 @@
 
 # Auto Selection — PROGRESS
 
-## 30. Отслеживание объявлений: наличие, история цен, статусные уведомления (фазы 1-3)
+## 30. Отслеживание объявлений: наличие, история цен, статусные уведомления (фазы 1-4)
 
 - **Миграция `0009_listing_tracking`**: `content_hash`, `is_active`,
   `first_seen_at`/`last_seen_at` (бэкфилл из `parsed_at`), `disappeared_at`/
@@ -19,7 +19,13 @@
   уведомления `listing_status_scan` → `send_listing_status`
   (price_drop/gone/returned; аудитория — получатели из sent_log; rate limit,
   тихие часы, антидубль по kind).
-- Тесты: **284 passed** (+8 к 276), ruff чист, `alembic heads` → `0010`.
+- **Фаза 4**: история цен в UI — `PricePointOut`, в `ListingOut` добавлены
+  `is_active`/`first_seen_at`/`first_price`/`price_history`; карточка
+  `GET /api/listings/{id}` отдаёт `price_history` (ASC; в ленте — нет, иначе N+1),
+  `GET /api/favorites` — `first_price` одним батч-запросом. Mini App: секция
+  «История цен» на экране объявления, бейджи «⬇️ −N%» / «🔴 Исчезло» на карточке
+  и «⬇️ (было X)» / «🔴» в избранном.
+- Тесты: **285 passed** (+1 к 284), ruff чист, `alembic heads` → `0010`.
 
 ## 29. OpenAI выпилен + ParserDoctor: триаж причин падения источника
 

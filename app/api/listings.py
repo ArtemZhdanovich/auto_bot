@@ -4,8 +4,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from app.core.deps import SessionDep
-from app.db.models import Listing
-from app.schemas.listing import ListingListOut, ListingOut
+from app.db.models import Listing, ListingPriceHistory
+from app.schemas.listing import ListingListOut, ListingOut, PricePointOut
 from app.services.analytics import EVENT_SEARCH_COMPLETED, track
 
 router = APIRouter(prefix="/api/listings", tags=["listings"])
@@ -79,4 +79,19 @@ async def get_listing(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found"
         )
-    return ListingOut.model_validate(listing)
+    out = ListingOut.model_validate(listing)
+    # История цен — только в карточке (в ленте был бы N+1); хронологический порядок
+    result = await session.execute(
+        select(
+            ListingPriceHistory.price,
+            ListingPriceHistory.currency,
+            ListingPriceHistory.recorded_at,
+        )
+        .where(ListingPriceHistory.listing_id == listing_id)
+        .order_by(ListingPriceHistory.recorded_at, ListingPriceHistory.id)
+    )
+    out.price_history = [
+        PricePointOut.model_validate(row, from_attributes=True)
+        for row in result.all()
+    ]
+    return out

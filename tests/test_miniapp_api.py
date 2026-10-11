@@ -202,6 +202,8 @@ async def test_list_listings(client):
     assert body["total"] == 2
     assert [i["id"] for i in body["items"]] == [1, 2]
     assert body["items"][0]["make"] == "BMW"
+    # Лента без истории цен (только карточка, иначе N+1)
+    assert body["items"][0]["price_history"] is None
 
 
 @pytest.mark.asyncio
@@ -218,3 +220,43 @@ async def test_get_listing_404(client):
     http, _ = client
     resp = await http.get("/api/listings/999")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_listing_with_price_history(client):
+    """Карточка включает price_history (хронологический порядок), PLAN.md фаза 4."""
+    from app.db.models import Listing
+
+    http, session = client
+    session.add(
+        Listing(
+            id=5,
+            source="encar",
+            source_id="s-5",
+            url="https://encar.com/x",
+            make="BMW",
+            model="520i",
+            year=2018,
+            price=17000.0,
+            currency="USD",
+            images=[],
+            parsed_at=datetime.now(UTC),
+            is_active=True,  # серверный дефолт БД; до flush в ORM-объекте None
+        )
+    )
+    now = datetime.now(UTC)
+    session.set_results(
+        [
+            [
+                SimpleNamespace(price=18000.0, currency="USD", recorded_at=now),
+                SimpleNamespace(price=17500.0, currency="USD", recorded_at=now),
+                SimpleNamespace(price=17000.0, currency="USD", recorded_at=now),
+            ]
+        ]
+    )
+    resp = await http.get("/api/listings/5")
+    assert resp.status_code == 200
+    body = resp.json()
+    history = body["price_history"]
+    assert [p["price"] for p in history] == [18000.0, 17500.0, 17000.0]
+    assert body["price"] == 17000.0

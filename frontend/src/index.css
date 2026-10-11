@@ -102,6 +102,22 @@ main {
   color: #fff;
   font-size: var(--font-xs);
 }
+.listing-card__badge {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+.listing-card__badge--drop {
+  background: rgba(36, 158, 96, 0.9);
+}
+.listing-card__badge--gone {
+  background: rgba(0, 0, 0, 0.45);
+}
 .listing-card__body {
   padding: var(--space-3) var(--space-4) var(--space-4);
   display: flex;

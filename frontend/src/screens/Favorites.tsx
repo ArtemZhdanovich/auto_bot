@@ -50,27 +50,34 @@ export function FavoritesScreen() {
   return (
     <List>
       <Section header={`Избранное: ${items.length}`}>
-        {items.map((l) => (
-          <Cell
-            key={l.id}
-            subtitle={`${l.year ?? "—"} · ${l.price?.toLocaleString("ru") ?? "—"} ${l.currency ?? ""} · ${l.mileage_km?.toLocaleString("ru") ?? "—"} км`}
-            onClick={() => navigate(`/listing/${l.id}`)}
-            after={
-              <Button
-                mode="plain"
-                size="s"
-                onClick={(e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  unfavorite(l.id);
-                }}
-              >
-                ✕
-              </Button>
-            }
-          >
-            {`${l.make ?? ""} ${l.model ?? ""}`.trim() || "Объявление"}
-          </Cell>
-        ))}
+        {items.map((l) => {
+          // Бейджи отслеживания (PLAN.md, фаза 4): ⬇️ цена снизилась, 🔴 исчезло
+          const dropped =
+            l.first_price != null && l.price != null && l.price < l.first_price;
+          const badge = l.is_active === false ? "🔴 " : dropped ? "⬇️ " : "";
+          const oldPrice = dropped && l.first_price ? ` (было ${l.first_price.toLocaleString("ru")})` : "";
+          return (
+            <Cell
+              key={l.id}
+              subtitle={`${l.year ?? "—"} · ${l.price?.toLocaleString("ru") ?? "—"} ${l.currency ?? ""}${oldPrice} · ${l.mileage_km?.toLocaleString("ru") ?? "—"} км`}
+              onClick={() => navigate(`/listing/${l.id}`)}
+              after={
+                <Button
+                  mode="plain"
+                  size="s"
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    unfavorite(l.id);
+                  }}
+                >
+                  ✕
+                </Button>
+              }
+            >
+              {`${badge}${l.make ?? ""} ${l.model ?? ""}`.trim() || "Объявление"}
+            </Cell>
+          );
+        })}
       </Section>
     </List>
   );

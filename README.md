@@ -128,7 +128,10 @@ AI-агент отвечает на фактические вопросы (ра�
   - `GET/POST/PATCH/DELETE /api/filters[/{id}]` — CRUD фильтров (лимит 20, criteria
     валидируется `SearchCriteria`);
   - `GET /api/listings` — лента с фильтрами make/model/year/price/mileage/source,
-    пагинация `limit/offset` (≤50), новые сверху; `GET /api/listings/{id}` — карточка.
+    пагинация `limit/offset` (≤50), новые сверху; `GET /api/listings/{id}` — карточка
+    с историей цен (`price_history` из `listing_price_history`, PLAN.md фаза 4);
+    `GET /api/favorites` отдаёт `first_price` (первая точка истории) — бейдж
+    «⬇️ цена снизилась», а `is_active=false` — бейдж «🔴 исчезло».
 - **Dev-сервер**: `npm run dev` на :8080, `/api` проксируется на :8000.
 - **Compose**: сервис `miniapp` (Vite build → nginx, `/api` → backend).
 
@@ -209,6 +212,17 @@ AI-агент отвечает на фактические вопросы (ра�
   (аудитория — `sent_log`); действуют те же rate limit, тихие часы и антидубли.
 - `price_drop` / `returned` ставятся fetch-воркером сразу после парсинга
   (id-списки `price_changed_ids` / `reactivated_ids` из `save_listings`).
+
+### История цен в UI (PLAN.md, фаза 4)
+
+- **Карточка** (`GET /api/listings/{id}`): `price_history` — точки
+  `listing_price_history` по возрастанию `recorded_at`; в Mini App — секция
+  «История цен» (новые сверху, текущая помечена) и плашка «🔴 Исчезло с продажи»
+  при `is_active=false`. В ленте истории нет (иначе N+1).
+- **Бейджи избранного** (`GET /api/favorites`): `first_price` — первая точка
+  истории одним батч-запросом; клиент показывает «⬇️ −N%» на карточке и
+  «⬇️ (было X)» в списке избранного при `price < first_price`, «🔴 Исчезло»
+  при `is_active=false`.
 
 ## Этап 3: AI-диалоговый агент
 

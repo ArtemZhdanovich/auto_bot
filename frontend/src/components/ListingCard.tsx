@@ -20,6 +20,16 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
   const [fav, setFav] = useState(favorited);
   const [photoFailed, setPhotoFailed] = useState(false);
   const photo = listing.images[0];
+  // Бейджи отслеживания (PLAN.md, фаза 4): снижение цены и исчезновение
+  const dropped =
+    listing.first_price != null &&
+    listing.price != null &&
+    listing.price < listing.first_price;
+  const dropPct =
+    dropped && listing.first_price
+      ? Math.round((1 - (listing.price as number) / listing.first_price) * 100)
+      : 0;
+  const gone = listing.is_active === false;
 
   const onOpen = useCallback(() => {
     haptic();
@@ -76,6 +86,11 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
         <button className="listing-card__fav" onClick={(e) => void onToggleFav(e)} aria-label="В избранное">
           <Heart size={18} fill={fav ? "currentColor" : "none"} />
         </button>
+        {gone ? (
+          <span className="listing-card__badge listing-card__badge--gone">🔴 Исчезло</span>
+        ) : dropped ? (
+          <span className="listing-card__badge listing-card__badge--drop">⬇️ −{dropPct}%</span>
+        ) : null}
         {listing.images.length > 1 && (
           <span className="listing-card__photos-count">{listing.images.length}</span>
         )}

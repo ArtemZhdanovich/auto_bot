@@ -63,6 +63,14 @@ class FetchResult(BaseModel):
     source_meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class PricePointOut(BaseModel):
+    """Точка истории цен (listing_price_history, PLAN.md фаза 4)."""
+
+    price: float
+    currency: Optional[str] = None
+    recorded_at: datetime
+
+
 class ListingOut(BaseModel):
     """Объявление для ленты/карточки Mini App (этап 5, ТЗ п. 9.2.4–9.2.5)."""
 
@@ -81,6 +89,14 @@ class ListingOut(BaseModel):
     vin: Optional[str] = None
     images: list[Any] = Field(default_factory=list)
     parsed_at: datetime
+
+    # Отслеживание (PLAN.md, фаза 4): is_active/first_seen_at приходят из ORM;
+    # price_history дозаполняет только карточка (в ленте — N+1),
+    # first_price — список избранного (бейдж «цена снизилась»).
+    is_active: bool = True
+    first_seen_at: Optional[datetime] = None
+    first_price: Optional[float] = None
+    price_history: Optional[list[PricePointOut]] = None
 
 
 class ListingListOut(BaseModel):
