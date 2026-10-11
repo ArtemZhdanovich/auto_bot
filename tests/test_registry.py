@@ -34,6 +34,13 @@ class FakeSession:
     async def execute(self, stmt: Any) -> FakeResult:
         return FakeResult(self._rows)
 
+    async def get(self, entity: Any, pk: Any) -> Any:
+        """Поддержка reload_source (session.get(Source, name))."""
+        for row in self._rows:
+            if getattr(row, "name", None) == pk:
+                return row
+        return None
+
 
 class FakeSecretStore:
     def __init__(self, secrets: dict[str, str] | None = None) -> None:
@@ -111,4 +118,40 @@ async def test_registry_reload_replaces_cache():
     # reload закрыл старые клиенты, новые — рабочие
     assert isinstance(first.http, HttpClient)
     assert isinstance(second.http, HttpClient)
+    await registry.aclose()
+
+
+async def test_registry_proxy_pool_only_for_use_proxy_sources():
+    """Шлюз достаётся только источникам с capabilities.use_proxy=true."""
+
+    class FakePool:
+        pass
+
+    rows = [
+        _source_row(name="che168", adapter_class="Che168HtmlAdapter",
+                    capabilities={"use_proxy": True}),
+        _source_row(name="encar", capabilities={"country": "KR"}),  # без флага
+    ]
+    registry = AdapterRegistry(lambda: FakeSession(rows), proxy_pool=FakePool())
+    await registry.load()
+
+    che = registry.get("che168")
+    assert che.http._proxy_pool is not None  # ходит через шлюз
+
+    enc = registry.get("encar")
+    assert enc.http._proxy_pool is None  # платный трафик не жжёт
+    await registry.aclose()
+
+
+async def test_registry_reload_source_picks_up_new_config():
+    row = _source_row(name="che168", adapter_class="Che168HtmlAdapter",
+                      kind="parser", config={"card_selector": "li.old"})
+    session = FakeSession([row])
+    registry = AdapterRegistry(lambda: session)
+    await registry.load()
+
+    row.config = {"card_selector": "div.new"}  # «врач» обновил конфиг в БД
+    adapter = await registry.reload_source("che168")
+    assert adapter is registry.get("che168")
+    assert adapter.config["card_selector"] == "div.new"
     await registry.aclose()

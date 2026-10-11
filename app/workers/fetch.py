@@ -17,6 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 
 from app.adapters.registry import AdapterRegistry
+from app.adapters.common.proxy import build_proxy_pool
 from app.core.config import get_settings
 from app.db.models import Source
 from app.db.session import session_factory
@@ -175,10 +176,15 @@ async def enqueue_notify_scan(ctx: dict[str, Any], source_name: str) -> bool:
 
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
-    registry = AdapterRegistry(session_factory)
+    redis = Redis.from_url(settings.redis_url)
+    # Прокси-пул: DataImpulse-шлюз (если настроен) или статический пул из Redis.
+    # Подключается только к источникам с capabilities.use_proxy=true.
+    registry = AdapterRegistry(
+        session_factory, proxy_pool=build_proxy_pool(settings, redis)
+    )
     await registry.load()
     ctx["registry"] = registry
-    ctx["redis"] = Redis.from_url(settings.redis_url)
+    ctx["redis"] = redis
     logger.info("fetch_worker_started: sources=%s", [a.source_name for a in registry.all()])
 
 

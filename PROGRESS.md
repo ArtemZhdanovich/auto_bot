@@ -398,4 +398,22 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   меняет конфиг. Тесты: `tests/test_parser_doctor.py` (12). Включение:
   `"doctor_mode": "auto"` в `sources.config` источника (GLM_API_KEY
   уже используется диалогом).
+- **Прокси DataImpulse (опционально, «если глушить будут»)**: шлюз
+  резидентских прокси по официальному формату доков
+  `http://login__cr.cn;sessid.X:pass@gw.dataimpulse.com:823` (823 HTTPS /
+  824 SOCKS5; `cr.*` — страна выхода, `sessid.*` — sticky ~30 мин).
+  `GatewayProxyPool` в `app/adapters/common/proxy.py`: ротацию IP делает
+  провайдер (per request или детерминированное sessid-окно
+  `PROXY_DATAIMPULSE_STICKY_TTL_SEC`, 0 = ротация на каждый запрос);
+  `mark_bad` не выбрасывает шлюз навсегда — N ошибок соединения подряд
+  усыпляют его на cooldown, после которого `get()` возвращает None и
+  HttpClient ходит напрямую (обрыв шлюза не убивает парсинг). Фабрика
+  `build_proxy_pool(settings, redis)`: заданы user+pass → шлюз, иначе
+  статический `ProxyPool` из Redis. Подключается в `AdapterRegistry`
+  только к источникам с `capabilities.use_proxy=true` (che168 — да,
+  encar API — нет, платный трафик не жжётся); флаг добавлен в миграцию
+  `0005` (до `alembic upgrade head` — просто перезапустить миграции).
+  Включение: `PROXY_DATAIMPULSE_USER` + `PROXY_DATAIMPULSE_PASS`
+  (+ опц. `PROXY_DATAIMPULSE_GEO=cn`) в `.env`. Тесты:
+  `tests/test_proxy.py` (11) + 2 в `tests/test_registry.py`.
 

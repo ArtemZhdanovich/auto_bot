@@ -33,9 +33,11 @@ class AdapterRegistry:
         self,
         session_factory,
         secret_store: Any | None = None,
+        proxy_pool: Any | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._secrets = secret_store or EnvSecretStore()
+        self._proxy_pool = proxy_pool
         self._cache: dict[str, BaseApiAdapter] = {}
 
     async def load(self) -> None:
@@ -62,6 +64,15 @@ class AdapterRegistry:
         creds = None
         if row.credentials_ref:
             creds = await self._secrets.get(row.credentials_ref)
+        # Платный шлюз-прокси — только для источников, помеченных use_proxy
+        # (API-источники без банов ходят напрямую и трафик не жгут).
+        http_client = None
+        if self._proxy_pool is not None and (row.capabilities or {}).get("use_proxy"):
+            from app.adapters.common.http import HttpClient
+
+            http_client = HttpClient(
+                proxy_pool=self._proxy_pool, timeout=row.timeout_sec
+            )
         return cls(
             source_name=row.name,
             config=row.config or {},
@@ -69,6 +80,7 @@ class AdapterRegistry:
             rate_limit=row.rate_limit_per_min,
             timeout=row.timeout_sec,
             capabilities=row.capabilities or {},
+            http_client=http_client,
         )
 
     async def reload_source(self, name: str) -> BaseApiAdapter | None:

@@ -87,6 +87,19 @@ class Settings(BaseSettings):
     digest_max_cards: int = 5  # 3–5 карточек в дайджесте
     notify_quiet_hours_default: str | None = None  # глобальные тихие часы "23:00-08:00"
 
+    # Прокси DataImpulse (опционально): шлюз для парсеров, если источники глушат.
+    # Официальный формат: http://login__cr.cn;sessid.X:password@gw.dataimpulse.com:823
+    # Задаёте user+pass → источники с capabilities.use_proxy=true ходят через шлюз.
+    proxy_dataimpulse_user: str | None = None
+    proxy_dataimpulse_pass: str | None = None
+    proxy_dataimpulse_host: str = "gw.dataimpulse.com"
+    proxy_dataimpulse_port: int = 823  # 823 = HTTPS, 824 = SOCKS5
+    proxy_dataimpulse_geo: str | None = None  # cr.*: "cn" / "cn,de" (None = весь мир)
+    # 0 = ротация IP на каждый запрос (default у провайдера); иначе sticky-окно
+    proxy_dataimpulse_sticky_ttl_sec: int = 1800
+    proxy_dataimpulse_fail_threshold: int = 5  # ConnectError подряд → пауза шлюза
+    proxy_dataimpulse_fail_cooldown_sec: int = 300  # пауза: ходим напрямую
+
     # Alerting / мониторинг (этап 8, ТЗ п. 10)
     alerts_enabled: bool = True  # алерты в Telegram на ADMIN_CHAT_ID
     alert_dedup_ttl_sec: int = 1800  # базовое подавление повторов alert:{key}

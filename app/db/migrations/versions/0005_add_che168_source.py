@@ -38,7 +38,7 @@ CONFIG = (
     '"title_selector": "h4", "price_selector": ".price", '
     '"link_selector": "a", "max_pages": 5}'
 )
-CAPABILITIES = '{"fuel_from_text": true, "transmission_from_text": true}'
+CAPABILITIES = '{"fuel_from_text": true, "transmission_from_text": true, "use_proxy": true}'
 
 
 def upgrade() -> None:
