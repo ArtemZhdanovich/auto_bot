@@ -269,3 +269,24 @@ class PartnerApiKey(Base):
     )
     rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AdminAction(Base):
+    """Audit log админ-действий (UI/UX ТЗ §3.9, миграция 0008).
+
+    Пишем кто (actor), что (action), над чем (entity/entity_id), payload и
+    результат. Секреты (API-ключи) в payload НЕ попадают.
+    """
+
+    __tablename__ = "admin_actions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    actor: Mapped[str] = mapped_column(Text, default="admin")
+    action: Mapped[str] = mapped_column(Text, nullable=False)  # partner.create / partner.rotate_key / ...
+    entity: Mapped[str | None] = mapped_column(Text)  # "partner" / "source" / "lead" ...
+    entity_id: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    result: Mapped[str | None] = mapped_column(Text)  # "ok" / текст ошибки
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

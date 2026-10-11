@@ -17,6 +17,7 @@ import {
   type AdminPartner,
 } from "./api";
 import { AdminLeads, Partners, Sources } from "./AdminScreens";
+import { ChatWidget } from "./ChatWidget";
 import { ErrorState } from "../ui/States";
 
 function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
@@ -125,6 +126,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         </button>
       </nav>
       <main className="pa-main">{children}</main>
+      <ChatWidget />
     </div>
   );
 }

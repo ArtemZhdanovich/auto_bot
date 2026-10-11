@@ -28,6 +28,7 @@ from app.schemas.partner import (
     PartnerWithStatsOut,
 )
 from app.services import partners
+from app.services.admin_audit import log_admin_action
 from app.services.analytics import EVENT_LEAD_FEEDBACK, EVENT_LEAD_SOLD, track
 
 # --- Admin: /api/admin/partners (X-Internal-Token) ---------------------------
@@ -47,6 +48,13 @@ async def create_partner(body: PartnerCreateIn, session: SessionDep) -> PartnerK
         contact=body.contact,
         plan=body.plan,
         daily_quota=body.daily_quota,
+    )
+    await log_admin_action(
+        session,
+        action="partner.create",
+        entity="partner",
+        entity_id=str(account.id),
+        payload={"name": account.name, "plan": account.plan, "daily_quota": account.daily_quota},
     )
     return PartnerKeyOut(
         partner_id=account.id, key=raw_key, key_prefix=raw_key[:10] + "…"
@@ -86,6 +94,13 @@ async def _get_account(session: SessionDep, partner_id: int) -> PartnerAccount:
 async def rotate_partner_key(partner_id: int, session: SessionDep) -> PartnerKeyOut:
     account = await _get_account(session, partner_id)
     raw_key = await partners.rotate_key(session, account)
+    await log_admin_action(
+        session,
+        action="partner.rotate_key",
+        entity="partner",
+        entity_id=str(account.id),
+        payload={"key_prefix": raw_key[:10] + "…"},  # сам ключ в audit НЕ пишем
+    )
     return PartnerKeyOut(
         partner_id=account.id, key=raw_key, key_prefix=raw_key[:10] + "…"
     )
