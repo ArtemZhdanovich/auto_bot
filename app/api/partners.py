@@ -17,6 +17,9 @@ from app.core.deps_partner import (
 )
 from app.db.models import PartnerAccount
 from app.schemas.partner import (
+    BatchClaimIn,
+    BatchClaimOut,
+    BillingOut,
     ClaimOut,
     FeedbackIn,
     PartnerCreateIn,
@@ -26,6 +29,7 @@ from app.schemas.partner import (
     PartnerOut,
     PartnerUpdateIn,
     PartnerWithStatsOut,
+    PlanInfo,
 )
 from app.services import partners
 from app.services.admin_audit import log_admin_action
@@ -178,6 +182,63 @@ async def partner_leads(
         )
         for lead in leads
     ]
+
+
+@router.post("/leads/batch", response_model=BatchClaimOut)
+async def claim_leads_batch(
+    body: BatchClaimIn,
+    auth: PartnerAuthDep,
+    session: PartnerSessionDep,
+    redis: RedisDep,
+) -> BatchClaimOut:
+    """Забрать до N доступных лидов одной операцией (кнопка «Взять 3» в ЛК)."""
+    _, account = auth
+    await check_rate_limit(redis, account.id)
+    leads, reason = await partners.claim_batch(session, account, body.limit)
+    if reason == "quota_exceeded":
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Daily quota exceeded")
+    for lead in leads:
+        await track(
+            session,
+            lead.user_id,
+            EVENT_LEAD_SOLD,
+            {"lead_id": lead.id, "partner_id": account.id, "plan": account.plan,
+             "batch": True},
+        )
+    return BatchClaimOut(
+        claimed=[
+            ClaimOut(
+                lead_id=lead.id,
+                partner_id=account.id,
+                partner_status=lead.partner_status,
+                user_id=lead.user_id,
+                qualification=lead.qualification,
+                claimed_at=lead.claimed_at,
+            )
+            for lead in leads
+        ]
+    )
+
+
+@router.get("/billing", response_model=BillingOut)
+async def partner_billing(
+    auth: PartnerAuthDep,
+    session: PartnerSessionDep,
+    redis: RedisDep,
+) -> BillingOut:
+    """Текущий план, расход квоты и каталог тарифов (ЛК «Биллинг», ТЗ §4.2)."""
+    _, account = auth
+    await check_rate_limit(redis, account.id)
+    used = await partners.claimed_today(session, account.id)
+    return BillingOut(
+        plan=account.plan,
+        daily_quota=account.daily_quota,
+        claimed_today=used,
+        quota_remaining=max(account.daily_quota - used, 0),
+        plans=[
+            PlanInfo(key=key, **data) for key, data in partners.PLAN_CATALOG.items()
+        ],
+    )
 
 
 @router.post("/leads/{lead_id}/claim", response_model=ClaimOut)

@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { PartnerApiError, papi, type PartnerLead, type PartnerMe } from "./api";
+import {
+  PartnerApiError,
+  papi,
+  type BatchClaimOut,
+  type BillingOut,
+  type PartnerLead,
+  type PartnerMe,
+} from "./api";
 import { useToast } from "../ui/Toast";
 import { EmptyState, ErrorState } from "../ui/States";
 
@@ -64,6 +71,7 @@ export function Pool({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState<number | null>(null);
+  const [claimingBatch, setClaimingBatch] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -108,9 +116,61 @@ export function Pool({
     }
   };
 
+  const claimBatch = async (limit: number) => {
+    setClaimingBatch(true);
+    try {
+      const res = await papi<BatchClaimOut>("/leads/batch", {
+        method: "POST",
+        body: JSON.stringify({ limit }),
+      });
+      if (res.claimed.length === 0) {
+        toast.show("Нет доступных лидов", { error: true });
+      } else {
+        toast.show(`✅ Забрано лидов: ${res.claimed.length} — контакты в «Моих лидах»`);
+      }
+      onClaimed();
+      const taken = new Set(res.claimed.map((c) => c.lead_id));
+      setLeads((prev) => prev.filter((l) => !taken.has(l.id)));
+    } catch (e) {
+      if (e instanceof PartnerApiError) {
+        if (e.status === 401) {
+          onUnauthorized();
+          return;
+        }
+        if (e.status === 429) {
+          toast.show("Дневная квота исчерпана — попробуйте завтра", { error: true });
+        } else {
+          toast.show(e.message, { error: true });
+        }
+      }
+    } finally {
+      setClaimingBatch(false);
+    }
+  };
+
   return (
     <>
       <h1 className="pa-page-title">Пул лидов</h1>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
+        <span style={{ color: "var(--text-secondary)", fontSize: 14 }}>
+          {leads.length} доступно
+        </span>
+        <button
+          className="btn btn--primary"
+          disabled={loading || !!error || claimingBatch || leads.length === 0}
+          onClick={() => void claimBatch(3)}
+        >
+          {claimingBatch ? "Забираю…" : "⚡ Взять 3"}
+        </button>
+      </div>
       {loading ? (
         <div className="panel">Загрузка…</div>
       ) : error ? (
@@ -304,6 +364,8 @@ export function ApiKeyScreen({ me }: { me: PartnerMe }) {
 GET  /api/partner/leads                  — пул доступных
 GET  /api/partner/leads?mine=true        — мои лиды
 POST /api/partner/leads/{id}/claim       — захват лида
+POST /api/partner/leads/batch            — захват до N лидов {"limit":3}
+GET  /api/partner/billing                — план, квота, тарифы
 POST /api/partner/leads/{id}/feedback    — фидбек (accepted/returned/junk/deal)`}
         </pre>
         <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
@@ -323,16 +385,107 @@ POST /api/partner/leads/{id}/feedback    — фидбек (accepted/returned/jun
   );
 }
 
-// --- Биллинг: заглушка (ТЗ §4.2, помечено [бэкенд]) ---
+// --- Биллинг (ТЗ §4.2): текущий план, расход квоты, каталог тарифов ---
 
-export function BillingStub() {
+export function Billing({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const [billing, setBilling] = useState<BillingOut | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    papi<BillingOut>("/billing")
+      .then(setBilling)
+      .catch((e) => {
+        if (e instanceof PartnerApiError && e.status === 401) onUnauthorized();
+        else setError((e as Error).message);
+      });
+  }, [onUnauthorized]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (error) return <ErrorState description={error} onRetry={load} />;
+  if (!billing) return <div className="panel">Загрузка…</div>;
+
+  const usedPct =
+    billing.daily_quota > 0
+      ? Math.min(100, Math.round((billing.claimed_today / billing.daily_quota) * 100))
+      : 0;
+
   return (
     <>
       <h1 className="pa-page-title">Биллинг</h1>
-      <EmptyState
-        title="Скоро"
-        description="Балансы и пополнение появятся в следующем обновлении"
-      />
+      <div className="panel">
+        <h3>Текущий план: {billing.plan}</h3>
+        <p style={{ fontSize: 14, color: "var(--text-secondary)", marginTop: 4 }}>
+          Оплата за лид (CPL): списание за каждый захваченный лид. Смена тарифа —
+          через вашего менеджера.
+        </p>
+        <div style={{ marginTop: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: 14,
+              marginBottom: 6,
+            }}
+          >
+            <span>
+              Сегодня: <b>{billing.claimed_today}</b> / {billing.daily_quota}
+            </span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              доступно {billing.quota_remaining}
+            </span>
+          </div>
+          <div
+            style={{
+              height: 8,
+              borderRadius: 4,
+              background: "var(--bg-secondary)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${usedPct}%`,
+                height: "100%",
+                background: "var(--accent)",
+              }}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="panel">
+        <h3>Тарифы</h3>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Тариф</th>
+              <th>Квота в день</th>
+              <th>Цена/мес</th>
+            </tr>
+          </thead>
+          <tbody>
+            {billing.plans.map((p) => (
+              <tr
+                key={p.key}
+                style={p.key === billing.plan ? { fontWeight: 600 } : undefined}
+              >
+                <td>
+                  {p.title}
+                  {p.key === billing.plan && (
+                    <span className="badge" style={{ marginLeft: 8 }}>
+                      текущий
+                    </span>
+                  )}
+                </td>
+                <td>{p.daily_quota} лидов</td>
+                <td>{p.price_usd} $</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }

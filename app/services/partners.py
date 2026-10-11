@@ -207,3 +207,50 @@ async def my_leads(
     )
     return list(result.scalars().all())
 
+
+async def claim_batch(
+    session: AsyncSession, account: PartnerAccount, limit: int = 3
+) -> tuple[list[Lead], str]:
+    """Забрать до N доступных лидов одной операцией (кнопка «Взять 3» в ЛК).
+
+    Учитывает остаток дневной квоты: берём min(limit, quota_remaining).
+    Возвращает (захваченные лиды, статус): ok | quota_exceeded.
+    """
+    used = await claimed_today(session, account.id)
+    remaining = account.daily_quota - used
+    if remaining <= 0:
+        return [], "quota_exceeded"
+    take = min(limit, remaining)
+    result = await session.execute(
+        select(Lead)
+        .where(
+            Lead.status == "new",
+            Lead.partner_id.is_(None),
+            Lead.qualification.is_not(None),
+        )
+        .order_by(Lead.id.desc())
+        .limit(take)
+    )
+    leads = list(result.scalars().all())
+    now = datetime.now(UTC)
+    for lead in leads:
+        lead.partner_id = account.id
+        lead.partner_status = "claimed"
+        lead.claimed_at = now
+        lead.updated_at = now
+    if leads:
+        await session.commit()
+        for lead in leads:
+            await session.refresh(lead)
+    return leads, "ok"
+
+
+# --- Биллинг: каталог тарифов CPL (значения квот — дефолты при создании) -------
+
+PLAN_CATALOG: dict[str, dict] = {
+    "starter": {"title": "Starter", "daily_quota": 5, "price_usd": 49},
+    "pro": {"title": "Pro", "daily_quota": 15, "price_usd": 149},
+    "salon": {"title": "Salon", "daily_quota": 40, "price_usd": 399},
+}
+
+

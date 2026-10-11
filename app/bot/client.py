@@ -89,6 +89,20 @@ class BackendClient:
             {"user_id": user_id, "notify_mode": notify_mode},
         )
 
+    async def quiet_hours(
+        self, user_id: int, value: str | None = None, *, clear: bool = False
+    ) -> dict | None:
+        """POST /api/notifications/settings — тихие часы для всех фильтров.
+
+        value="23:00-08:00" — установить; clear=True — сбросить.
+        """
+        payload: dict = {"user_id": user_id, "notify_mode": None}
+        if clear:
+            payload["quiet_hours_clear"] = True
+        elif value:
+            payload["quiet_hours"] = value
+        return await self._post("/api/notifications/settings", payload)
+
     async def _get(self, path: str) -> dict | None:
         """GET с internal-токеном. None — backend недоступен/ошибка."""
         try:

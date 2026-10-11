@@ -103,3 +103,37 @@ class FeedbackIn(BaseModel):
     """POST /api/partner/leads/{id}/feedback — статус качества лида."""
 
     status: PartnerStatus
+
+
+class BatchClaimIn(BaseModel):
+    """POST /api/partner/leads/batch — взять N лидов одной кнопкой."""
+
+    limit: int = Field(default=3, ge=1, le=10)
+
+
+class BatchClaimOut(BaseModel):
+    """Результат batch-claim: захваченные лиды (исчерпание квоты → 429)."""
+
+    claimed: list[ClaimOut]
+
+
+# --- Биллинг (тарифы CPL) -----------------------------------------------------
+
+
+class PlanInfo(BaseModel):
+    """Тариф из каталога (значения по умолчанию квоты; фактическая — у партнёра)."""
+
+    key: PartnerPlan
+    title: str
+    daily_quota: int
+    price_usd: int
+
+
+class BillingOut(BaseModel):
+    """GET /api/partner/billing — текущий план, расход квоты, каталог тарифов."""
+
+    plan: str
+    daily_quota: int
+    claimed_today: int
+    quota_remaining: int
+    plans: list[PlanInfo]

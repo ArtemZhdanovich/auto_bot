@@ -17,7 +17,7 @@ import {
 } from "./api";
 import {
   ApiKeyScreen,
-  BillingStub,
+  Billing,
   Dashboard,
   MyLeads,
   Pool,
@@ -202,7 +202,10 @@ export function PartnerApp() {
         />
         <Route path="/partner/leads" element={<MyLeads onUnauthorized={onUnauthorized} />} />
         <Route path="/partner/key" element={<ApiKeyScreen me={me} />} />
-        <Route path="/partner/billing" element={<BillingStub />} />
+        <Route
+          path="/partner/billing"
+          element={<Billing onUnauthorized={onUnauthorized} />}
+        />
         <Route path="*" element={<Navigate to="/partner" replace />} />
       </Routes>
     </Layout>

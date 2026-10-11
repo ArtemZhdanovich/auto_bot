@@ -22,21 +22,27 @@ router = APIRouter(
 
 class NotifySettingsIn(BaseModel):
     user_id: int
-    notify_mode: Literal["instant", "digest", "off"]
+    # None = не менять режим (только тихие часы)
+    notify_mode: Literal["instant", "digest", "off"] | None = None
     quiet_hours: str | None = None  # "23:00-08:00" или None
+    # Явно сбросить тихие часы (отличить от «не передано»)
+    quiet_hours_clear: bool = False
 
 
 @router.post("/settings")
 async def update_settings(payload: NotifySettingsIn, session: SessionDep) -> dict:
-    """Режим уведомлений применяется ко всем фильтрам пользователя."""
+    """Режим уведомлений и тихие часы применяются ко всем фильтрам пользователя."""
     result = await session.execute(
         select(UserFilter).where(UserFilter.user_id == payload.user_id)
     )
     filters = list(result.scalars().all())
     now = datetime.now(timezone.utc)
     for flt in filters:
-        flt.notify_mode = payload.notify_mode
-        if payload.quiet_hours is not None:
+        if payload.notify_mode is not None:
+            flt.notify_mode = payload.notify_mode
+        if payload.quiet_hours_clear:
+            flt.quiet_hours = None
+        elif payload.quiet_hours is not None:
             flt.quiet_hours = payload.quiet_hours
         flt.updated_at = now
     await session.commit()

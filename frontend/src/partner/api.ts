@@ -69,3 +69,33 @@ export interface PartnerLead {
   claimed_at: string | null;
   user_id: number | null;
 }
+
+export interface ClaimOut {
+  lead_id: number;
+  partner_id: number;
+  partner_status: string;
+  user_id: number | null;
+  qualification: Record<string, unknown> | null;
+  claimed_at: string | null;
+}
+
+export interface BatchClaimOut {
+  claimed: ClaimOut[];
+}
+
+// --- Биллинг ---
+
+export interface PlanInfo {
+  key: "starter" | "pro" | "salon";
+  title: string;
+  daily_quota: number;
+  price_usd: number;
+}
+
+export interface BillingOut {
+  plan: string;
+  daily_quota: number;
+  claimed_today: number;
+  quota_remaining: number;
+  plans: PlanInfo[];
+}

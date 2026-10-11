@@ -6,14 +6,18 @@ CRUD источников с валидацией adapter_class по ADAPTER_CLA
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.adapters import ADAPTER_CLASSES
+from app.ai.llm_client import LLMError, build_llm_client
+from app.core.config import get_settings
 from app.core.deps import SessionDep
 from app.queue import enqueue_task
 from app.core.deps_internal import check_internal_token
 from app.db.models import Lead, Source, SourceHealth
 from app.schemas.criteria import SourceConfig
+from app.services.admin_assistant import assistant_reply
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -143,4 +147,42 @@ async def trigger_fetch(
 
     message_id = await enqueue_task("fetch_source_task", name, criteria, max_pages)
     return {"queued": True, "job_id": message_id}
+
+
+# --- AI-помощник (UI/UX ТЗ §3.2, фаза 4) --------------------------------------
+
+
+class AssistantTurn(BaseModel):
+    role: str  # user | assistant
+    content: str
+
+
+class AssistantIn(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    history: list[AssistantTurn] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/assistant/chat")
+async def assistant_chat(
+    body: AssistantIn,
+    session: SessionDep,
+    x_internal_token: str | None = InternalToken,
+) -> dict:
+    """Один ход AI-помощника админа: LLM с tools (leads/partners/sources)."""
+    check_internal_token(x_internal_token)
+    try:
+        llm = build_llm_client(get_settings())
+    except LLMError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, f"LLM unavailable: {exc}"
+        ) from exc
+    try:
+        reply = await assistant_reply(
+            session, llm, body.message, [t.model_dump() for t in body.history]
+        )
+    finally:
+        aclose = getattr(llm, "aclose", None)
+        if aclose is not None:
+            await aclose()
+    return {"reply": reply}
 

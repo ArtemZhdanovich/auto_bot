@@ -10,7 +10,7 @@ from app.db.models import SourceHealth
 from app.db.session import get_session
 from app.main import app
 from app.services import alerting, source_health
-from conftest import FakeRedis, FakeSession
+from conftest import FakeRedis
 
 
 @pytest.fixture

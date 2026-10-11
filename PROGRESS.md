@@ -1,4 +1,29 @@
+
 # Auto Selection — PROGRESS
+
+## 28. Фаза 5 — deferred [бэкенд] items (UI/UX roadmap wrap-up)
+
+- **Batch-claim**: `POST /api/partner/leads/batch` `{"limit":1..10}` — атомарно
+  забирает до N доступных лидов с учётом дневной квоты (исчерпание → 429,
+  как у одиночного claim). Сервис `partners.claim_batch`, аналитика
+  `lead_sold` c `batch: true`, кнопка «⚡ Взять 3» в пуле ЛК.
+- **Биллинг**: каталог тарифов `PLAN_CATALOG` (starter 5/$49, pro 15/$149,
+  salon 40/$399), `GET /api/partner/billing` (план, квота, расход), экран
+  «Биллинг» в ЛК вместо заглушки (прогресс-бар квоты + таблица тарифов).
+- **Тихие часы**: применялись в send worker (фильтр → `NOTIFY_QUIET_HOURS_DEFAULT`);
+  добавлены настройка из бота (меню «Уведомления → 🌙 Тихие часы», пресеты
+  23:00–08:00 / 22:00–10:00 / выкл через `BackendClient.quiet_hours`) и
+  поддержка в `POST /api/notifications/settings` (notify_mode опционален,
+  `quiet_hours_clear` для сброса).
+- **AI-помощник админа**: `app/services/admin_assistant.py` — tool-loop
+  (до 3 итераций) поверх `build_llm_client` (GLM, `LLM_PROVIDER=glm`);
+  tools: `leads_stats`, `partners_list`, `sources_health` (только чтение);
+  `POST /api/admin/assistant/chat` (X-Internal-Token; LLM недоступен → 503);
+  `ChatWidget.tsx` подключён к эндпоинту (история, 503-подсказка про ключ).
+- Тесты: **259 passed** (+15: batch-claim сервис/API, биллинг, ассистент);
+  ruff чист; фронт `tsc + vite build` — ок.
+- Напоминание владельцу: `alembic upgrade head` (0004–0008) и вписать
+  `GLM_API_KEY` в `.env` (иначе ассистент отвечает 503 с подсказкой).
 
 > Экосистема подбора автомобилей из-за рубежа (Корея, Китай, ОАЭ и др.) для
 > пользователей из РБ / РФ / СНГ: Telegram-бот + WebApp (Mini App) + сайт

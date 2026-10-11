@@ -416,3 +416,87 @@ async def test_rate_limit_fail_open():
             return False
 
     await check_rate_limit(BrokenRedis(), 1)  # не бросает — fail-open
+# --- Сервис: batch-claim + биллинг ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claim_batch_ok_sets_fields():
+    s = SeqSession()
+    l1, l2, l3 = make_lead(1), make_lead(2), make_lead(3)
+    s.set_queue([], [l1, l2, l3])  # claimed_today -> 0, пул из 3
+    leads, reason = await partners.claim_batch(s, make_account(), limit=3)
+    assert reason == "ok" and len(leads) == 3
+    assert all(lead.partner_id == 1 for lead in leads)
+    assert all(lead.partner_status == "claimed" and lead.claimed_at for lead in leads)
+    assert s.committed
+
+
+@pytest.mark.asyncio
+async def test_claim_batch_quota_exceeded():
+    s = SeqSession()
+    s.set_queue([1, 2, 3, 4, 5])  # claimed_today=5 при квоте 5 (scalar_one=len(rows))
+    leads, reason = await partners.claim_batch(
+        s, make_account(daily_quota=5), limit=3
+    )
+    assert reason == "quota_exceeded" and leads == []
+    assert not s.committed
+
+
+@pytest.mark.asyncio
+async def test_claim_batch_partial_when_quota_low():
+    s = SeqSession()
+    s.set_queue([4], [make_lead(9)])  # остаток квоты 1, лимит 3
+    leads, reason = await partners.claim_batch(s, make_account(), limit=3)
+    assert reason == "ok" and len(leads) == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_claim_endpoint_ok(client, seq_session: SeqSession):
+    seq_session.add(make_account())
+    seq_session.set_queue([make_key()], [], [make_lead(11), make_lead(12)])
+    resp = await client.post(
+        "/api/partner/leads/batch", json={"limit": 2}, headers={"X-API-Key": RAW_KEY}
+    )
+    assert resp.status_code == 200
+    claimed = resp.json()["claimed"]
+    assert len(claimed) == 2
+    assert {c["lead_id"] for c in claimed} == {11, 12}
+    events = [x for x in seq_session.added if isinstance(x, AnalyticsEvent)]
+    assert len(events) == 2 and events[0].props["batch"] is True
+
+
+@pytest.mark.asyncio
+async def test_batch_claim_endpoint_quota_429(client, seq_session: SeqSession):
+    seq_session.add(make_account(daily_quota=5))
+    seq_session.set_queue([make_key()], [1, 2, 3, 4, 5])  # claimed_today -> 5
+    resp = await client.post(
+        "/api/partner/leads/batch", json={"limit": 3}, headers={"X-API-Key": RAW_KEY}
+    )
+    assert resp.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_batch_claim_endpoint_unauthorized(client):
+    resp = await client.post("/api/partner/leads/batch", json={"limit": 2})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_billing_endpoint_catalog_and_usage(client, seq_session: SeqSession):
+    seq_session.add(make_account(plan="pro", daily_quota=15))
+    seq_session.set_queue([make_key()], [1, 2, 3, 4])  # claimed_today -> 4
+    resp = await client.get("/api/partner/billing", headers={"X-API-Key": RAW_KEY})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["plan"] == "pro"
+    assert body["claimed_today"] == 4 and body["quota_remaining"] == 11
+    assert {p["key"] for p in body["plans"]} == {"starter", "pro", "salon"}
+    pro = next(p for p in body["plans"] if p["key"] == "pro")
+    assert pro["price_usd"] == 149 and pro["daily_quota"] == 15
+
+
+@pytest.mark.asyncio
+async def test_billing_endpoint_unauthorized(client):
+    resp = await client.get("/api/partner/billing")
+    assert resp.status_code == 401
+

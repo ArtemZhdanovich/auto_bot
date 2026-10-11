@@ -251,6 +251,7 @@ async def main_menu_callback(cb, state: FSMContext) -> None:
                 [InlineKeyboardButton(text="⚡ Instant", callback_data="menu:notify_set:instant")],
                 [InlineKeyboardButton(text="📬 Дайджест (09:00/20:00)", callback_data="menu:notify_set:digest")],
                 [InlineKeyboardButton(text="🔕 Выключить", callback_data="menu:notify_set:off")],
+                [InlineKeyboardButton(text="🌙 Тихие часы", callback_data="menu:quiet")],
             ]
         )
         await cb.message.answer(
@@ -270,6 +271,34 @@ async def main_menu_callback(cb, state: FSMContext) -> None:
             await cb.message.answer("Backend недоступен, попробуйте позже.")
         else:
             await cb.message.answer(labels[mode])
+        return
+    if action == "quiet":
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🌙 23:00–08:00", callback_data="menu:quiet_set:23:00-08:00")],
+                [InlineKeyboardButton(text="🌙 22:00–10:00", callback_data="menu:quiet_set:22:00-10:00")],
+                [InlineKeyboardButton(text="☀️ Без тихих часов", callback_data="menu:quiet_set:off")],
+            ]
+        )
+        await cb.message.answer(
+            "🌙 <b>Тихие часы</b> — ночью уведомления не приходят "
+            "(дождутся утра). Выберите интервал:",
+            reply_markup=kb,
+        )
+        return
+    if action.startswith("quiet_set:"):
+        value = action.split(":", 1)[1]
+        if value == "off":
+            result = await backend.quiet_hours(user_id, clear=True)
+            text = "☀️ Тихие часы отключены."
+        else:
+            result = await backend.quiet_hours(user_id, value)
+            start, end = value.split("-")
+            text = f"🌙 Тихие часы {start}–{end} UTC установлены."
+        if result is None:
+            await cb.message.answer("Backend недоступен, попробуйте позже.")
+        else:
+            await cb.message.answer(text)
         return
     if action == "subscribe":
         # переиспользуем логику /subscribe

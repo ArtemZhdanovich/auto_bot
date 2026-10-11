@@ -3,7 +3,7 @@
 import pytest
 
 from app.core.config import get_settings
-from app.db.models import AnalyticsEvent, Lead
+from app.db.models import AnalyticsEvent
 from app.db.session import get_session
 from app.main import app
 from app.services import analytics
