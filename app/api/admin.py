@@ -18,6 +18,7 @@ from app.core.deps_internal import check_internal_token
 from app.db.models import Lead, Listing, Source, SourceHealth
 from app.schemas.criteria import SourceConfig
 from app.services.admin_assistant import assistant_reply
+from app.services import funnels
 from app.services.storage import storage_from_settings
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -221,4 +222,28 @@ async def admin_listing_raw(
         "url": url,
         "expires_in": settings.raw_presign_ttl_sec,
     }
+
+
+@router.get("/analytics/funnel")
+async def analytics_funnel(
+    session: SessionDep,
+    x_internal_token: str | None = InternalToken,
+    days: int = Query(default=30, ge=1, le=365),
+) -> dict:
+    """Воронка search→dialog→lead→subscription (P2-бэклог: SQL-дашборды)."""
+    check_internal_token(x_internal_token)
+    stages = await funnels.funnel(session, days)
+    return {"days": days, "stages": stages}
+
+
+@router.get("/analytics/retention")
+async def analytics_retention(
+    session: SessionDep,
+    x_internal_token: str | None = InternalToken,
+    days: int = Query(default=30, ge=1, le=365),
+) -> dict:
+    """Когорты D1/D7 по дню регистрации (P2-бэклог: SQL-дашборды)."""
+    check_internal_token(x_internal_token)
+    cohorts = await funnels.retention(session, days)
+    return {"days": days, "cohorts": cohorts}
 
