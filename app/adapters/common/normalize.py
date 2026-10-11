@@ -6,10 +6,15 @@
 FUEL_MAP = {
     "gasoline": "petrol", "petrol": "petrol", "бензин": "petrol", "휘발유": "petrol",
     "가솔린": "petrol",
+    "汽油": "petrol",
     "diesel": "diesel", "дизель": "diesel", "디젤": "diesel",
+    "柴油": "diesel",
     "hybrid": "hybrid", "гибрид": "hybrid", "하이브리드": "hybrid",
+    "混合动力": "hybrid", "油电混合": "hybrid", "插电混动": "hybrid",
     "electric": "electric", "ev": "electric", "электро": "electric", "전기": "electric",
+    "纯电动": "electric", "电动": "electric",
     "lpg": "lpg", "гбо": "lpg", "газ": "lpg", "가스": "lpg",
+    "油改气": "lpg",
     "휘발유+전기": "hybrid", "디젤+전기": "hybrid",
 }
 
@@ -27,9 +32,13 @@ BODY_MAP = {
 TRANSMISSION_MAP = {
     "automatic": "automatic", "auto": "automatic", "at": "automatic",
     "автомат": "automatic", "акпп": "automatic", "오토": "automatic",
+    "自动": "automatic", "自动挡": "automatic",
     "manual": "manual", "mt": "manual", "механика": "manual", "мкпп": "manual",
+    "手动": "manual", "手动挡": "manual",
     "cvt": "cvt", "вариатор": "cvt",
+    "无级变速": "cvt",
     "dct": "dct", "робот": "dct",
+    "双离合": "dct", "湿式双离合": "dct", "干式双离合": "dct",
 }
 
 DRIVE_MAP = {
@@ -58,6 +67,67 @@ MAKE_MAP = {
     "byd": "BYD", "chery": "Chery", "cheri": "Chery", "черри": "Chery",
     "geely": "Geely", "джили": "Geely", "haval": "Haval", "хавал": "Haval",
     "mg": "MG", "li-auto": "Li Auto", "li": "Li Auto", "ли": "Li Auto",
+    # --- Китай (che168/autohome: иероглифы в SSR-вёрстке) ---
+    "丰田": "Toyota",
+    "本田": "Honda",
+    "日产": "Nissan", "尼桑": "Nissan",
+    "马自达": "Mazda",
+    "三菱": "Mitsubishi",
+    "铃木": "Suzuki",
+    "斯巴鲁": "Subaru",
+    "现代": "Hyundai",
+    "起亚": "Kia",
+    "大众": "Volkswagen",
+    "奥迪": "Audi",
+    "宝马": "BMW",
+    "奔驰": "Mercedes-Benz",
+    "保时捷": "Porsche",
+    "雷克萨斯": "Lexus",
+    "沃尔沃": "Volvo",
+    "路虎": "Land Rover", "陆虎": "Land Rover",
+    "捷豹": "Jaguar",
+    "凯迪拉克": "Cadillac",
+    "别克": "Buick",
+    "雪佛兰": "Chevrolet",
+    "福特": "Ford",
+    "克莱斯勒": "Chrysler",
+    "吉普": "Jeep",
+    "迷你": "MINI", "mini": "MINI",
+    "菲亚特": "Fiat",
+    "标致": "Peugeot",
+    "雪铁龙": "Citroen",
+    "雷诺": "Renault",
+    # Китайские бренды
+    "比亚迪": "BYD",
+    "吉利": "Geely",
+    "奇瑞": "Chery",
+    "长城": "Great Wall",
+    "哈弗": "Haval", "哈佛": "Haval",
+    "坦克": "Tank",
+    "魏牌": "Wey",
+    "欧拉": "Ora",
+    "长安": "Changan",
+    "红旗": "Hongqi",
+    "荣威": "Roewe",
+    "名爵": "MG",
+    "五菱": "Wuling",
+    "传祺": "Trumpchi", "广汽传祺": "Trumpchi",
+    "东风": "Dongfeng",
+    "启辰": "Venucia",
+    "奔腾": "Bestune",
+    "江淮": "JAC",
+    "海马": "Haima",
+    "理想": "Li Auto",
+    "蔚来": "NIO",
+    "小鹏": "XPeng",
+    "小米": "Xiaomi",
+    "零跑": "Leapmotor",
+    "哪吒": "Neta",
+    "极氪": "Zeekr",
+    "岚图": "Voyah",
+    "问界": "AITO",
+    "深蓝": "Deepal",
+    "埃安": "Aion",
 }
 
 
@@ -84,8 +154,32 @@ def normalize_body(raw: str | None) -> str | None:
 
 
 def normalize_transmission(raw: str | None) -> str | None:
-    """automatic / автомат / 오토 → 'automatic'."""
+    """automatic / автомат / 오토 / 自动 → 'automatic'."""
     return TRANSMISSION_MAP.get(_clean(raw))
+
+
+def _detect_from_text(text: str | None, mapping: dict[str, str]) -> str | None:
+    """Поиск значения справочника как подстроки в свободном тексте карточки.
+
+    Для SSR-парсинга (che168), где топливо/КПП — кусок текста, а не поле.
+    Ключи длиннее проверяются раньше («插电混动» до «电动»).
+    """
+    if not text:
+        return None
+    for key, value in sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True):
+        if len(key) > 1 and key in text:
+            return value
+    return None
+
+
+def detect_fuel(text: str | None) -> str | None:
+    """«5.2万公里 汽油 自动挡» → 'petrol' (подстрока в тексте карточки)."""
+    return _detect_from_text(text, FUEL_MAP)
+
+
+def detect_transmission(text: str | None) -> str | None:
+    """«…自动挡…» → 'automatic' (подстрока в тексте карточки)."""
+    return _detect_from_text(text, TRANSMISSION_MAP)
 
 
 def normalize_drive(raw: str | None) -> str | None:

@@ -298,8 +298,12 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
 9. Rate limiter Telegram: 429/retry_after обрабатывается в send-воркере
     (1 ретрай) и в адаптерах (ротация прокси), но общего Token Bucket
     (~30 msg/sec) в Redis нет.
-10. Адаптер Китая (Che168/аналог) — приоритет, если целитесь в рынки
-    РБ/РФ/СНГ; далее ОАЭ/Япония/EU/US.
+10. ~~Адаптер Китая (Che168/аналог)~~ — **код готов** (см. «Отработанные»):
+    `Che168HtmlAdapter` + миграция `0005` (источник `che168`, enabled=false).
+    Для включения: сверить селекторы с живым HTML (curl из браузера/через
+    прокси, F12), проверить гео-доступность с IP РБ, при отличии вёрстки
+    поправить `sources.config` (без деплоя), затем `UPDATE sources SET
+    enabled=true WHERE name='che168'`.
 11. Рефакторинг веб-авторизации: `telegram_id` → nullable, отдельный PK.
     Сейчас синтетические отрицательные id в диапазоне −(1×10⁸…9×10⁸),
     ретрай 5×; коллизии станут частыми после ~30k веб-пользователей.
@@ -365,4 +369,19 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
   была в `0001`. Явный `status="new"` при создании (колоночный
   `default=` срабатывает только на flush — тот же класс бага, что
   у `SourceHealth`). Тесты: `tests/test_leads.py`.
+- **Адаптер Китая Che168 (P2-10)**: `Che168HtmlAdapter` (kind='parser')
+  — SSR-парсинг `selectolax`/lexbor через общий `HttpClient` (ретраи,
+  429, прокси-ротация, MockTransport-инъекция). Нормализация: «23.80万»
+  → 238000 CNY, «5.2万公里» → 52000 км, марка иероглифами (丰田 → Toyota)
+  — справочник ~50 CJK-марок в `MAKE_MAP`, топливо/КПП поиском подстроки
+  (`detect_fuel`/`detect_transmission`, т.к. `normalize_fuel` — точный
+  lookup). Селекторы/путь списка — в `sources.config` (смена вёрстки
+  правится в БД без деплоя); `raw_payload` хранит HTML карточки для
+  перепарсинга; VIN=None (в Китае скрыт) → дедуп общий fuzzy.
+  `healthcheck` = 200 + контейнер списка (вёрстка сломана/капча → False
+  → алерты CB). Миграция `0005` вставляет источник `che168`
+  (schedule_cron `*/30 * * * *`, **enabled=false** до сверки с живым
+  HTML и проверки гео). Зависимость `selectolax` (в venv стоит 1.0.0 —
+  импорт из `selectolax.lexbor`, Modest deprecated). Тесты:
+  `tests/test_che168_adapter.py` (13).
 

@@ -5,6 +5,7 @@
 """
 
 from app.adapters.base import BaseApiAdapter
+from app.adapters.che168 import Che168HtmlAdapter
 from app.adapters.encar import EncarApiAdapter
 from app.adapters.kcar import KCarApiAdapter
 
@@ -12,11 +13,13 @@ from app.adapters.kcar import KCarApiAdapter
 ADAPTER_CLASSES: dict[str, type[BaseApiAdapter]] = {
     "EncarApiAdapter": EncarApiAdapter,
     "KCarApiAdapter": KCarApiAdapter,
+    "Che168HtmlAdapter": Che168HtmlAdapter,
 }
 
 __all__ = [
     "ADAPTER_CLASSES",
     "BaseApiAdapter",
+    "Che168HtmlAdapter",
     "EncarApiAdapter",
     "KCarApiAdapter",
 ]
