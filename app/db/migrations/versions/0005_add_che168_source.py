@@ -25,8 +25,8 @@ INSERT_SQL = sa.text(
     VALUES (
         'che168', 'Che168HtmlAdapter', 'parser', false, 300, '*/30 * * * *',
         10, 30,
-        :config::jsonb,
-        :capabilities::jsonb
+        CAST(:config AS jsonb),
+        CAST(:capabilities AS jsonb)
     )
     ON CONFLICT (name) DO NOTHING
     """

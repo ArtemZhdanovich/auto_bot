@@ -43,6 +43,11 @@ services:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     env_file: .env
+    environment:
+      # .env может держать localhost (запуск по процессам) — в compose хост другой
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -68,6 +73,10 @@ services:
     build: .
     command: python -m app.workers.fetch
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -77,6 +86,10 @@ services:
     build: .
     command: python -m app.workers.send
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

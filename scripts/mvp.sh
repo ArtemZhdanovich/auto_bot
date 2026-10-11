@@ -32,6 +32,7 @@ BASE_URL="${APP_BASE_URL:-http://localhost:8000}"
 MINIAPP_URL="${MINIAPP_URL:-http://localhost:8080}"
 CORE="postgres redis rabbitmq"
 MVP="backend bot miniapp"
+ADMIN_ID="809464979"   # хардкод: супер-админ демо (fallback, если нет в .env)
 
 log()  { printf '\033[1;36m[mvp]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[mvp]\033[0m %s\n' "$*"; }
@@ -141,8 +142,9 @@ cmd_whoami() {
 }
 
 cmd_admin() {
-  local id="${1:-}"
+  local id="${1:-$ADMIN_ID}"
   case "$id" in ''|*[!0-9]*) die "укажите числовой telegram_id: bash scripts/mvp.sh admin 123456789" ;; esac
+  log "Назначаю супер-админа: $id"
 
   # 1. ADMIN_CHAT_ID в .env (алерты/уведомления админу идут ему)
   if grep -qE '^ADMIN_CHAT_ID=' .env; then

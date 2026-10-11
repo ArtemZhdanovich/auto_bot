@@ -13,6 +13,8 @@ from app.bot.client import BackendClient
 from app.bot.handlers import router
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 async def main() -> None:
     settings = get_settings()
@@ -55,12 +57,20 @@ async def main() -> None:
         scope=BotCommandScopeAllPrivateChats(),
     )
     if settings.miniapp_url:
-        await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(
-                text="🚗 Поиск авто",
-                web_app=WebAppInfo(url=settings.miniapp_url),
+        if settings.miniapp_url.startswith("https://"):
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="🚗 Поиск авто",
+                    web_app=WebAppInfo(url=settings.miniapp_url),
+                )
             )
-        )
+        else:
+            # Telegram принимает только HTTPS для Web App: локальная демка
+            # (http://localhost:…) — работаем без кнопки-меню, не падаем.
+            logger.warning(
+                "miniapp_url не HTTPS (%s) — кнопка-меню Mini App не установлена",
+                settings.miniapp_url,
+            )
 
     await dp.start_polling(bot)
 

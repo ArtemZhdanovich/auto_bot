@@ -97,9 +97,13 @@ async def cmd_start(message: Message, command: CommandObject | None, state: FSMC
 
 
 def _miniapp_url() -> str:
+    """URL Mini App, но только HTTPS: Telegram отвергает http-WebApp-кнопки
+    (Bad Request прямо при отправке сообщения). Для локальной демки (http)
+    возвращаем пусто — кнопки не добавляются, бот работает."""
     from app.core.config import get_settings
 
-    return get_settings().miniapp_url
+    url = get_settings().miniapp_url
+    return url if url.startswith("https://") else ""
 
 
 def build_listing_caption(listing: dict) -> str:
