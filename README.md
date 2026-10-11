@@ -177,6 +177,17 @@ docker-compose.yml    # вся инфраструктура (dev/staging)
 
 ## Быстрый старт
 
+### MVP одной командой (сайт + бот + LLM)
+
+```bash
+bash scripts/mvp.sh up          # postgres/redis/rabbitmq + миграции + backend/bot/miniapp
+bash scripts/mvp.sh up --parse  # + fetch-воркер и 1 страница encar (данные в ленте)
+bash scripts/mvp.sh down        # остановить приложение (инфраструктура остаётся)
+```
+
+Скрипт проверяет `.env` (BOT_TOKEN, APP_SECRET_KEY, GLM_API_KEY; без ключа
+LLM добавьте `LLM_PROVIDER=mock`) и печатает адреса после старта.
+
 ### Локально (по процессам)
 
 ```bash
