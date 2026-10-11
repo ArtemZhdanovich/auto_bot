@@ -8,14 +8,24 @@ from redis.asyncio import Redis
 from app.core.config import get_settings
 
 
+def internal_token() -> str:
+    """Секрет для внутренних эндпоинтов: INTERNAL_TOKEN, иначе APP_SECRET_KEY.
+
+    Отдельная переменная разграничивает JWT-подпись и доступ к
+    internal/admin API; пустое значение сохраняет обратную совместимость.
+    """
+    settings = get_settings()
+    return settings.internal_token or settings.app_secret_key
+
+
 def check_internal_token(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
 ) -> None:
-    """Внутренние эндпоинты (бот/воркеры) — общий секрет APP_SECRET_KEY.
+    """Внутренние эндпоинты (бот/воркеры) — INTERNAL_TOKEN или APP_SECRET_KEY.
 
     Аннотация Header позволяет использовать и напрямую в Depends(router-level),
     и с явной передачей значения из эндпоинтов admin."""
-    if x_internal_token != get_settings().app_secret_key:
+    if x_internal_token != internal_token():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token"
         )

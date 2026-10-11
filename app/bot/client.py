@@ -13,7 +13,7 @@ class BackendClient:
     def __init__(self, base_url: str | None = None, timeout: float = 10.0):
         settings = get_settings()
         self._base_url = (base_url or settings.app_base_url).rstrip("/")
-        self._internal_token = settings.app_secret_key
+        self._internal_token = settings.internal_token or settings.app_secret_key
         self._timeout = timeout
 
     async def upsert_user(

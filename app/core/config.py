@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # App
     app_env: str = "dev"
     app_secret_key: str = "dev-secret-change-me-0123456789abcdef0123456789abcdef"
+    # Отдельный секрет для внутренних эндпоинтов (X-Internal-Token);
+    # пустое значение = обратная совместимость (используется APP_SECRET_KEY).
+    internal_token: str = ""
     app_base_url: str = "http://localhost:8000"
     miniapp_url: str = "http://localhost:8080"
 

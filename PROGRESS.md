@@ -193,7 +193,8 @@ auto_bot/
 - **Пароли сайта**: PBKDF2-SHA256, 240k итераций; email — regex-валидация.
 - **Веб-пользователи**: синтетические отрицательные telegram_id (PK/FK),
   ретрай до 5× при коллизии.
-- **Внутренние эндпоинты**: `X-Internal-Token` (= APP_SECRET_KEY).
+- **Внутренние эндпоинты**: `X-Internal-Token` (`INTERNAL_TOKEN`;
+  пустое значение — обратная совместимость с `APP_SECRET_KEY`).
 - **RAG**: internal token между backend и rag_api, JWT между rag_api и
   worker, ротация ключей HS/RS/ES, PII-редакция перед записью диалогов.
 - **Постквантовое шифрование документов**: гибрид ML-KEM-768 (FIPS 203) +
@@ -268,10 +269,59 @@ RAG_API_TOKEN, RAG_JWT_SECRET, PQ-ключи) → HTTPS для MINIAPP_URL.
 
 ## 18. Известные долги и next steps
 
-1. **Отозвать BOT_TOKEN через @BotFather** (утечка) и перевыпустить.
+### 🔴 P0 — инциденты/блокеры
+
+1. **Отозвать BOT_TOKEN через @BotFather** (утечка) и перевыпустить, обновить `.env`.
 2. Пользователь 809464979: tier=pro — сбросить на Free (решение владельца).
-3. Проверить, что callback настроек уведомлений поддерживает
-   мгновенно/дайджест/выкл так, как шлёт меню бота.
+3. Живой E2E RAG-стека: задать `GLM_API_KEY` + PQ-ключи, `docker compose build
+   rag_worker rag_api`, `ingest_kb.py --force`, контрольный запрос к rag-api.
+
+### 🟡 P1 — на этой неделе
+
+4. Telegram Stars E2E: код-путь полный (sendInvoice XTR → pre_checkout →
+   successful_payment → `/payments/success` → активация tier), но реальная
+   оплата не проводилась. Протестировать тестовым платежом.
+5. Автоматическое расписание парсинга: колонка `sources.schedule_cron`
+   хранится, но нигде не консьюмится — парсинг запускается вручную
+   (`POST /admin/sources/{name}/fetch`). Инфраструктура готова (`CronSpec`
+   в `app/queue/rabbit.py`, Redis-лок от дублей) — добавить cron-job,
+   который ставит `fetch_source_task` для источников с `schedule_cron`.
+6. Залить ветку `refactor/monorepo` rag_service (зеркалирование GLM + PQ).
+7. Публичный HTTPS `MINIAPP_URL` для прода; проверить кнопку меню в TG-клиенте.
+
+### 🟢 P2 — до первого трафика
+
+8. Мониторинг и алерты (этап 8 ТЗ): healthcheck всех сервисов, алерт в
+   Telegram (RAG недоступен, circuit breaker открыт, DLQ > 10), метрики
+   latency/error rate/cache hit rate. Сейчас есть только `/health` и `/metrics`.
+9. Circuit breaker по источникам реализован (`should_skip_source`:
+   error_streak ≥ 5 → пауза 10 мин) — осталось добавить алертинг на него.
+10. Rate limiter Telegram: 429/retry_after обрабатывается в send-воркере
+    (1 ретрай) и в адаптерах (ротация прокси), но общего Token Bucket
+    (~30 msg/sec) в Redis нет.
+11. Адаптер Китая (Che168/аналог), далее ОАЭ/Япония/EU/US.
+12. Рефакторинг веб-авторизации: `telegram_id` → nullable, отдельный PK.
+    Сейчас синтетические отрицательные id в диапазоне −(1×10⁸…9×10⁸),
+    ретрай 5×; коллизии станут частыми после ~30k веб-пользователей.
+
+### 🟢 P3 — стратегическое
+
+13. Метрики воронки (активация, retention, конверсия в лид/Pro).
+14. Мониторинг стоимости LLM (unit-экономика GLM).
+15. Ротация PQ-ключей и разделение доступа к приватному ключу.
+
+### Отработанные пункты ревью (факты по коду)
+
+- Fuzzy-дедуп **есть**: `app/adapters/common/dedup.py` — VIN + fuzzy-хэш
+  (make|model|year|mileage|price), TTL 48 ч, Redis SET NX.
+- Circuit breaker источников **есть**: `app/services/source_health.py` +
+  проверка в fetch-воркере.
+- Callback'и уведомлений **совпадают**: бот шлёт `instant/digest/off`,
+  backend ждёт `Literal["instant","digest","off"]`.
+- `INTERNAL_TOKEN` выделен из `APP_SECRET_KEY` (обратная совместимость
+  сохранена); настроено в `.env.example`, учитывается ботом и backend.
+- `Dockerfile`, `alembic.ini`, `frontend/*` закоммичены
+  (кроме `tsconfig.tsbuildinfo` — в `.gitignore`).
 4. Живой E2E RAG-стека (compose up → ingest → вопрос через rag-api).
 5. Залить ветку `refactor/monorepo` rag_service в удалённый репозиторий.
 6. Этап 8 (ТЗ): мониторинг и алерты, DLQ-алертинг.
