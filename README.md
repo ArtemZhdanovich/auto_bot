@@ -188,6 +188,15 @@ bash scripts/mvp.sh down        # остановить приложение (и�
 Скрипт проверяет `.env` (BOT_TOKEN, APP_SECRET_KEY, GLM_API_KEY; без ключа
 LLM добавьте `LLM_PROVIDER=mock`) и печатает адреса после старта.
 
+Сделать себя супер-админом демо (алерты админу, `role=admin`, тариф
+business на 30 дней — без лимитов фильтров и AI):
+
+```bash
+# 1. напишите боту /start в Telegram
+bash scripts/mvp.sh whoami      # 2. найдите свой telegram_id в списке
+bash scripts/mvp.sh admin <id>  # 3. назначить супер-админа (бот перезапустится)
+```
+
 ### Локально (по процессам)
 
 ```bash

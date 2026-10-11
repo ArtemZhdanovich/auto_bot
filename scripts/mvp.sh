@@ -12,6 +12,10 @@
 #   bash scripts/mvp.sh down         # остановить стенд
 #   bash scripts/mvp.sh logs         # хвост логов backend/bot/miniapp
 #   bash scripts/mvp.sh urls         # показать адреса
+#   bash scripts/mvp.sh whoami       # кто уже писал боту (telegram_id из БД)
+#   bash scripts/mvp.sh admin <id>   # сделать юзера супер-админом демо:
+#                                    #   ADMIN_CHAT_ID в .env + users.role='admin'
+#                                    #   + тариф business на 30 дней; рестарт бота
 #
 # Требования в .env (см. .env.example):
 #   BOT_TOKEN      — токен бота (без него бот не стартует)
@@ -126,10 +130,46 @@ cmd_urls() {
   echo "                   полноценный режим — открыть через кнопку бота)"
 }
 
+psql() { $COMPOSE exec -T postgres psql -U app -d autoselect "$@"; }
+
+cmd_whoami() {
+  log "Последние юзеры, писавшие боту (напишите боту /start, если список пуст):"
+  psql -c "SELECT telegram_id, COALESCE(username,'-') AS username,
+                  COALESCE(first_name,'-') AS name, role, subscription_tier
+           FROM users ORDER BY created_at DESC LIMIT 10;"
+  log "Назначить супер-админа:  bash scripts/mvp.sh admin <telegram_id>"
+}
+
+cmd_admin() {
+  local id="${1:-}"
+  case "$id" in ''|*[!0-9]*) die "укажите числовой telegram_id: bash scripts/mvp.sh admin 123456789" ;; esac
+
+  # 1. ADMIN_CHAT_ID в .env (алерты/уведомления админу идут ему)
+  if grep -qE '^ADMIN_CHAT_ID=' .env; then
+    sed -i "s/^ADMIN_CHAT_ID=.*/ADMIN_CHAT_ID=$id/" .env
+  else
+    printf '\nADMIN_CHAT_ID=%s\n' "$id" >> .env
+  fi
+
+  # 2. роль + демо-тариф business (30 дней: все фильтры, instant, AI без лимита)
+  psql -c "UPDATE users SET role='admin',
+                  subscription_tier='business',
+                  subscription_until = now() + interval '30 days'
+            WHERE telegram_id = $id
+            RETURNING telegram_id, username, role, subscription_tier, subscription_until;"
+
+  # 3. рестарт бота, чтобы он увидел новый ADMIN_CHAT_ID
+  $COMPOSE up -d --force-recreate bot >/dev/null
+  log "Юзер $id — супер-админ: ADMIN_CHAT_ID + role=admin + business/30д. Бот перезапущен."
+  warn "Демо-тариф снимается: UPDATE users SET subscription_tier='free', subscription_until=NULL WHERE telegram_id=$id;"
+}
+
 case "${1:-up}" in
-  up)   shift || true; cmd_up "$@" ;;
-  down) cmd_down ;;
-  logs) cmd_logs ;;
-  urls) cmd_urls ;;
-  *) die "использование: bash scripts/mvp.sh {up [--parse]|down|logs|urls}" ;;
+  up)     shift || true; cmd_up "$@" ;;
+  down)   cmd_down ;;
+  logs)   cmd_logs ;;
+  urls)   cmd_urls ;;
+  whoami) cmd_whoami ;;
+  admin)  shift || true; cmd_admin "${1:-}" ;;
+  *) die "использование: bash scripts/mvp.sh {up [--parse]|down|logs|urls|whoami|admin <id>}" ;;
 esac
