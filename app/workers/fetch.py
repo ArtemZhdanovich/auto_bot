@@ -21,10 +21,10 @@ from app.adapters.common.proxy import build_proxy_pool
 from app.core.config import get_settings
 from app.db.models import Source
 from app.db.session import session_factory
-from app.queue import QUEUE_FETCH, IntervalSpec, TaskWorker, enqueue_task
+from app.queue import QUEUE_FETCH, CronSpec, IntervalSpec, TaskWorker, enqueue_task
 from app.schemas.criteria import SearchCriteria
 from app.services.cron import cron_matches
-from app.services.fetch import save_listings
+from app.services.fetch import mark_stale, save_listings
 from app.services.source_health import record_error, record_success, should_skip_source
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,8 @@ async def fetch_source_task(
             "reactivated": 0,
             "cross_dup": 0,
         }
+        # id-списки для статусных уведомлений (price_drop/returned, фаза 3)
+        event_ids: dict[str, list[int]] = {"price_drop": [], "returned": []}
         cursor: str | None = None
         pages = 0
         parsed_total = 0
@@ -72,7 +74,12 @@ async def fetch_source_task(
 
                 stats = await save_listings(session, redis, result.items)
                 for key, value in stats.items():
-                    totals[key] += value
+                    if key == "price_changed_ids":
+                        event_ids["price_drop"].extend(value)
+                    elif key == "reactivated_ids":
+                        event_ids["returned"].extend(value)
+                    else:
+                        totals[key] += value
                 parsed_total += len(result.items)
 
                 await record_success(
@@ -95,6 +102,10 @@ async def fetch_source_task(
 
         if totals["new"] or totals["price_changed"] or totals["reactivated"]:
             await enqueue_notify_scan(ctx, source_name)
+
+        for kind, ids in event_ids.items():
+            if ids:
+                await enqueue_status_scan(ctx, kind, ids)
 
         if pages and parsed_total == 0:
             # Источник отвечает, но карточек 0 — вероятнее всего сменилась
@@ -174,6 +185,32 @@ async def enqueue_notify_scan(ctx: dict[str, Any], source_name: str) -> bool:
         return False
 
 
+async def enqueue_status_scan(
+    ctx: dict[str, Any], kind: str, listing_ids: list[int]
+) -> bool:
+    """Статусные уведомления (price_drop/gone/returned) — не критичны для fetch."""
+    try:
+        await enqueue_task("listing_status_scan", kind, listing_ids)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enqueue_status_scan_failed: %s", exc)
+        return False
+
+
+async def stale_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron 04:00 UTC (PLAN.md, фаза 3): устаревшие объявления → is_active=false.
+
+    Источники в circuit breaker пропускаются внутри mark_stale; для
+    деактивированных ставится скан «gone»-уведомлений (аудитория sent_log).
+    """
+    async with session_factory() as session:
+        gone_ids = await mark_stale(session)
+    if gone_ids:
+        await enqueue_status_scan(ctx, "gone", gone_ids)
+    logger.info("stale_check_done: gone=%s", len(gone_ids))
+    return {"gone": len(gone_ids)}
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url)
@@ -198,7 +235,10 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     logger.info("fetch_worker_stopped")
 
 
-HANDLERS = {"fetch_source_task": fetch_source_task}
+HANDLERS = {
+    "fetch_source_task": fetch_source_task,
+    "stale_check_job": stale_check_job,
+}
 
 
 async def main() -> None:
@@ -216,6 +256,7 @@ async def main() -> None:
         concurrency=3,   # как arq max_jobs=3
         job_timeout=120,  # как arq job_timeout
         interval_jobs=[IntervalSpec(schedule_fetch_due, every_sec=60)],
+        cron_jobs=[CronSpec(stale_check_job, hour=4, minute=0)],
     )
     try:
         await worker.run()

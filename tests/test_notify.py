@@ -161,3 +161,14 @@ def test_format_card_no_price():
     card = format_listing_card(_listing(price=None, currency=None, mileage_km=None))
     assert "цена по запросу" in card
     assert "км" not in card
+
+async def test_mark_sent_with_kind(fake_redis, fake_session):
+    from app.services.notify import event_audience
+
+    await mark_sent(fake_session, fake_redis, 100, 5, kind="price_drop")
+    assert await fake_redis.get(notified_key(100, 5, "price_drop")) == "1"
+    # строка пишется в sent_log (kind — параметр insert, не виден в str(stmt))
+    assert any("sent_log" in str(stmt) for stmt in fake_session.executed)
+
+    fake_session.set_result([100, 300])
+    assert await event_audience(fake_session, 5) == [100, 300]

@@ -11,13 +11,16 @@ old_* = NULL) для MVP допустима — см. PLAN.md, раздел 3.
 
 import hashlib
 import logging
+from datetime import datetime, timedelta, timezone
 
 from redis.asyncio import Redis
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.common.dedup import is_duplicate, raw_payload
+from app.core.config import get_settings
+from app.db.models import Listing, SourceHealth
 from app.schemas.listing import UnifiedListing
 
 logger = logging.getLogger(__name__)
@@ -128,8 +131,9 @@ async def save_listings(
     в listing_price_history при изменении пары (price, currency), для NEW —
     первая точка.
 
-    Возвращает {"new", "updated", "unchanged", "price_changed",
-    "reactivated", "cross_dup"}.
+    Возвращает счётчики {"new", "updated", "unchanged", "price_changed",
+    "reactivated", "cross_dup"} + id-списки "price_changed_ids" /
+    "reactivated_ids" (аудитория статусных уведомлений, фаза 3).
     """
     stats = {
         "new": 0,
@@ -139,6 +143,8 @@ async def save_listings(
         "reactivated": 0,
         "cross_dup": 0,
     }
+    price_changed_ids: list[int] = []
+    reactivated_ids: list[int] = []
     for item in items:
         if redis is not None and await is_duplicate(redis, item):
             stats["cross_dup"] += 1
@@ -157,12 +163,17 @@ async def save_listings(
             price_point = item.price is not None
         elif not row["was_active"]:  # вернулось в выдачу
             stats["reactivated"] += 1
+            reactivated_ids.append(row["listing_id"])
             price_point = price_changed
         elif row["old_hash"] == params["content_hash"]:  # без изменений
             stats["unchanged"] += 1
             price_point = False
         else:  # контент изменился
-            stats["price_changed" if price_changed else "updated"] += 1
+            if price_changed:
+                stats["price_changed"] += 1
+                price_changed_ids.append(row["listing_id"])
+            else:
+                stats["updated"] += 1
             price_point = price_changed
         if price_point:
             await session.execute(
@@ -177,4 +188,48 @@ async def save_listings(
     await session.commit()
     if any(stats.values()):
         logger.info("listings_saved: %s", stats)
-    return stats
+    return stats | {
+        "price_changed_ids": price_changed_ids,
+        "reactivated_ids": reactivated_ids,
+    }
+
+
+async def mark_stale(
+    session: AsyncSession, *, max_age_days: int | None = None
+) -> list[int]:
+    """Пометить устаревшие объявления (PLAN.md, фаза 3).
+
+    is_active=false + disappeared_at для активных строк с last_seen_at старше
+    порога (STALE_MAX_AGE_DAYS, по умолчанию 3 дня). Источники в circuit
+    breaker (error_streak >= SOURCE_CB_ERROR_STREAK) пропускаются: источник
+    лежит, его объявления не могли видеться. Возвращает id деактивированных
+    (для «gone»-уведомлений).
+    """
+    settings = get_settings()
+    age = settings.stale_max_age_days if max_age_days is None else max_age_days
+    threshold = datetime.now(timezone.utc) - timedelta(days=age)
+    cb_sources = (
+        (
+            await session.execute(
+                select(SourceHealth.source_name).where(
+                    SourceHealth.error_streak >= settings.source_cb_error_streak
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    stmt = update(Listing).where(
+        Listing.is_active.is_(True),
+        Listing.last_seen_at < threshold,
+    )
+    if cb_sources:
+        stmt = stmt.where(Listing.source.not_in(list(cb_sources)))
+    result = await session.execute(
+        stmt.values(is_active=False, disappeared_at=func.now()).returning(Listing.id)
+    )
+    ids = list(result.scalars().all())
+    await session.commit()
+    if ids:
+        logger.info("mark_stale_done: gone=%s", len(ids))
+    return ids

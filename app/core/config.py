@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     digest_max_cards: int = 5  # 3–5 карточек в дайджесте
     notify_quiet_hours_default: str | None = None  # глобальные тихие часы "23:00-08:00"
 
+    # Отслеживание объявлений (миграция 0009, stale-cron фазы 3)
+    stale_max_age_days: int = 3  # не виден N дней → is_active=false (CB-источники пропускаются)
+
     # Прокси DataImpulse (опционально): шлюз для парсеров, если источники глушат.
     # Официальный формат: http://login__cr.cn;sessid.X:password@gw.dataimpulse.com:823
     # Задаёте user+pass → источники с capabilities.use_proxy=true ходят через шлюз.

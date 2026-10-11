@@ -224,10 +224,75 @@ async def test_digest_job_empty_skips_user(fake_redis):
 def test_worker_registers_jobs_and_cron():
     assert set(send_mod.HANDLERS) == {
         "send_listing_notification",
+        "send_listing_status",
         "notify_new_listings",
+        "listing_status_scan",
         "digest_job",
         "subscription_check_job",
     }
     crons = send_mod.CRON_JOBS
     assert {(c.hour, c.minute) for c in crons} == {(9, 0), (20, 0), (12, 0)}
     assert {c.name for c in crons} == {"digest_job", "subscription_check_job"}
+
+
+# --- статусные уведомления (фаза 3) --------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_listing_status_price_drop(ctx, patched_session, monkeypatch):
+    session = patched_session
+    _patch_get(session)
+    # тихие часы не мешают: стаб сессии возвращает строки цены на все execute()
+    async def _no_quiet(*_a):
+        return None
+
+    monkeypatch.setattr(send_mod, "_user_quiet_hours", _no_quiet)
+    # точки цены (desc): новая 42000, предыдущая 40000 → «было 40 000»
+    session.set_result([Decimal("42000"), Decimal("40000")])
+
+    result = await send_mod.send_listing_status(ctx, 100, 5, kind="price_drop")
+
+    assert result == {"user_id": 100, "listing_id": 5, "kind": "price_drop", "sent": True}
+    _chat_id, text = session.sent  # type: ignore[attr-defined]
+    assert "Цена снизилась" in text and "40 000" in text
+    assert await ctx["redis"].get(notified_key(100, 5, "price_drop")) == "1"
+
+
+@pytest.mark.asyncio
+async def test_send_listing_status_gone(ctx, patched_session):
+    session = patched_session
+    _patch_get(session)
+
+    result = await send_mod.send_listing_status(ctx, 100, 5, kind="gone")
+
+    assert result["sent"] is True
+    _chat_id, text = session.sent  # type: ignore[attr-defined]
+    assert "исчезло" in text
+    assert await ctx["redis"].get(notified_key(100, 5, "gone")) == "1"
+
+
+@pytest.mark.asyncio
+async def test_send_listing_status_already_sent_per_kind(ctx, patched_session):
+    await ctx["redis"].setex(notified_key(100, 5, "returned"), 600, "1")
+
+    result = await send_mod.send_listing_status(ctx, 100, 5, kind="returned")
+
+    assert result["skipped"] == "already_sent"
+
+
+@pytest.mark.asyncio
+async def test_listing_status_scan_dispatch(ctx, monkeypatch):
+    async def fake_audience(session, listing_id):
+        return [100, 200]
+
+    monkeypatch.setattr(send_mod, "event_audience", fake_audience)
+    pool = FakePublisher()
+    ctx["publisher"] = pool
+
+    result = await send_mod.listing_status_scan(ctx, "gone", [5])
+
+    assert result == {"kind": "gone", "dispatched": 2}
+    assert pool.jobs == [
+        ("send_listing_status", (100, 5, "gone")),
+        ("send_listing_status", (200, 5, "gone")),
+    ]

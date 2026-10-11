@@ -19,13 +19,15 @@ import httpx
 from redis.asyncio import Redis
 
 from app.core.config import get_settings
-from app.db.models import Listing, User, UserFilter
+from app.db.models import Listing, ListingPriceHistory, User, UserFilter
 from app.db.session import session_factory
 from app.queue import QUEUE_SEND, CronSpec, TaskPublisher, TaskWorker
 from app.services.notify import (
+    _fmt_price,
     buffer_for_digest,
     clear_digest,
     collect_for_filters,
+    event_audience,
     format_listing_card,
     in_quiet_hours,
     mark_sent,
@@ -120,6 +122,123 @@ async def send_listing_notification(
 
         await mark_sent(session, redis, user_id, listing_id)
         return {"user_id": user_id, "listing_id": listing_id, "sent": True}
+
+
+def format_status_card(listing: Any, kind: str, old_price: Any = None) -> str:
+    """Карточка статусного события (PLAN.md, фаза 3): price_drop/gone/returned."""
+    if kind == "price_drop":
+        line = "⬇️ <b>Цена снизилась</b>"
+        if old_price is not None:
+            line += (
+                f": {_fmt_price(old_price, listing.currency)} → "
+                f"{_fmt_price(listing.price, listing.currency)}"
+            )
+    elif kind == "returned":
+        line = "✅ <b>Снова в продаже</b>"
+    else:  # gone
+        line = "🔴 <b>Объявление исчезло с источника</b>"
+    return line + "\n" + format_listing_card(listing)
+
+
+async def _old_price(session: Any, listing_id: int) -> Any:
+    """Предыдущая точка цены (вторая с конца) — для «было → стало»."""
+    result = await session.execute(
+        select(ListingPriceHistory.price)
+        .where(ListingPriceHistory.listing_id == listing_id)
+        .order_by(ListingPriceHistory.recorded_at.desc())
+        .limit(2)
+    )
+    rows = list(result.scalars().all())
+    return rows[1] if len(rows) > 1 else None
+
+
+async def send_listing_status(
+    ctx: dict[str, Any], user_id: int, listing_id: int, kind: str
+) -> dict[str, Any]:
+    """Статусное уведомление (price_drop/gone/returned) — тот же контур, что
+    instant: rate limit, тихие часы (в буфер дайджеста), антидубль по kind."""
+    settings = get_settings()
+    redis: Redis = ctx["redis"]
+    bot_token: str = ctx.get("bot_token", "")
+
+    if await was_sent(redis, user_id, listing_id, kind):
+        return {
+            "user_id": user_id,
+            "listing_id": listing_id,
+            "kind": kind,
+            "skipped": "already_sent",
+        }
+    allowed = await redis.set(
+        f"rl:notify:{user_id}", "1", nx=True, ex=settings.notify_rate_limit_sec
+    )
+    if not allowed:
+        return {
+            "user_id": user_id,
+            "listing_id": listing_id,
+            "kind": kind,
+            "skipped": "rate_limited",
+        }
+
+    async with session_factory() as session:
+        listing = await session.get(Listing, listing_id)
+        if listing is None:
+            return {
+                "user_id": user_id,
+                "listing_id": listing_id,
+                "kind": kind,
+                "error": "not_found",
+            }
+
+        if in_quiet_hours(await _user_quiet_hours(session, user_id)):
+            # тихие часы: в буфер дайджеста, чтобы не потерять
+            await buffer_for_digest(redis, user_id, listing_id)
+            return {
+                "user_id": user_id,
+                "listing_id": listing_id,
+                "kind": kind,
+                "skipped": "quiet_hours",
+            }
+
+        old_price = (
+            await _old_price(session, listing_id) if kind == "price_drop" else None
+        )
+        ok, err = await send_telegram_message(
+            bot_token, user_id, format_status_card(listing, kind, old_price)
+        )
+        if not ok:
+            return {
+                "user_id": user_id,
+                "listing_id": listing_id,
+                "kind": kind,
+                "error": err,
+            }
+
+        await mark_sent(session, redis, user_id, listing_id, kind=kind)
+        return {"user_id": user_id, "listing_id": listing_id, "kind": kind, "sent": True}
+
+
+async def listing_status_scan(
+    ctx: dict[str, Any], kind: str, listing_ids: list[int]
+) -> dict[str, Any]:
+    """Фанаут статусных уведомлений аудитории sent_log (кто уже видел карточку).
+
+    Вызывается fetch-воркером: price_drop/returned сразу после парсинга,
+    gone — из stale_check_job (cron 04:00 UTC).
+    """
+    publisher: TaskPublisher | None = ctx.get("publisher")
+    dispatched = 0
+    async with session_factory() as session:
+        for listing_id in listing_ids:
+            for user_id in await event_audience(session, listing_id):
+                if publisher is not None:
+                    await publisher.enqueue(
+                        "send_listing_status", user_id, listing_id, kind
+                    )
+                dispatched += 1
+
+    if dispatched:
+        logger.info("status_scan_done: kind=%s dispatched=%s", kind, dispatched)
+    return {"kind": kind, "dispatched": dispatched}
 
 
 async def notify_new_listings(
@@ -280,7 +399,9 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 HANDLERS = {
     "send_listing_notification": send_listing_notification,
+    "send_listing_status": send_listing_status,
     "notify_new_listings": notify_new_listings,
+    "listing_status_scan": listing_status_scan,
     "digest_job": digest_job,
     "subscription_check_job": subscription_check_job,
 }

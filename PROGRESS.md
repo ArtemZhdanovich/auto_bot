@@ -1,6 +1,26 @@
 
 # Auto Selection — PROGRESS
 
+## 30. Отслеживание объявлений: наличие, история цен, статусные уведомления (фазы 1-3)
+
+- **Миграция `0009_listing_tracking`**: `content_hash`, `is_active`,
+  `first_seen_at`/`last_seen_at` (бэкфилл из `parsed_at`), `disappeared_at`/
+  `price_changed_at`, таблица `listing_price_history`, partial-индекс активных,
+  индекс по `last_seen_at`, BRIN по `first_seen_at`, индекс истории цен.
+- **Upsert переписан на CTE** (1 запрос): `old_price`/`old_currency`/`old_hash`/
+  `was_active` из `existing` (FOR UPDATE) + RETURNING; `first_seen_at` не
+  сбрасывается, `disappeared_at = NULL` при реактивации; дедуп: cross-source
+  Redis до записи, in-source — `ON CONFLICT` (source, source_id).
+- **`compute_content_hash`** = sha256(title|price|currency|mileage|sorted images);
+  смена хэша — единый триггер «объявление изменилось» (в фазе 5 — повторный
+  перевод тайтла). Точки цены пишутся при NEW и смене пары (price, currency).
+- **Фаза 3**: `0010_sent_log_kind` (PK → user_id+listing_id+kind), `mark_stale`
+  (CB-aware, RETURNING id), cron `stale_check_job` 04:00 UTC, статусные
+  уведомления `listing_status_scan` → `send_listing_status`
+  (price_drop/gone/returned; аудитория — получатели из sent_log; rate limit,
+  тихие часы, антидубль по kind).
+- Тесты: **284 passed** (+8 к 276), ruff чист, `alembic heads` → `0010`.
+
 ## 29. OpenAI выпилен + ParserDoctor: триаж причин падения источника
 
 - **LLM только за Китай**: провайдер OpenAI удалён из фабрики

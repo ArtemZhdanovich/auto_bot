@@ -25,7 +25,8 @@
    Price-drop/gone/returned ложатся на него (в фазе 3 добавить `kind`).
 5. **Нумерация миграций с `0009`.** 0007/0008 заняты. Переводные колонки
    (`title_raw/title_ru`, `source_language`, `translated_at`, …) — отдельной
-   миграцией `0010_translations` в фазе 5, НЕ в 0009.
+   миграцией `0011_translations` в фазе 5, НЕ в 0009 (номер 0010 занят
+   `sent_log.kind`, фаза 3).
 
 Дополнения ревью:
 - **`content_hash` — единый триггер.** Смена хэша = «объявление изменилось»;
@@ -43,9 +44,9 @@
 |---|---|---|---|
 | 1 | Миграция `0009_listing_tracking` + ORM | 1 день | — |
 | 2 | `compute_content_hash` + upsert `save_listings` (CTE) | 2 дня | фаза 1 |
-| 3 | Stale-cron (с проверкой CB) + уведомления price_drop/gone/returned, `sent_log.kind` | 2–3 дня | фаза 2 |
+| 3 | ✅ Stale-cron (с проверкой CB) + уведомления price_drop/gone/returned, `sent_log.kind` | 2–3 дня | фаза 2 |
 | 4 | История цен в UI (карточка, бейджи избранного) | 1 день | фаза 2 |
-| 5 | Перевод: `0010_translations`, title-only, NLLB | 3–4 дня | фаза 2 |
+| 5 | Перевод: `0011_translations`, title-only, NLLB | 3–4 дня | фаза 2 |
 | 6 | `raw_payload` → S3 (MinIO) + retention-крон | 1–2 дня | — |
 | 7 | Партиционирование `listing_price_history` (не `listings`!) | отложить | миллионы строк |
 
@@ -140,9 +141,10 @@ async def save_listings(session, redis, items) -> dict[str, int]:
     {'new', 'updated', 'unchanged', 'price_changed', 'reactivated', 'cross_dup'}
     """
 
-async def mark_stale(session, *, max_age_days: int = 3) -> int:
-    """is_active=false + disappeared_at для last_seen_at старше порога;
-    источники в circuit breaker пропускаются. Фаза 3."""
+async def mark_stale(session, *, max_age_days: int | None = None) -> list[int]:
+    """is_active=false + disappeared_at для last_seen_at старше порога
+    (STALE_MAX_AGE_DAYS); источники в circuit breaker пропускаются.
+    Возвращает id деактивированных (для «gone»-уведомлений). Фаза 3."""
 ```
 
 Fetch-воркер ставит `notify_new_listings` при `new + price_changed +
@@ -152,9 +154,9 @@ reactivated` (скан дешёвый, `sent_log`/Redis-дедуп отфиль�
 
 ## 5. Открытые вопросы (решить при наступлении фазы)
 
-- **Фаза 3 (UX):** `reactivated` — отдельный тип уведомления («снова в
-  продаже») или идёт как `new` с пометкой `was_active=false`? Решить при
-  проектировании `sent_log.kind`.
+- **Фаза 3 (UX):** РЕШЕНО: `reactivated` → отдельный kind `returned`
+  («снова в продаже»); аудитория статусных уведомлений — пользователи,
+  уже получавшие карточку объявления (sent_log).
 - **Фаза 5:** куда NLLB — в RAG-сервис (ML уже там, но завязан на
   Qdrant/RabbitMQ и не всегда поднят) или отдельный лёгкий микросервис?
 - **Фаза 5:** расширять ли `UnifiedListing.description` и отдают ли его

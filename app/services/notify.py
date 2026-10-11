@@ -27,29 +27,50 @@ logger = logging.getLogger(__name__)
 # Антидубли (ТЗ п. 8.6): sent_log + notified:{user_id}:{listing_id} TTL 7 дней
 
 
-def notified_key(user_id: int, listing_id: int) -> str:
-    return f"notified:{user_id}:{listing_id}"
+def notified_key(user_id: int, listing_id: int, kind: str = "new") -> str:
+    """Для 'new' — исторический ключ без суффикса (совместимость), иначе с ним."""
+    base = f"notified:{user_id}:{listing_id}"
+    return base if kind == "new" else f"{base}:{kind}"
 
 
-async def was_sent(redis: Redis, user_id: int, listing_id: int) -> bool:
-    return bool(await redis.get(notified_key(user_id, listing_id)))
+async def was_sent(
+    redis: Redis, user_id: int, listing_id: int, kind: str = "new"
+) -> bool:
+    return bool(await redis.get(notified_key(user_id, listing_id, kind)))
 
 
 async def mark_sent(
-    session: AsyncSession, redis: Redis, user_id: int, listing_id: int
+    session: AsyncSession,
+    redis: Redis,
+    user_id: int,
+    listing_id: int,
+    kind: str = "new",
 ) -> None:
-    """Фиксация отправки: строка в sent_log (идемпотентно) + Redis-ключ с TTL 7д."""
+    """Фиксация отправки: строка в sent_log (идемпотентно) + Redis-ключ с TTL 7д.
+
+    kind отличает повторные отправки того же объявления (price_drop и т.д.):
+    PK sent_log = (user_id, listing_id, kind), миграция 0010.
+    """
     await session.execute(
         pg_insert(SentLog)
-        .values(user_id=user_id, listing_id=listing_id)
+        .values(user_id=user_id, listing_id=listing_id, kind=kind)
         .on_conflict_do_nothing()
     )
     await session.commit()
     await redis.setex(
-        notified_key(user_id, listing_id),
+        notified_key(user_id, listing_id, kind),
         get_settings().notify_sent_ttl_sec,
         "1",
     )
+
+
+async def event_audience(session: AsyncSession, listing_id: int) -> list[int]:
+    """Аудитория статусных уведомлений (PLAN.md, фаза 3): пользователи, уже
+    получавшие карточку этого объявления (sent_log)."""
+    result = await session.execute(
+        select(SentLog.user_id).where(SentLog.listing_id == listing_id).distinct()
+    )
+    return list(result.scalars().all())
 
 
 # ---------------------------------------------------------------------------

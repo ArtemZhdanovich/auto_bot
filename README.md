@@ -194,6 +194,22 @@ AI-агент отвечает на фактические вопросы (ра�
 
 Постановка из hands: `python -c "import asyncio; from app.queue import enqueue_task; asyncio.run(enqueue_task('notify_new_listings'))"`.
 
+### Статусные уведомления и stale-cron (PLAN.md, фаза 3; миграции 0009-0010)
+
+- **`sent_log.kind`** (`0010_sent_log_kind`): `new | price_drop | gone | returned`,
+  PK расширен до `(user_id, listing_id, kind)`. Redis-ключи: `notified:{uid}:{lid}`
+  (для `new` — исторический формат) и `notified:{uid}:{lid}:{kind}` для остальных.
+- **`stale_check_job`** (cron 04:00 UTC, fetch-воркер): `mark_stale` помечает
+  `is_active=false + disappeared_at` объявлениям с `last_seen_at` старше
+  `STALE_MAX_AGE_DAYS` (по умолчанию 3 дня), пропуская источники в circuit
+  breaker (`source_health.error_streak >= SOURCE_CB_ERROR_STREAK`).
+- **`listing_status_scan` → `send_listing_status`**: карточки «⬇️ Цена снизилась
+  (было → стало; старая цена из `listing_price_history`)», «🔴 Исчезло»,
+  «✅ Снова в продаже» уходят тем, кто уже получал карточку этого объявления
+  (аудитория — `sent_log`); действуют те же rate limit, тихие часы и антидубли.
+- `price_drop` / `returned` ставятся fetch-воркером сразу после парсинга
+  (id-списки `price_changed_ids` / `reactivated_ids` из `save_listings`).
+
 ## Этап 3: AI-диалоговый агент
 
 Свободный текст пользователя → `POST /api/dialog/message` (internal-токен) → agent loop:

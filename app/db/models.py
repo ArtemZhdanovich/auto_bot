@@ -105,6 +105,8 @@ class SentLog(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     listing_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Тип уведомления (миграция 0010): new / price_drop / gone / returned
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True, default="new")
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

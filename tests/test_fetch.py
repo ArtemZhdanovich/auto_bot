@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.schemas.listing import UnifiedListing
-from app.services.fetch import compute_content_hash, save_listings
+from app.services.fetch import compute_content_hash, mark_stale, save_listings
 from tests.conftest import FakeRedis
 
 
@@ -118,14 +118,8 @@ def test_content_hash_ignores_image_order():
 async def test_new_listing_writes_first_price_point():
     session = UpsertSession([NEW_ROW])
     stats = await save_listings(session, None, [_item()])
-    assert stats == {
-        "new": 1,
-        "updated": 0,
-        "unchanged": 0,
-        "price_changed": 0,
-        "reactivated": 0,
-        "cross_dup": 0,
-    }
+    assert stats["new"] == 1 and stats["cross_dup"] == 0
+    assert stats["price_changed_ids"] == [] and stats["reactivated_ids"] == []
     assert session.committed is True
     assert len(session.executed) == 2  # upsert + первая точка цены
     assert "listing_price_history" in session.executed[1][0]
@@ -149,6 +143,7 @@ async def test_price_change_writes_price_point():
     )
     stats = await save_listings(session, None, [_item()])
     assert stats["price_changed"] == 1 and stats["updated"] == 0
+    assert stats["price_changed_ids"] == [1]
     assert len(session.executed) == 2
     assert "listing_price_history" in session.executed[1][0]
     assert session.executed[1][1]["price"] == Decimal("38500")
@@ -165,6 +160,7 @@ async def test_reactivation_resets_disappeared_at():
     session = UpsertSession([_row(_item(), was_active=False)])
     stats = await save_listings(session, None, [_item()])
     assert stats["reactivated"] == 1
+    assert stats["reactivated_ids"] == [1]
     assert "disappeared_at = NULL" in session.executed[0][0]
     assert len(session.executed) == 1  # цена не менялась — точки нет
 
@@ -175,6 +171,7 @@ async def test_reactivation_with_price_change_writes_point():
     )
     stats = await save_listings(session, None, [_item()])
     assert stats["reactivated"] == 1
+    assert stats["reactivated_ids"] == [1]
     assert len(session.executed) == 2
     assert "listing_price_history" in session.executed[1][0]
 
@@ -188,3 +185,76 @@ async def test_cross_source_dup_checked_before_upsert():
     stats = await save_listings(second, redis, [_item()])
     assert stats["cross_dup"] == 1
     assert second.executed == []  # до upsert дело не дошло
+
+
+# ---------- mark_stale / stale_check_job (фаза 3) ----------
+
+
+class StaleSession:
+    """Стаб: execute() по очереди возвращает заготовленные id-списки."""
+
+    def __init__(self, results: list[list]):
+        self._results = list(results)
+        self.executed: list[str] = []
+        self.committed = False
+
+    async def execute(self, stmt):
+        self.executed.append(str(stmt))
+        rows = self._results.pop(0)
+
+        class _R:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return rows
+
+        return _R()
+
+    async def commit(self):
+        self.committed = True
+
+
+async def test_mark_stale_deactivates_and_skips_cb_sources():
+    session = StaleSession([["encar"], [7, 9]])  # сначала CB-источники, затем id
+    ids = await mark_stale(session, max_age_days=3)
+    assert ids == [7, 9]
+    assert session.committed is True
+    assert "source_health" in session.executed[0]  # CB-источники учтены
+    assert "NOT IN" in session.executed[1]
+    assert "disappeared_at" in session.executed[1] and "is_active" in session.executed[1]
+
+
+async def test_mark_stale_without_cb_sources_no_not_in():
+    session = StaleSession([[], [1]])
+    ids = await mark_stale(session, max_age_days=3)
+    assert ids == [1]
+    assert "NOT IN" not in session.executed[1]
+
+
+async def test_stale_check_job_enqueues_gone(monkeypatch):
+    import app.workers.fetch as fetch_mod
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+    async def fake_mark_stale(session, *, max_age_days=None):
+        return [5, 6]
+
+    jobs: list[tuple] = []
+
+    async def fake_enqueue(task, *args):
+        jobs.append((task,) + args)
+        return "msg-id"
+
+    monkeypatch.setattr(fetch_mod, "session_factory", lambda: _Session())
+    monkeypatch.setattr(fetch_mod, "mark_stale", fake_mark_stale)
+    monkeypatch.setattr(fetch_mod, "enqueue_task", fake_enqueue)
+
+    result = await fetch_mod.stale_check_job({})
+    assert result == {"gone": 2}
+    assert jobs == [("listing_status_scan", "gone", [5, 6])]
