@@ -22,6 +22,7 @@ from app.core.config import get_settings
 from app.db.models import Listing, ListingPriceHistory, User, UserFilter
 from app.db.session import session_factory
 from app.queue import QUEUE_SEND, CronSpec, TaskPublisher, TaskWorker
+from app.services import rate_limit
 from app.services.notify import (
     _fmt_price,
     buffer_for_digest,
@@ -44,10 +45,18 @@ TELEGRAM_API = "https://api.telegram.org"
 async def send_telegram_message(
     bot_token: str, chat_id: int, text: str
 ) -> tuple[bool, str | None]:
-    """sendMessage с parse_mode=HTML. 429 → ждём retry_after и повторяем раз."""
+    """sendMessage с parse_mode=HTML. 429 → ждём retry_after и повторяем раз.
+
+    Перед отправкой — Token Bucket (ТЗ п. 12.6): ~30 msg/s глобально,
+    ~1 msg/s на чат; Redis лежит → отправка не блокируется (fail-open).
+    """
     if not bot_token:
         logger.warning("telegram_send_skipped: no BOT_TOKEN")
         return False, "no_bot_token"
+
+    waited = await rate_limit.rate_limit_wait(chat_id)
+    if waited:
+        logger.info("telegram_rate_limited_local: waited=%.2fs chat=%s", waited, chat_id)
 
     url = f"{TELEGRAM_API}/bot{bot_token}/sendMessage"
     payload = {
@@ -381,7 +390,12 @@ async def subscription_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     # Redis (данные: дедуп, rate limit, digest-буферы, ключи подписок)
-    ctx["redis"] = Redis.from_url(settings.redis_url)
+    redis = Redis.from_url(settings.redis_url)
+    ctx["redis"] = redis
+    # Token Bucket Telegram (ТЗ п. 12.6): 30 msg/s глобально, 1 msg/s на чат
+    rate_limit.init_rate_limiter(
+        redis, settings.telegram_rate_global_per_sec, settings.telegram_rate_chat_per_sec
+    )
     ctx["bot_token"] = settings.bot_token
     ctx["publisher"] = TaskPublisher(settings.rabbitmq_url)
     logger.info("send_worker_started")
@@ -391,6 +405,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     publisher: TaskPublisher | None = ctx.get("publisher")
     if publisher:
         await publisher.aclose()
+    rate_limit.reset_rate_limiter()
     redis: Redis | None = ctx.get("redis")
     if redis:
         await redis.aclose()

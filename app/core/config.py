@@ -84,6 +84,10 @@ class Settings(BaseSettings):
 
     # Уведомления (этап 4, ТЗ п. 4.6, 8.6)
     notify_rate_limit_sec: int = 30  # не чаще 1 сообщения / 30 сек (п. 8.6)
+    # Token Bucket Telegram (ТЗ п. 12.6): ~30 msg/s глобально, ~1 msg/s на чат.
+    # 0 = лимитер выключен; Redis лежит → fail-open (429-обработка — страховка).
+    telegram_rate_global_per_sec: float = 30.0
+    telegram_rate_chat_per_sec: float = 1.0
     notify_scan_window_sec: int = 1800  # «свежие» объявления для сканирования фильтров
     notify_sent_ttl_sec: int = 60 * 60 * 24 * 7  # notified:{uid}:{lid}, 7 дней
     digest_max_cards: int = 5  # 3–5 карточек в дайджесте
