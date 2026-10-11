@@ -5,6 +5,8 @@ import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-route
 import { AppRoot, Placeholder, Tabbar } from "@telegram-apps/telegram-ui";
 
 import { authorize } from "./api/auth";
+import { getAccessToken } from "./api/client";
+import { LoginScreen } from "./screens/Login";
 import { FeedScreen } from "./screens/Feed";
 import { ListingScreen } from "./screens/Listing";
 import { FiltersScreen } from "./screens/Filters";
@@ -40,10 +42,14 @@ export function App() {
   const [onboarded, setOnboarded] = useState(
     () => sessionStorage.getItem("autobot.onboarded") === "1",
   );
+  const [authed, setAuthed] = useState(() => Boolean(getAccessToken()));
 
   useEffect(() => {
     authorize()
-      .catch(() => undefined) // вне Telegram — read-only режим ленты
+      .then((r) => {
+        if (r) setAuthed(true);
+      })
+      .catch(() => undefined) // вне Telegram — покажем форму входа
       .finally(() => setAuth("ready"));
   }, []);
 
@@ -51,6 +57,14 @@ export function App() {
     return (
       <AppRoot>
         <Placeholder description="Загрузка…" />
+      </AppRoot>
+    );
+  }
+
+  if (!authed) {
+    return (
+      <AppRoot>
+        <LoginScreen onAuthed={() => setAuthed(true)} />
       </AppRoot>
     );
   }

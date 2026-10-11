@@ -35,7 +35,7 @@ export function isTelegramContext(): boolean {
   return Boolean(getWebApp()?.initData);
 }
 
-/** Обмен initData на JWT. Вне Telegram возвращает null (read-only режим). */
+/** Обмен initData на JWT. Вне Telegram возвращает null (веб-режим: логин формой). */
 export async function authorize(): Promise<AuthResponse | null> {
   const wa = getWebApp();
   if (!wa?.initData) {
@@ -46,6 +46,26 @@ export async function authorize(): Promise<AuthResponse | null> {
   const resp = await api<AuthResponse>("/auth/telegram", {
     method: "POST",
     body: JSON.stringify({ init_data: wa.initData }),
+  });
+  setTokens(resp.access_token, resp.refresh_token);
+  return resp;
+}
+
+/** Регистрация на сайте: email + пароль → JWT (поиск доступен после регистрации). */
+export async function webRegister(email: string, password: string, firstName?: string): Promise<AuthResponse> {
+  const resp = await api<AuthResponse>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password, first_name: firstName || null }),
+  });
+  setTokens(resp.access_token, resp.refresh_token);
+  return resp;
+}
+
+/** Вход на сайте: email + пароль → JWT. */
+export async function webLogin(email: string, password: string): Promise<AuthResponse> {
+  const resp = await api<AuthResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
   });
   setTokens(resp.access_token, resp.refresh_token);
   return resp;
