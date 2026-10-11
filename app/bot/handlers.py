@@ -208,16 +208,21 @@ def build_main_menu_kb() -> InlineKeyboardMarkup:
     """Главное инлайн-меню бота (WebApp + быстрые действия)."""
     from aiogram.types import WebAppInfo
 
-    from app.core.config import get_settings
-
-    miniapp_url = get_settings().miniapp_url
+    miniapp_url = _miniapp_url()  # только HTTPS, иначе кнопки не будет
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
                 text="🚗 AI-подбор авто", callback_data="menu:ai"
             )
         ],
-        [InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=miniapp_url))],
+    ]
+    if miniapp_url:
+        rows.append(
+            [InlineKeyboardButton(
+                text="📱 Открыть приложение", web_app=WebAppInfo(url=miniapp_url)
+            )]
+        )
+    rows.extend([
         [
             InlineKeyboardButton(text="🔔 Уведомления", callback_data="menu:notify"),
             InlineKeyboardButton(text="⭐ Подписка", callback_data="menu:subscribe"),
@@ -226,7 +231,7 @@ def build_main_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔄 Сбросить диалог", callback_data="menu:reset"),
             InlineKeyboardButton(text="❓ Помощь", callback_data="menu:help"),
         ],
-    ]
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
