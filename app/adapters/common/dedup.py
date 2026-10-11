@@ -58,7 +58,11 @@ async def is_duplicate(redis: Redis, listing: UnifiedListing) -> bool:
 
 
 def raw_payload(listing: UnifiedListing) -> dict[str, Any]:
-    """Сырые данные для колонки `listings.raw_payload` (перепарсинг)."""
+    """Сырые данные объявления для S3-объекта (перепарсинг; PLAN.md, фаза 6).
+
+    Раньше писалcя в колонку listings.raw_payload (миграция 0012 выпилила её):
+    теперь кладётся в MinIO ключом raw/{source}/{yyyy}/{mm}/{id}_{hash}.json.
+    """
     return {
         "source": listing.source,
         "schema_version": listing.schema_version,

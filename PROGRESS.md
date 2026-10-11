@@ -1,6 +1,39 @@
 
 # Auto Selection — PROGRESS
 
+## 32. raw_payload → S3/MinIO (фаза 6)
+
+- **boto3 vs aioboto3 решено: aioboto3** — fetch/send воркеры асинхронные,
+  синхронный boto3 блокировал бы event loop. **Миграция `0012_raw_payload_s3`**:
+  колонка `listings.raw_payload` (JSONB, раздувала БД/бэкапы) выпилена, вместо
+  неё `raw_key` (TEXT) — ключ S3-объекта; NULL = не загружен (MinIO лежал /
+  флаг выключен).
+- **`S3Storage`** (`app/services/storage.py`): ленивый импорт aioboto3,
+  botocore `Config` (retries=3, connect 5s / read 30s), MinIO через
+  `endpoint_url`; ключ `raw/{source}/{yyyy}/{mm}/{listing_id}_{content_hash}.json`
+  (retention по префиксу + бесплатная дедупликация: хэш не менялся — объект
+  не перезаписываем); S3 Metadata (source/listing_id/content_hash/fetched_at);
+  `put_raw`/`presign_raw`/`delete_older_than`/`ensure_bucket` — все с
+  fallback: ошибка → warning в лог, объявления сохраняются.
+- **`save_listings(..., storage=)`**: NEW/смена `content_hash` → параллельная
+  загрузка (`asyncio.gather`, `return_exceptions`) + executemany
+  `UPDATE listings SET raw_key`; без изменений → загрузки нет.
+  Fetch-воркер создаёт storage в startup-ctx (`ensure_bucket`).
+- **Retention-крон** `raw_retention_job` 03:30 UTC: list_objects_v2 пагинацией
+  → пакетный delete_objects (≤1000), объекты старше `RAW_RETENTION_DAYS=180`.
+- **Админ-endpoint `GET /api/admin/listings/{id}/raw`** (internal token):
+  presigned GET на 10 мин (`RAW_PRESIGN_TTL_SEC`), прямого доступа к MinIO
+  у админки нет; raw_key NULL → 404, storage недоступен → 502.
+- Конфиг: `RAW_PAYLOAD_ENABLED` (по умолчанию false), `S3_ENDPOINT_URL`/
+  `S3_BUCKET`/`S3_ACCESS_KEY`/`S3_SECRET_KEY`/`S3_REGION` (через `env_file: .env`
+  в compose; в docker-сети endpoint `http://minio:9000`). PLAN: открытый
+  вопрос закрыт; фаза 7 — добавлен план (RANGE по `recorded_at`, PK обязан
+  включать ключ, pg_partman, связка «горячее/холодное» с MinIO).
+- Тесты: **310 passed** (+10: формат ключа, загрузка NEW/raw_key-UPDATE,
+  unchanged без загрузки, fallback при ошибке S3, disabled, retention-крон,
+  admin presigned URL / 404), ruff чист, `alembic heads` → `0012`,
+  `docker compose config` ОК.
+
 ## 31. Перевод тайтлов: NLLB-микросервис (фаза 5)
 
 - **Размещение NLLB (открытый вопрос PLAN) решено**: отдельный optional-сервис

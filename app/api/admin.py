@@ -15,9 +15,10 @@ from app.core.config import get_settings
 from app.core.deps import SessionDep
 from app.queue import enqueue_task
 from app.core.deps_internal import check_internal_token
-from app.db.models import Lead, Source, SourceHealth
+from app.db.models import Lead, Listing, Source, SourceHealth
 from app.schemas.criteria import SourceConfig
 from app.services.admin_assistant import assistant_reply
+from app.services.storage import storage_from_settings
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -185,4 +186,39 @@ async def assistant_chat(
         if aclose is not None:
             await aclose()
     return {"reply": reply}
+
+
+@router.get("/listings/{listing_id}/raw")
+async def admin_listing_raw(
+    listing_id: int,
+    session: SessionDep,
+    x_internal_token: str | None = InternalToken,
+) -> dict:
+    """Presigned URL на сырой payload объявления (PLAN.md, фаза 6).
+
+    Прямой доступ к MinIO админке не даём — короткий presigned GET
+    (RAW_PRESIGN_TTL_SEC, по умолчанию 10 мин). raw_key = NULL (MinIO
+    был недоступен при парсинге или флаг выключен) → 404.
+    """
+    check_internal_token(x_internal_token)
+    listing = (
+        await session.execute(select(Listing).where(Listing.id == listing_id))
+    ).scalar_one_or_none()
+    if listing is None or not listing.raw_key:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "raw payload not found in storage"
+        )
+    settings = get_settings()
+    url = await storage_from_settings().presign_raw(
+        listing.raw_key, settings.raw_presign_ttl_sec
+    )
+    if url is None:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "storage unavailable"
+        )
+    return {
+        "key": listing.raw_key,
+        "url": url,
+        "expires_in": settings.raw_presign_ttl_sec,
+    }
 

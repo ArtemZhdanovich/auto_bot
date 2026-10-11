@@ -329,3 +329,28 @@ Optional-микросервис NLLB (`nllb-200-distilled-600M`, CPU, :8200): п
 docker compose up -d translate
 uv run alembic upgrade head   # 0011_translations
 ```
+
+## Сырые ответы адаптеров в MinIO (raw_payload, фаза 6 PLAN.md)
+
+Сырые JSON от encar/kcar/che168 — «холодные» данные (аудит, отладка парсера):
+в PostgreSQL не хранятся (колонка `raw_payload` выпилена миграцией `0012`,
+вместо неё `listings.raw_key` — ключ S3-объекта). Загрузка через **aioboto3**
+(не блокирует event loop), MinIO — через `S3_ENDPOINT_URL`.
+
+- Ключ: `raw/{source}/{yyyy}/{mm}/{listing_id}_{content_hash}.json` — retention
+  по префиксу + дедупликация (хэш не менялся → объект не перезаписывается).
+  Metadata: source, listing_id, content_hash, fetched_at.
+- Fallback обязателен: MinIO недоступен/флаг выключен → объявления сохраняются,
+  `raw_key = NULL` (аудит теряется — не страшно).
+- Retention-крон `raw_retention_job` (03:30 UTC): удаляет объекты старше
+  `RAW_RETENTION_DAYS` (по умолчанию 180).
+- Админка: `GET /api/admin/listings/{id}/raw` (заголовок `X-Internal-Token`)
+  → presigned GET на 10 минут; прямого доступа к MinIO у UI нет.
+
+Включение:
+```bash
+# .env: RAW_PAYLOAD_ENABLED=true, S3_ENDPOINT_URL=http://localhost:9000
+#       (внутри docker-сети — http://minio:9000), S3_ACCESS_KEY/S3_SECRET_KEY
+docker compose up -d minio
+uv run alembic upgrade head   # 0012_raw_payload_s3
+```

@@ -209,7 +209,9 @@ class Listing(Base):
     mileage_km: Mapped[int | None] = mapped_column(Integer)
     vin: Mapped[str | None] = mapped_column(Text)
     images: Mapped[list[Any]] = mapped_column(JSONB, default=list)
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Сырой ответ адаптера живёт в S3/MinIO (PLAN.md, фаза 6, миграция 0012):
+    # ключ объекта; NULL = не загружен (MinIO недоступен / флаг выключен).
+    raw_key: Mapped[str | None] = mapped_column(Text)
     schema_version: Mapped[int] = mapped_column(Integer, default=1)
     parsed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

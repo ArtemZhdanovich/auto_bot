@@ -47,7 +47,7 @@
 | 3 | ✅ Stale-cron (с проверкой CB) + уведомления price_drop/gone/returned, `sent_log.kind` | 2–3 дня | фаза 2 |
 | 4 | ✅ История цен в UI (карточка, бейджи избранного) | 1 день | фаза 2 |
 | 5 | ✅ Перевод: `0011_translations`, title-only, NLLB (`services/translate`) | 3–4 дня | фаза 2 |
-| 6 | `raw_payload` → S3 (MinIO) + retention-крон | 1–2 дня | — |
+| 6 | ✅ `raw_payload` → S3 (MinIO) + retention-крон | 1–2 дня | — |
 | 7 | Партиционирование `listing_price_history` (не `listings`!) | отложить | миллионы строк |
 
 ---
@@ -166,6 +166,30 @@ reactivated` (скан дешёвый, `sent_log`/Redis-дедуп отфиль�
 - **Фаза 5:** РЕШЕНО: `description` НЕ заводим — translation MVP title-only
   (`title_raw`/`title_ru` в `0011_translations`); расширение контракта —
   отдельно, с адаптерами.
-- **Фаза 6:** boto3 vs aioboto3 для S3/MinIO (в `app/` S3-клиента пока нет).
+- **Фаза 6:** РЕШЕНО: **aioboto3** (не boto3) — fetch/send воркеры асинхронные,
+  синхронный boto3 блокировал бы event loop. `S3Storage`
+  (app/services/storage.py): ключ `raw/{source}/{yyyy}/{mm}/{id}_{hash}.json`
+  (retention по префиксу + дедуп по хэшу), S3 Metadata (source/listing_id/
+  content_hash/fetched_at), botocore retries+timeouts, флаг
+  `RAW_PAYLOAD_ENABLED`, fallback: MinIO недоступен → объявления сохраняются,
+  `raw_key` = NULL. Админке — presigned GET (`GET /api/admin/listings/{id}/raw`,
+  10 мин), прямого доступа к MinIO нет. Retention-крон 03:30 UTC
+  (`raw_retention_job`, `RAW_RETENTION_DAYS=180`).
 - **Опционально:** перевод индексов `listings` в partial-версии
   (`WHERE is_active`) — мерить на реальных объёмах.
+
+## 6. Фаза 7 — партиционирование `listing_price_history` (когда «пора»)
+
+Триггер: таблица стабильно > 1–2 млн строк и запросы динамики цены сканируют
+слишком много. Раньше — не трогать (overhead на вставку, сложнее миграции).
+
+Когда придёт время:
+- **RANGE по `recorded_at`** (месяц/неделя); LIST/HASH не подходят для time-series.
+- **Ключ партиционирования обязан входить в каждый уникальный индекс**:
+  PK сделать `(listing_id, recorded_at)` — заранее спроектировать схему так,
+  чтобы миграция была `ATTACH`, а не перестройкой.
+- **pg_partman** для автосоздания партиций (иначе вставки упадут на границе месяца).
+- **Retention**: старые партиции (12–24 мес) — `DROP TABLE` (мгновенно) или
+  архив в S3 (MinIO из фазы 6 — связка «горячее/холодное»).
+- Альтернатива при аналитике/агрегатах — TimescaleDB (чанки, сжатие,
+  continuous aggregates); для MVP не нужно.

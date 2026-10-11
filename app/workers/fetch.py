@@ -10,7 +10,7 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from redis.asyncio import Redis
@@ -26,6 +26,7 @@ from app.schemas.criteria import SearchCriteria
 from app.services.cron import cron_matches
 from app.services.fetch import mark_stale, save_listings
 from app.services.source_health import record_error, record_success, should_skip_source
+from app.services.storage import storage_from_settings
 from app.services.translate_client import translate_client_from_settings
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,9 @@ async def fetch_source_task(
                 result = await adapter.fetch(criteria_obj, cursor)
                 latency_ms = int((time.perf_counter() - started) * 1000)
 
-                stats = await save_listings(session, redis, result.items)
+                stats = await save_listings(
+                    session, redis, result.items, storage=ctx.get("storage")
+                )
                 for key, value in stats.items():
                     if key == "price_changed_ids":
                         event_ids["price_drop"].extend(value)
@@ -273,6 +276,20 @@ async def translate_listings(
     return {"translated": len(translations)}
 
 
+async def raw_retention_job(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron 03:30 UTC (PLAN.md, фаза 6): удалить raw-объекты старше
+    RAW_RETENTION_DAYS. MinIO лежит → ошибка внутри storage, ничего не падает.
+    """
+    storage = ctx.get("storage")
+    if storage is None or not storage.enabled:
+        return {"deleted": 0, "skipped": True}
+    settings = get_settings()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.raw_retention_days)
+    deleted = await storage.delete_older_than(cutoff)
+    logger.info("raw_retention_done: deleted=%s cutoff=%s", deleted, cutoff.date())
+    return {"deleted": deleted}
+
+
 async def stale_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
     """Cron 04:00 UTC (PLAN.md, фаза 3): устаревшие объявления → is_active=false.
 
@@ -300,6 +317,10 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["redis"] = redis
     # Клиент перевода (фаза 5): disabled, если TRANSLATE_ENABLED=false или URL пуст
     ctx["translate"] = translate_client_from_settings(redis)
+    # S3-хранилище raw_payload (фаза 6): disabled, если S3_ENDPOINT_URL пуст
+    storage = storage_from_settings()
+    await storage.ensure_bucket()
+    ctx["storage"] = storage
     logger.info("fetch_worker_started: sources=%s", [a.source_name for a in registry.all()])
 
 
@@ -317,6 +338,7 @@ HANDLERS = {
     "fetch_source_task": fetch_source_task,
     "stale_check_job": stale_check_job,
     "translate_listings": translate_listings,
+    "raw_retention_job": raw_retention_job,
 }
 
 
@@ -335,7 +357,10 @@ async def main() -> None:
         concurrency=3,   # как arq max_jobs=3
         job_timeout=120,  # как arq job_timeout
         interval_jobs=[IntervalSpec(schedule_fetch_due, every_sec=60)],
-        cron_jobs=[CronSpec(stale_check_job, hour=4, minute=0)],
+        cron_jobs=[
+            CronSpec(stale_check_job, hour=4, minute=0),
+            CronSpec(raw_retention_job, hour=3, minute=30),  # фаза 6: retention raw
+        ],
     )
     try:
         await worker.run()

@@ -19,6 +19,7 @@ dependencies = [
     "selectolax>=0.3",
     "aio-pika>=10.1.1",
     "cryptography>=45",
+    "aioboto3>=13.2",
 ]
 
 [dependency-groups]

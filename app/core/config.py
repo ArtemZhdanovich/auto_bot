@@ -110,6 +110,19 @@ class Settings(BaseSettings):
         "che168": "zho_Hans",
     }
 
+    # S3/MinIO: raw_payload в холодное хранилище (PLAN.md, фаза 6).
+    # aioboto3 (не блокирует event loop воркеров); MinIO — через endpoint_url.
+    # Выключено (флаг/пустой endpoint) → raw не пишется никуда, объявления
+    # сохраняются как обычно (fallback обязателен).
+    raw_payload_enabled: bool = False  # feature flag
+    s3_endpoint_url: str = ""  # напр. http://localhost:9000 (пусто = выключен)
+    s3_bucket: str = "raw-payloads"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "us-east-1"
+    raw_retention_days: int = 180  # retention-крон: удалять объекты старше N дней
+    raw_presign_ttl_sec: int = 600  # presigned GET для админки, 10 мин
+
     # Прокси DataImpulse (опционально): шлюз для парсеров, если источники глушат.
     # Официальный формат: http://login__cr.cn;sessid.X:password@gw.dataimpulse.com:823
     # Задаёте user+pass → источники с capabilities.use_proxy=true ходят через шлюз.
