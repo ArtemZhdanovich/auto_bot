@@ -13,9 +13,11 @@ from sqlalchemy import (
     Integer,
     Numeric,
     PrimaryKeyConstraint,
+    String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -184,6 +186,13 @@ class Listing(Base):
         Index("idx_listings_year", "year"),
         Index("idx_listings_price", "price"),
         Index("idx_listings_vin", "vin"),
+        # Отслеживание (миграция 0009)
+        Index("idx_listings_last_seen", "last_seen_at"),
+        Index(
+            "idx_listings_active",
+            "is_active",
+            postgresql_where=text("is_active = TRUE"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -204,6 +213,36 @@ class Listing(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+    # Отслеживание наличия и изменений (PLAN.md, миграция 0009)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    disappeared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    price_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ListingPriceHistory(Base):
+    """Точка цены: строка только при изменении (PLAN.md, миграция 0009)."""
+
+    __tablename__ = "listing_price_history"
+    __table_args__ = (Index("idx_price_history_listing", "listing_id", "recorded_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    listing_id: Mapped[int] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), nullable=False
+    )
+    price: Mapped[float] = mapped_column(Numeric, nullable=False)
+    currency: Mapped[str | None] = mapped_column(String(8))
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class AnalyticsEvent(Base):

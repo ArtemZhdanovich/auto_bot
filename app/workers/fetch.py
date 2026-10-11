@@ -53,7 +53,14 @@ async def fetch_source_task(
             logger.error("adapter_not_loaded: %s", source_name)
             return {"source": source_name, "error": "adapter not loaded"}
 
-        saved = in_source_dup = cross_dup = 0
+        totals = {
+            "new": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "price_changed": 0,
+            "reactivated": 0,
+            "cross_dup": 0,
+        }
         cursor: str | None = None
         pages = 0
         parsed_total = 0
@@ -64,9 +71,8 @@ async def fetch_source_task(
                 latency_ms = int((time.perf_counter() - started) * 1000)
 
                 stats = await save_listings(session, redis, result.items)
-                saved += stats["saved"]
-                in_source_dup += stats["in_source_dup"]
-                cross_dup += stats["cross_dup"]
+                for key, value in stats.items():
+                    totals[key] += value
                 parsed_total += len(result.items)
 
                 await record_success(
@@ -83,11 +89,11 @@ async def fetch_source_task(
             return {
                 "source": source_name,
                 "error": str(exc),
-                "saved": saved,
+                "new": totals["new"],
                 "pages": pages,
             }
 
-        if saved:
+        if totals["new"] or totals["price_changed"] or totals["reactivated"]:
             await enqueue_notify_scan(ctx, source_name)
 
         if pages and parsed_total == 0:
@@ -95,13 +101,7 @@ async def fetch_source_task(
             # вёрстка. Зовём ИИ-ремонтника (fire-and-forget, не ломает фетч).
             _fire_doctor(ctx, source_name, adapter)
 
-        return {
-            "source": source_name,
-            "pages": pages,
-            "saved": saved,
-            "in_source_dup": in_source_dup,
-            "cross_dup": cross_dup,
-        }
+        return {"source": source_name, "pages": pages, **totals}
 
 
 def _fire_doctor(ctx: dict[str, Any], source_name: str, adapter: Any) -> None:
