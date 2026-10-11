@@ -1,145 +1,615 @@
-# bot-encar — Экосистема подбора автомобилей
+# bot-encar — Экосистема подбора автомобилей (Encar + KCar + Che168)
 
-Реализация ТЗ (`TZ.md`), этапы 0–6.
+Telegram-бот + Mini App для подбора автомобилей из Кореи и Китая: агрегация
+объявлений с нескольких источников, AI-диалоговый ассистент (GLM) с RAG-базой
+знаний, уведомления по фильтрам, монетизация (Telegram Stars + CPL-лиды для
+партнёров), партнёрский API и полный админ-контур.
 
-## Структура
+Реализация ТЗ (`TZ.md`), этапы 0–8 + фазы 1–7 `PLAN.md`. Текущий статус и
+бэклог — `PROGRESS.md` (статус-дашборд в §0).
+
+- **Языки/рантайм**: Python 3.13 (asyncio), TypeScript/React 18
+- **Менеджер пакетов**: `uv` (Python), `npm` (frontend)
+- **БД/инфраструктура**: PostgreSQL 16, Redis 7, RabbitMQ 3, Qdrant, MinIO (S3)
+- **Тесты**: 350 passed, `ruff` clean, `mypy` настроен
+
+---
+
+## Содержание
+
+1. [Архитектура](#архитектура)
+2. [Стек и репозиторий](#стек-и-репозиторий)
+3. [Быстрый старт](#быстрый-старт)
+4. [Docker Compose: все сервисы](#docker-compose-все-сервисы)
+5. [Конфигурация (.env)](#конфигурация-env)
+6. [Telegram-бот](#telegram-бот)
+7. [Backend API](#backend-api)
+8. [Адаптеры источников и парсинг](#адаптеры-источников-и-парсинг)
+9. [Очередь задач и воркеры](#очередь-задач-и-воркеры)
+10. [AI-слой: LLM, агент, RAG](#ai-слой-llm-агент-rag)
+11. [Микросервис RAG (services/rag)](#микросервис-rag-servicesrag)
+12. [Перевод тайтлов (services/translate)](#перевод-тайтлов-servicestranslate)
+13. [Сырые ответы в MinIO (raw_payload)](#сырые-ответы-в-minio-raw_payload)
+14. [Монетизация: подписки и Telegram Stars](#монетизация-подписки-и-telegram-stars)
+15. [Лиды и партнёрский контур с CPL-биллингом](#лиды-и-партнёрский-контур-с-cpl-биллингом)
+16. [Аналитика и воронки](#аналитика-и-воронки)
+17. [Мониторинг и алерты](#мониторинг-и-алерты)
+18. [Безопасность](#безопасность)
+19. [Модель данных и миграции](#модель-данных-и-миграции)
+20. [Тесты и качество](#тесты-и-качество)
+21. [Прод-чеклист](#прод-чеклист)
+
+---
+
+## Архитектура
 
 ```
-app/                 # Backend (FastAPI + aiogram + ARQ)
-├── api/            # auth (initData/JWT), users, me, filters, listings, admin, dialog, notifications
-├── bot/            # aiogram 3: /start, /help, /reset, /stop, /resume; FSM в Redis
-├── core/           # config (pydantic-settings), security (initData/JWT), deps
-├── db/
-│   ├── models.py   # SQLAlchemy-модели (ТЗ п. 5.8)
-│   ├── session.py  # async engine + сессии
-│   └── migrations/ # Alembic
-├── schemas/        # Pydantic-контракты: UnifiedListing, SearchCriteria, DialogState (ТЗ п. 5)
-├── services/       # бизнес-логика (users, notify)
-├── adapters/       # источники (Encar, KCar), дедуп, прокси
-├── workers/        # fetch и send (+ cron подписок), очередь RabbitMQ
-├── queue/          # RabbitMQ: producer (enqueue_task), TaskWorker, DLQ, cron
-└── main.py         # uvicorn app.main:app
-frontend/            # Mini App: React + Vite + TS + @telegram-apps/telegram-ui (этап 5)
+                    ┌────────────────────────── Telegram ──────────────────────────┐
+                    │  Bot API (long polling)          WebApp (Mini App :8080)     │
+                    └──────────────┬───────────────────────────┬───────────────────┘
+                                   │                           │ initData → JWT
+                            ┌──────▼──────┐             ┌──────▼──────┐
+                            │  bot        │   HTTP      │  Mini App   │ React 18 + Vite
+                            │  (aiogram3) │────────────▶│  + frontend │ (nginx, /api → backend)
+                            └──────┬──────┘             └──────┬──────┘
+                                   │ enqueue (bot → backend)   │ REST (JWT)
+                                   │                           │
+┌─────────────┐             ┌──────▼───────────────────────────▼──────┐
+│  Encar      │             │            backend (FastAPI :8000)      │
+│  KCar       │  httpx      │  auth / users / filters / listings /    │
+│  Che168 ────┼────────────▶│  favorites / payments / dialog / ai /   │
+│  (адаптеры, │  (+прокси   │  notifications / leads / partners /     │
+│  registry)  │  Data-      │  admin                                  │
+└─────────────┘  Impulse)   └───┬──────────┬──────────┬──────────┬───────┘
+                                │          │          │          │
+                     ┌──────────▼───┐ ┌────▼────┐ ┌───▼───┐ ┌────▼─────────┐
+                     │ PostgreSQL16 │ │ Redis 7 │ │Rabbit │ │ LLM GLM 4.6  │
+                     │ (данные)     │ │ (FSM,   │ │MQ 3   │ │ api.z.ai     │
+                     └──────────────┘ │ дедуп,  │ │очереди│ └────┬─────────┘
+                                      │ кэши,   │ └───┬───┘      │ fallback
+                                      │ лимитеры│     │          ▼
+                                      └─────────┘     │    ┌──────────────┐
+                                                      │    │ services/rag │ rag_api :8100
+                                           ┌──────────▼───┐ │ rag_worker   │ ← Qdrant :6333
+                                           │ fetch worker │ │  (RQ-ядро)   │ ← MinIO :9000
+                                           │ send worker  │ └──────────────┘
+                                           │ (рассылка,   │
+                                           │ token bucket)│   services/translate :8200
+                                           └──────────────┘   (NLLB, перевод тайтлов)
 ```
 
-## Локальный запуск
+**Потоки данных:**
+
+1. **Парсинг**: Fetch Worker по cron/задаче → адаптер источника → `UnifiedListing`
+   → дедуп (БД + Redis) → `save_listings` (история цен, content_hash) →
+   задачи `translate_listings` (опц.) и raw JSON → MinIO (опц.).
+2. **Уведомления**: Fetch Worker находит совпадения с фильтрами → очередь `send`
+   → Send Worker → Token Bucket → Telegram (instant/дайджест/статусы).
+3. **Диалог**: юзер пишет боту / жмёт кнопку в Mini App → AI-агент (GLM) →
+   tools (поиск по БД, RAG, лид) → ответ с кнопками.
+4. **Монетизация**: Stars-инвойсы (Pro/Business) и CPL-лиды (партнёры).
+
+---
+
+## Стек и репозиторий
+
+### Backend
+| Компонент | Технология | Нюансы |
+|---|---|---|
+| Веб-фреймворк | FastAPI + uvicorn | `app/main.py`, OpenAPI на `/docs` |
+| Бот | aiogram 3 (long polling) | FSM-состояния диалога — в Redis, не в памяти |
+| ORM/миграции | SQLAlchemy 2 async + Alembic | asyncpg, декларативные `Mapped[...]` |
+| Валидация | Pydantic v2 + pydantic-settings | `app/schemas/`, `Settings` в `app/core/config.py` |
+| Очередь | aio-pika (RabbitMQ) | Свой мини-фреймворк `app/queue/`: TaskWorker, CronSpec, DLQ |
+| Кэш/состояние | redis.asyncio | Дедуп, DialogState, rate limit, кэши LLM/перевода |
+| HTTP-клиент | httpx (async) | Источники, LLM, RAG, Telegram — всё через httpx |
+| S3 | aioboto3 | raw_payload в MinIO (не блокирует event loop) |
+| LLM | GLM 4.6 (Zhipu/z.ai) | Fallback: Anthropic, Ollama, `mock` для тестов |
+| Крипто | PQ: ML-KEM-768 + X25519 | `app/core/pq_crypto.py`, шифрование документов RAG at-rest |
+
+### Frontend (Mini App)
+- React 18 + Vite + TypeScript, UI-кит `@telegram-apps/telegram-ui`,
+  тема через CSS-переменные Telegram (`--tg-theme-*`).
+- Авторизация: `initData` из Telegram WebApp → `POST /api/auth/telegram` → JWT
+  (sessionStorage). Вне Telegram — read-only лента.
+- Dev-сервер `npm run dev` на :8080 с прокси `/api` → :8000; в compose —
+  Vite build → nginx, `/api` проксируется на backend.
+
+### Микросервисы
+- **`services/rag/`** — RAG-ядро из monorepo `rag_service`: `rag_core`
+  (hexagonal), `rag_worker` (:8101 health/metrics), `rag_api` (:8100),
+  `kb/` (база знаний markdown), `scripts/ingest_kb.py`.
+- **`services/translate/`** — NLLB-переводчик тайтлов
+  (`facebook/nllb-200-distilled-600M`, CPU), :8200.
+
+### Структура репозитория
+
+```
+app/
+├── api/              # FastAPI-роутеры (см. «Backend API»)
+├── bot/              # aiogram 3: handlers, button_flow, client, __main__
+├── ai/               # agent, llm_client, prompts, tools, rag_client
+├── adapters/         # encar, kcar, che168, registry
+│   └── common/       # http, normalize, dedup, proxy (обвязка парсеров)
+├── services/         # бизнес-логика (таблица ниже)
+├── workers/          # fetch.py, send.py — воркеры очереди
+├── queue/            # rabbit.py: enqueue_task, TaskWorker, CronSpec, DLQ
+├── core/             # config, security (JWT/initData), deps*, pq_crypto
+├── db/               # models.py, session.py, migrations/versions (0001–0014)
+└── schemas/          # Pydantic: listing, criteria, filter, dialog, user,
+                      # payment, lead, partner, rag
+frontend/             # Mini App (React + Vite + TS + telegram-ui)
+services/
+├── rag/              # RAG-микросервис (ядро rag_service)
+└── translate/        # NLLB-перевод тайтлов
+tests/                # 350 тестов; хелперы FakeSession/FakeRedis/MockLLMClient
+TZ.md                 # исходное ТЗ
+PLAN.md               # план фаз 1–7 (перевод, S3, партиционирование, …)
+PROGRESS.md           # статус-дашборд: что готово / что ждёт владельца
+docker-compose.yml    # вся инфраструктура (dev/staging)
+.env.example          # зеркало Settings + интерполяция compose
+```
+
+### Сервисы `app/services/` (бизнес-логика)
+
+| Модуль | Назначение |
+|---|---|
+| `users.py` | регистрация/онбординг, лимиты тарифа, tier-логика |
+| `search.py` | выборка объявлений по `SearchCriteria` (лента, AI-поиск) |
+| `notify.py` | instant/дайджест-уведомления, антидубли, тихие часы |
+| `subscription.py` | тарифы, лимиты, активация Pro/Business по Stars |
+| `fetch.py` | сохранение объявлений: дедуп, история цен, content_hash, S3 |
+| `storage.py` | `S3Storage` (aioboto3): upload/retention/presign, fallback |
+| `partners.py` | ключи API, квоты, claim лидов, CPL-биллинг, suspended/reactivate |
+| `rate_limit.py` | Token Bucket Telegram (Redis+Lua): 30 msg/s, 1 msg/s/чат |
+| `analytics.py` | события воронки в `analytics_events` (не ломает поток) |
+| `funnels.py` | SQL-дашборды: конверсии, retention D1/D7 |
+| `alerting.py` | алерты в Telegram админу с дедупом `alert:{key}` |
+| `source_health.py` | health источников: latency, error_streak, circuit breaker |
+| `parser_doctor.py` | GLM-ремонт сломавшихся CSS-селекторов (doctor_mode) |
+| `translate_client.py` | клиент translate-сервиса: кэш, retry, circuit breaker |
+| `dialog.py` | DialogState в Redis: TTL 24ч, история 8 сообщений |
+| `admin_assistant.py` | AI-ассистент админки |
+| `admin_audit.py` | журнал админ-действий в `admin_actions` |
+| `cron.py` | регистрация CronSpec-задач воркеров |
+
+---
+
+## Быстрый старт
+
+### Локально (по процессам)
 
 ```bash
 # 1. Зависимости
 uv sync
 
 # 2. Конфиг
-cp .env.example .env   # заполните BOT_TOKEN и APP_SECRET_KEY
+cp .env.example .env   # минимум: BOT_TOKEN, APP_SECRET_KEY
 
-# 3. Поднять PostgreSQL, Redis и RabbitMQ
+# 3. Инфраструктура
 docker compose up -d postgres redis rabbitmq
 
 # 4. Миграции
 uv run alembic upgrade head
 
 # 5. Backend
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload          # :8000
 
-# 6. Бот (в другом терминале)
+# 6. Бот (другой терминал)
 uv run python -m app.bot
 
 # 7. Воркеры (ещё два терминала)
 uv run python -m app.workers.fetch
 uv run python -m app.workers.send
 
-# 8. Mini App dev-сервер (ещё один терминал)
-cd frontend && npm install && npm run dev   # http://localhost:8080
+# 8. Mini App dev-сервер (ещё один)
+cd frontend && npm install && npm run dev     # :8080
 ```
 
-Проверка: http://localhost:8000/health, Mini App: http://localhost:8080 (вне Telegram — read-only лента).
+Проверка: `http://localhost:8000/health`, Swagger: `http://localhost:8000/docs`,
+Mini App: `http://localhost:8080` (вне Telegram — read-only лента).
 
-## Docker Compose (всё сразу)
+### Всё сразу через compose
 
 ```bash
 cp .env.example .env
-docker compose up --build   # включая miniapp на :8080
+docker compose up --build
 ```
 
-## Дальнейшие этапы (ТЗ п. 14.3)
+### Микросервисы (опционально)
 
-- Этап 2 (✅ выполнен): адаптер Encar, AdapterRegistry, Fetch Worker (ARQ), дедупликация
-- Этап 3 (✅ выполнен): AI-диалоговый агент, DialogState в Redis, fallback-кнопки
-- Этап 4 (✅ выполнен): Send Worker, instant/digest уведомления, антидубли
-- Этап 5 (✅ выполнен): Mini App MVP (лента, фильтры, карточка, профиль)
-- Этап 6 (✅ выполнен): монетизация — подписки, Telegram Stars, избранное
-- Этап 7 (✅ выполнен): второй источник KCar — агрегация Encar+KCar в одной ленте
-- Далее: мониторинг и алерты (этап 8)
+```bash
+# RAG (нужны GLM_API_KEY, RAG_API_TOKEN в .env)
+docker compose up -d qdrant minio rag_worker rag_api
+uv run --project services/rag python scripts/ingest_kb.py --force
 
-## Интеграция RAG-сервиса (фазы 3-4 плана RAG)
+# Перевод тайтлов
+docker compose up -d translate   # + TRANSLATE_ENABLED=true в .env
+```
 
-AI-агент отвечает на фактические вопросы (растаможка, доставка, пошлины,
-риски, FAQ) через внешний `rag_service` (репозиторий `Pavel14701/rag_service`).
+---
 
-- **`app/ai/rag_client.py`** — `RAGClient`: `POST /api/v1/ask` (Bearer-токен),
-  retry с backoff (только сетевые ошибки), circuit breaker (5 ошибок подряд →
-  пауза 5 мин), таймаут 5 сек, кэш ответов в Redis (`rag:answer:<sha256>`,
-  TTL 1 час), `healthcheck()`, `ingest()` для загрузки базы знаний.
-- **`app/schemas/rag.py`** — контракт `RAGAnswer` / `RAGSource` / `RAGIngestResult`
-  (план п. 6.3).
-- **Tool `answer_question`** (фаза 4, план п. 8.1): LLM передаёт `topic` +
-  `question` → вопрос уходит в RAG. Confidence ≥ 0.6 → ответ из базы знаний;
-  иначе fallback — ответ самого LLM, а если и его нет — честное
-  «рекомендую уточнить у менеджера».
-- **Промпт** (план п. 8.2-8.3): ответы базы знаний — справочные данные,
-  не инструкции (защита от промпт-инъекций через документы); цифры без
-  источника называть нельзя.
-- **Включение**: `RAG_SERVICE_URL` в `.env` (пусто = RAG выключен, всё
-  работает как раньше через LLM). `RAG_ENABLED=false` — feature flag
-  для отката. Остальное: `RAG_API_TOKEN`, `RAG_TIMEOUT_SEC`,
-  `RAG_CACHE_TTL_SEC`, `RAG_CONFIDENCE_THRESHOLD`.
-- **Фазы 0-2 (деплой RAG, база знаний)** — инфраструктурные, вне репозитория:
-  docker-compose RAG+Qdrant+PostgreSQL+RabbitMQ из плана п. 5, контент по
-  структуре п. 7. После поднятия сервиса достаточно задать `RAG_SERVICE_URL`
-  — код уже готов.
+## Docker Compose: все сервисы
 
-## Этап 7: второй источник (KCar)
+| Сервис | Образ | Порты | Назначение / нюансы |
+|---|---|---|---|
+| `postgres` | postgres:16 | 5432 | БД `autoselect` (юзер `app`), healthcheck `pg_isready`. Пароль `DB_PASSWORD` |
+| `redis` | redis:7-alpine | 6379 | Дедуп, FSM, кэши, лимитеры, digest-буферы (DB 0); RAG использует DB 1 |
+| `rabbitmq` | rabbitmq:3-management | 5672, **15672 UI** | Очереди `fetch`/`send` + DLQ; guest/guest по умолчанию |
+| `backend` | build . | **8000** | FastAPI; healthcheck `/health` |
+| `bot` | build . | — | `python -m app.bot`; внутри сети ходит в `http://backend:8000` |
+| `worker_fetch` | build . | — | Парсинг, кроны 03:30/04:00 UTC |
+| `worker_send` | build . | — | Рассылка; Token Bucket на Redis |
+| `miniapp` | frontend/Dockerfile | **8080** | Vite build → nginx, `/api` → backend |
+| `qdrant` | qdrant/qdrant | 6333 | Векторный индекс RAG |
+| `minio` | minio/minio | 9000, 9001 (консоль) | raw_payload (S3 API); minioadmin/minioadmin — **сменить в проде** |
+| `rag_migrate` | postgres:16 | — | one-shot: создаёт БД `rag` в общем postgres |
+| `rag_migrate_alembic` | build services/rag | — | one-shot: `alembic upgrade head` для БД rag |
+| `rag_worker` | build services/rag | 8101 (внутр.) | Консьюмеры очередей RAG, healthz :8101 |
+| `rag_api` | build services/rag | **8100** | HTTP-шлюз `POST /api/v1/ask` (Bearer `RAG_API_TOKEN`) |
+| `translate` | build services/translate | **8200** | NLLB-перевод, `GET /health`; optional — падение не критично |
 
-- **`app/adapters/kcar.py`** — `KCarApiAdapter` (ТЗ п. 6.2): Search API kcar.com
-  (`{totalCnt, list[]}`), пагинация с 1-й страницы, цены в манах ×
-  `config.price_unit` (по умолчанию 10 000 → KRW), нормализация марок/топлива
-  через общий `normalize.py`. Конфиг в БД: `base_url`, `photo_prefix`,
-  `detail_url_template`, `page_size`, `price_unit` — меняется без деплоя.
-- **Регистрация**: `KCarApiAdapter` добавлен в `ADAPTER_CLASSES` (ТЗ п. 6.4);
-  источник сидируется в `sources` (name=`kcar`, priority=200).
-- **Агрегация**: реестр грузит все enabled-источники, Fetch Worker парсит
-  каждый по своим criteria, `save_listings` дедуплицирует внутри источника
-  (уникальный `(source, source_id)`) и между источниками (Redis, VIN/fuzzy).
-  Лента Mini App отдаёт оба источника одной выдачей.
-- **Нюанс**: публичный Search API kcar.com может требовать прокси/другой
-  endpoint из конкретной сети — правится `sources.config` без деплоя;
-  при недоступности срабатывает source_health + circuit breaker.
+Все сервисы с `env_file: .env` — S3/перевод/RAG-переменные пробрасываются
+автоматически. Внутри docker-сети имена хостов: `postgres`, `redis`,
+`rabbitmq`, `minio`, `qdrant`, `backend` (например, `S3_ENDPOINT_URL=http://minio:9000`).
 
-## Этап 5: Mini App MVP
+---
 
-`frontend/` — React 18 + Vite + TypeScript, UI-кит `@telegram-apps/telegram-ui`,
-тема через Telegram `--tg-theme-*`.
+## Конфигурация (.env)
 
-- **Авторизация**: `initData` из Telegram WebApp → `POST /api/auth/telegram` → JWT
-  (хранится в sessionStorage, цепляется ко всем запросам). Вне Telegram — read-only лента.
-- **Экраны** (п. 9.2): онбординг, лента (чипсы-фильтры + «Ещё»), карточка объявления,
-  фильтры (создание/удаление, instant/digest переключатель), избранное (заглушка — нет
-  таблицы `favorites` в ТЗ 5.8), профиль (тариф, роль).
-- **Новые backend-эндпоинты** (JWT):
-  - `GET/POST/PATCH/DELETE /api/filters[/{id}]` — CRUD фильтров (лимит 20, criteria
-    валидируется `SearchCriteria`);
-  - `GET /api/listings` — лента с фильтрами make/model/year/price/mileage/source,
-    пагинация `limit/offset` (≤50), новые сверху; `GET /api/listings/{id}` — карточка
-    с историей цен (`price_history` из `listing_price_history`, PLAN.md фаза 4);
-    `GET /api/favorites` отдаёт `first_price` (первая точка истории) — бейдж
-    «⬇️ цена снизилась», а `is_active=false` — бейдж «🔴 исчезло».
-- **Dev-сервер**: `npm run dev` на :8080, `/api` проксируется на :8000.
-- **Compose**: сервис `miniapp` (Vite build → nginx, `/api` → backend).
+Полное зеркало `app/core/config.py` — см. `.env.example` (там же комментарии
+по каждому блоку). Ключевые группы и **нюансы**:
 
-Проверка: `cd frontend && npm run build` (tsc + vite), `uv run pytest tests/ -q`.
+### Обязательный минимум
+- `BOT_TOKEN` — токен бота (@BotFather). ⚠️ Старый токен отозван — перед
+  продом перевыпустить.
+- `APP_SECRET_KEY` — подпись JWT **и** (по умолчанию) X-Internal-Token.
+- `DATABASE_URL`, `REDIS_URL`, `RABBITMQ_URL`.
 
-## Этап 6: Монетизация (подписки + Telegram Stars)
+### Авторизация
+- `INTERNAL_TOKEN` — отдельный секрет для админ-эндпоинтов; пусто = используется
+  `APP_SECRET_KEY` (обратная совместимость).
+- `ACCESS_TOKEN_TTL_SEC=3600`, `REFRESH_TOKEN_TTL_SEC=2592000` (30 дней),
+  `INIT_DATA_MAX_AGE_SEC=86400` — initData старше суток отклоняется.
 
-**Тарифы** (ТЗ п. 10.2, `app/services/subscription.py`):
+### LLM
+- `LLM_PROVIDER`: `glm` | `anthropic` | `ollama` | `mock` (тесты/dev без LLM).
+- `GLM_API_KEY`, `GLM_BASE_URL` (по умолчанию международный
+  `https://api.z.ai/api/paas/v4`; для ключей open.bigmodel.cn —
+  `https://open.bigmodel.cn/api/paas/v4`).
+- `LLM_TEMPERATURE=0.2`; модели `LLM_DEFAULT_MODEL`/`LLM_ADVANCED_MODEL`.
+
+### RAG
+- `RAG_SERVICE_URL` — **пусто = RAG выключен** (агент отвечает через LLM).
+- `RAG_ENABLED=true` — feature flag отката; `RAG_API_TOKEN` — Bearer шлюза.
+- `RAG_TIMEOUT_SEC=5`, `RAG_CACHE_TTL_SEC=3600` (Redis),
+  `RAG_CONFIDENCE_THRESHOLD=0.6` (ниже — fallback на LLM),
+  circuit breaker: 5 ошибок подряд → пауза 300 с.
+- `RAG_JWT_SECRET` — общий секрет rag_api↔rag_worker (пусто = `APP_SECRET_KEY`).
+
+### Уведомления
+- `NOTIFY_RATE_LIMIT_SEC=30` — не чаще 1 сообщения/30 с на юзера (п. 8.6).
+- `TELEGRAM_RATE_GLOBAL_PER_SEC=30` / `TELEGRAM_RATE_CHAT_PER_SEC=1` —
+  Token Bucket (0 = выкл; Redis лежит → fail-open).
+- `NOTIFY_SENT_TTL_SEC` = 7 дней антидубля `notified:{uid}:{lid}`.
+- `NOTIFY_QUIET_HOURS_DEFAULT` — глобальные тихие часы `"23:00-08:00"`.
+- `STALE_MAX_AGE_DAYS=3` — не виден N дней → `is_active=false`.
+
+### Перевод (optional)
+- `TRANSLATE_ENABLED=false` по умолчанию; упал/выключен → показывается
+  оригинальный тайтл (fallback обязателен по дизайну).
+- `TRANSLATE_SOURCE_LANGS` — JSON-карта источник→NLLB-код
+  (`encar/kcar` → `kor_Hang`, `che168` → `zho_Hans`); прочие — auto-детект.
+- Кэш переводов в Redis 30 дней; CB: 3 ошибки → пауза 5 мин + алерт.
+
+### S3/MinIO (optional)
+- `RAW_PAYLOAD_ENABLED=false` по умолчанию; пустой `S3_ENDPOINT_URL` = выкл.
+- `S3_BUCKET=raw-payloads`, `RAW_RETENTION_DAYS=180`,
+  `RAW_PRESIGN_TTL_SEC=600`.
+- Ошибка S3 **не ломает** сохранение объявления: `raw_key = NULL`.
+
+### Прокси DataImpulse (optional)
+- Заданы `PROXY_DATAIMPULSE_USER`+`PASS` → источники с
+  `capabilities.use_proxy=true` (che168) ходят через шлюз, остальные напрямую.
+- `__cr.<geo>` — гео выхода (`cn` для che168); `STICKY_TTL_SEC=1800` —
+  sticky-сессия IP, `0` = ротация на каждый запрос.
+- CB: 5 ошибок соединения подряд → пауза 5 мин (ходим напрямую).
+
+### Партнёры и биллинг
+- `PARTNER_RATE_LIMIT_PER_MIN=60` — fixed window на ключ в Redis.
+- `PARTNER_CPL_RATES={"starter": 5.0, "pro": 3.0, "salon": 2.0}` — CPL-тарифы
+  по планам (USD/лид); индивидуальный `cpl_rate` партнёра перекрывает план.
+
+### Мониторинг
+- `ALERTS_ENABLED=true` → алерты в Telegram на `ADMIN_CHAT_ID`;
+  `ALERT_DEDUP_TTL_SEC=1800` — подавление повторов;
+  `DLQ_ALERT_THRESHOLD=10` — глубина DLQ для алерта;
+  `SENTRY_DSN`, `LOG_LEVEL`.
+
+### PQ-шифрование (optional)
+- `ENCRYPT_DOCUMENTS` + `PQ_ENCRYPTION_PUBLIC_KEY`/`PRIVATE_KEY`
+  (ML-KEM-768 + X25519). Генерация:
+  `uv run python -c "from app.core.pq_crypto import generate_keypair; print(generate_keypair())"`.
+
+---
+
+## Telegram-бот
+
+`app/bot/` — aiogram 3, long polling (`python -m app.bot`). FSM-состояния —
+в Redis (переживают рестарт), энкрипция не нужна: ТЗ не требует.
+
+**Команды**: `/start` (онбординг + deep-link), `/menu`, `/help`, `/reset`
+(сброс AI-диалога), `/stop` (пауза уведомлений), `/resume`,
+`/subscribe` (тарифы).
+
+**Колбэки**:
+- `menu:*` — главное меню (поиск, фильтры → Mini App, подписка, справка);
+- `sub:buy:<tier>` — инвойс Stars на тариф;
+- `dlg:*` — кнопочные ответы AI-диалога (fallback-режим без LLM).
+
+**Deep-link**: `/start <payload>` обрабатывается (`handle_deep_link`) —
+например, открытие карточки/фильтра из Mini App.
+
+**AI-диалог** (`_agent_turn`): свободный текст → AI-агент (см. ниже);
+ошибки LLM > 5 подряд → переключение на кнопочный режим (fallback_text).
+
+**Платежи Stars**: `pre_checkout_query` валидируется, `successful_payment`
+активирует тариф (идемпотентно по charge id).
+
+---
+
+## Backend API
+
+Аутентификация — три схемы (зависимости в `app/core/deps*.py`):
+
+| Схема | Заголовок | Кто | Что защищает |
+|---|---|---|---|
+| JWT (Telegram initData или web-логин) | `Authorization: Bearer` | юзеры Mini App | users/me/filters/listings/favorites/payments/notifications/leads |
+| Internal Token | `X-Internal-Token` | админка/крон/бот | `/api/admin/*`, `/metrics`, `/api/dialog/*` |
+| Partner API Key | `X-API-Key` | партнёры (CPL) | `/api/partner/*` |
+
+### Пользователи и профили
+- `POST /api/auth/telegram` — валидация initData (HMAC, TTL 24 ч) → JWT.
+- `POST /api/auth/web`, `POST /api/auth/refresh` — веб-авторизация (миграция 0003).
+- `GET /api/users/me`, `PATCH /api/users/me` (обновление профиля/онбординга),
+  `GET /api/me/summary` — сводка для профиля (тариф, лимиты).
+
+### Фильтры и лента
+- `GET/POST/PATCH/DELETE /api/filters[/{id}]` — CRUD, лимит 20 на юзера
+  (Free 3 / Pro 20 / Business ∞), criteria валидируется `SearchCriteria`.
+- `GET /api/listings` — лента с фильтрами make/model/year/price/mileage/source,
+  пагинация `limit/offset` (≤50), новые сверху.
+- `GET /api/listings/{id}` — карточка + история цен (`listing_price_history`).
+- `GET/POST/DELETE /api/favorites[...]` — избранное; отдаёт `first_price`
+  (бейдж «⬇️ цена снизилась») и `is_active=false` (бейдж «🔴 исчезло»).
+
+### Диалог и AI-поиск
+- `POST /api/dialog/message` (internal) — ход диалога: юзер → агент → ответ.
+- `POST /api/ai/message` (JWT) — тот же агент из Mini App (AI-подбор авто);
+  `POST /api/ai/reset`, `POST /api/ai/finalize` — сброс/финализация критериев.
+
+### Уведомления
+- `POST /api/notifications/settings` — instant/digest, тихие часы.
+- `POST /api/notifications/scan` (internal) — принудительное сканирование.
+
+### Лиды (воронка диалог → обращение)
+- `POST /api/leads` (internal) — создать лид (бот/агент после квалификации);
+  событие `lead_created`.
+- `PATCH /api/leads/{id}` — статус менеджера: new/in_progress/closed/rejected.
+
+### Монетизация (Stars)
+- `GET /api/subscription` — статус, лимиты, цены.
+- `POST /api/payments/stars` — инвойс (XTR) + `createInvoiceLink`.
+- `GET /api/payments/history` — история платежей.
+
+### Админка (`/api/admin`, X-Internal-Token)
+- `GET /api/admin/adapters` — зарегистрированные адаптеры.
+- `GET /api/admin/sources`, `PUT /api/admin/sources/{name}` — конфиг источника
+  в БД (base_url, page_size, proxy и т.д. — без деплоя).
+- `GET /api/admin/sources/{name}/health` — latency/ошибки/CB.
+- `POST /api/admin/sources/{name}/fetch?max_pages=N` — ручной запуск парсинга.
+- `GET /api/admin/leads` — список лидов со статусами.
+- `POST /api/admin/assistant/chat` — AI-ассистент админки.
+- `GET /api/admin/listings/{id}/raw` — presigned GET сырого JSON из MinIO
+  (10 мин; `raw_key IS NULL` → 404, S3 недоступен → 502).
+- `GET /api/admin/analytics/funnel?days=30` — воронка
+  search→dialog→lead→subscription (конверсии к предыдущему этапу и к первому).
+- `GET /api/admin/analytics/retention?days=30` — когорты по дню регистрации,
+  D1/D7 (абсолютные и %).
+
+### Партнёры — админ (`/api/admin/partners`)
+- `POST /api/admin/partners` — создать партнёра + выдать ключ (сырой ключ
+  показывается **один раз**, хранится только SHA-256).
+- `GET /api/admin/partners` — список со статистикой (claimed_today, баланс).
+- `POST .../{id}/rotate` — ротация ключа (старый мгновенно инвалиден);
+  `POST .../{id}/revoke` — отзыв всех ключей.
+- `PATCH .../{id}` — план/квота/статус/cpl_rate (`reset_cpl_rate` → тариф плана).
+- `POST .../{id}/billing` — пополнение баланса (>0, снимает suspended) или
+  корректировка (<0); пишется в `partner_transactions`.
+
+### Партнёры — API (`/api/partner`, X-API-Key)
+- `GET /api/partner/me` — аккаунт: квота, баланс, цена следующего лида.
+- `GET /api/partner/leads` — пул доступных лидов (ПД скрыты до claim);
+  `?mine=1` — свои лиды (с ПД).
+- `POST /api/partner/leads/batch` — «взять N» (квота **и** баланс).
+- `POST /api/partner/leads/{id}/claim` — эксклюзивный claim (409 taken,
+  429 квота, **402 нет денег**).
+- `POST /api/partner/leads/{id}/feedback` — качество лида:
+  claimed/accepted/returned/junk/deal.
+- `GET /api/partner/billing` — план, баланс, каталог тарифов.
+
+### Системные
+- `GET /health` — liveness.
+- `GET /health/detailed` — postgres/redis/rabbitmq; 503 если лежит БД.
+- `GET /metrics` (internal) — юзеры/новые 24ч, тарифы, объявления, отправленные
+  уведомления, health источников, события воронки за 24 ч.
+
+---
+
+## Адаптеры источников и парсинг
+
+`app/adapters/` — каждый источник реализует контракт `BaseAdapter`
+(ТЗ п. 6): `capabilities()`, `fetch(criteria, page)` → список `UnifiedListing`.
+
+| Адаптер | Источник | Нюансы |
+|---|---|---|
+| `EncarAdapter` | encar.com (HTML) | CSS-селекторы в конфиге БД → чинятся без деплоя (и ParserDoctor'ом) |
+| `KCarApiAdapter` | kcar.com Search API | `{totalCnt, list[]}`; цены в манах × `price_unit` (10 000 → KRW); пагинация с 1-й страницы |
+| `Che168Adapter` | che168.com (HTML, Китай) | Цены в 万 (10k CNY) → нормализация; гео-блокировки → прокси DataImpulse `GEO=cn`; `enabled=true` в БД после сверки с живым HTML |
+
+**Общая обвязка (`adapters/common/`)**:
+- `http.py` — httpx-клиент с таймаутами, ретраями, UA;
+- `normalize.py` — нормализация марок/моделей/топлива/КПП → единый словарь;
+- `dedup.py` — 2 уровня: БД (уникальный `(source, source_id)`, content_hash) +
+  Redis (VIN/фuzzy между источниками);
+- `proxy.py` — `GatewayProxyPool` (DataImpulse): sticky-сессии, CB при ошибках.
+
+**Registry** (`adapters/registry.py`): `ADAPTER_CLASSES` → инстансы по
+enabled-источникам из таблицы `sources` (name, priority, capabilities,
+config JSON). Источник глушится/включается в БД, приоритет — порядок в ленте.
+
+**Пайплайн сохранения** (`services/fetch.py: save_listings`):
+1. Дедуп внутри источника (`source, source_id`).
+2. NEW или **изменившийся content_hash** → UPDATE (снимок в историю цен
+   `listing_price_history`; PK `(id, recorded_at)` — подготовка к
+   партиционированию, миграция 0013).
+3. Смена хэша/новое → задача `translate_listings` (если включен перевод)
+   и upload raw JSON в S3 (если включен).
+4. Совпадения с фильтрами → `enqueue_task` в очередь `send`.
+
+---
+
+## Очередь задач и воркеры
+
+`app/queue/rabbit.py` — мини-фреймворк поверх aio-pika:
+
+- `enqueue_task(queue, name, payload)` — JSON-сообщение; очередь = routing key.
+- `TaskWorker` — консьюмер с retry, фатальные ошибки → **DLQ**
+  (dead letter); мониторинг DLQ каждые 300 с, глубина ≥ 10 → алерт.
+- `CronSpec(fn, hour, minute)` — cron внутри воркера.
+
+**Fetch Worker** (`python -m app.workers.fetch`), очередь `fetch`:
+задачи `fetch_source` (парсинг источника), `translate_listings`;
+cron: `raw_retention_job` 03:30 UTC (retention MinIO), `stale_check_job`
+04:00 UTC (is_active=false для объявлений, которых нет ≥ 3 дней;
+CB-источники пропускаются).
+
+**Send Worker** (`python -m app.workers.send`), очередь `send`:
+задачи `send_listing_notification`, `send_listing_status`, `notify_new_listings`,
+`listing_status_scan`; cron: `digest_job` 09:00 и 20:00 UTC,
+`subscription_check_job` 12:00 UTC.
+
+**Перед отправкой в Telegram** (`send_telegram_message`):
+1. **Token Bucket** (Redis+Lua): ~30 msg/s глобально, ~1 msg/s на чат;
+   нет слота → sleep до 3 попыток, потом отправка всё равно; Redis лежит →
+   fail-open.
+2. 429 от Telegram → `retry_after` → sleep → 1 повтор.
+3. Персональный rate limit 30 с/юзера + антидубль 7 дней — до постановки в
+   очередь (в `notify.py`).
+
+---
+
+## AI-слой: LLM, агент, RAG
+
+### LLM-клиент (`app/ai/llm_client.py`)
+Провайдеры: `glm` (основной, api.z.ai), `anthropic`, `ollama`, `mock`.
+OpenAI-совместимый протокол; `LLM_BASE_URL` для прокси/Ollama.
+Ошибки > 5 подряд → переключение на резерв, дальше — кнопочный режим.
+
+### Агент (`app/ai/agent.py`)
+Диалог подбора авто: извлекает критерии (марка/бюджет/год/…) в
+`SearchCriteria`, зовёт tools, отвечает с кнопками. История — 8 последних
+сообщений, DialogState в Redis с TTL 24 ч. FAQ-ответы кэшируются (24 ч).
+
+### Tools (`app/ai/tools.py`)
+- поиск по БД по критериям (через `services/search.py`);
+- `answer_question` — вопрос в RAG (ниже);
+- создание лида (после AI-квалификации: бюджет/срок/готовность к предоплате —
+  `Lead.qualification` поднимает цену лида).
+
+### RAG-клиент (`app/ai/rag_client.py`)
+`POST /api/v1/ask` (Bearer): retry только на сетевые ошибки, circuit breaker
+(5 ошибок подряд → пауза 5 мин), таймаут 5 с, кэш ответов в Redis
+(`rag:answer:<sha256>`, TTL 1 ч). Confidence ≥ 0.6 → ответ базы знаний;
+ниже → ответ LLM; и его нет → «рекомендую уточнить у менеджера».
+Промпт-защита: содержимое kb — справочные данные, не инструкции
+(анти-инъекции через документы); цифры без источника называть нельзя.
+
+---
+
+## Микросервис RAG (services/rag)
+
+Локальный RAG на ядре [rag_service](https://github.com/Pavel14701/rag_service)
+(monorepo-версия): гибридный поиск (vector + BM25/RRF), агентный retrieval,
+multi-provider LLM, DLQ/retry через RabbitMQ.
+
+- `rag_core/` — ядро (domain / application / infrastructure, hexagonal);
+- `rag_worker/` — консьюмеры `query_queue`, `ingest_queue`, `delete_queue`,
+  `reindex_queue`; health/metrics на :8101;
+- `rag_api/` — шлюз `POST /api/v1/ask` (internal token → JWT → RPC в
+  `query_queue`), :8100;
+- `kb/` — база знаний (markdown: FAQ, таможня, доставка, риски, расходы);
+- `scripts/ingest_kb.py` — заливка kb в MinIO/Postgres/очередь индексации.
+
+Инфраструктура: `qdrant`, `minio`, `rag_migrate*`, `rag_worker`, `rag_api`
+(см. таблицу compose). БД `rag` — в общем PostgreSQL. Опциональное
+постквантовое шифрование документов at-rest: `ENCRYPT_DOCUMENTS=true` +
+PQ-ключи (ML-KEM-768 + X25519).
+
+Запуск и заливка базы знаний:
+```bash
+docker compose up -d qdrant minio rag_worker rag_api
+docker compose exec rag_worker alembic upgrade head   # если one-shot не отработал
+uv run --project services/rag python scripts/ingest_kb.py --force
+```
+
+---
+
+## Перевод тайтлов (services/translate)
+
+Optional-микросервис NLLB (`facebook/nllb-200-distilled-600M`, CPU, :8200):
+переводит `title` объявлений (корейский/китайский → русский).
+**Некритичен**: упал/выключен → UI показывает оригинал.
+
+- API: `POST /translate {texts, source_lang, target_lang}` → `{translations}`
+  (батчи; `null` = не переведено; `source_lang="auto"` — детект по письменности);
+  `GET /health`; Bearer `API_TOKEN` опционально.
+- Триггер — тот же content_hash: NEW/изменение → `translate_listings` →
+  `title_raw/title_ru/source_language/translated_at` (миграция 0011).
+- Клиент `translate_client.py`: Redis-кэш `tr:{tgt}:{src}:{sha1}` (30 дней),
+  retry, circuit breaker (3 ошибки → пауза 5 мин + алерт), батчи по 32,
+  таймаут 30 с (NLLB на CPU медленный).
+
+Включение: `TRANSLATE_ENABLED=true` + `docker compose up -d translate`.
+
+---
+
+## Сырые ответы в MinIO (raw_payload)
+
+Сырые JSON от encar/kcar/che168 — «холодные» данные (аудит, отладка парсера):
+в PostgreSQL **не хранятся** (колонка `raw_payload` выпилена миграцией 0012,
+вместо неё `listings.raw_key` — ключ S3-объекта). Загрузка через **aioboto3**.
+
+- Ключ: `raw/{source}/{yyyy}/{mm}/{listing_id}_{content_hash}.json` —
+  retention по префиксу + дедупликация (хэш не менялся → не перезаписывается).
+  S3 Metadata: source, listing_id, content_hash, fetched_at.
+- Загружаются только NEW/изменившиеся; ошибка S3 → объявление сохранено,
+  `raw_key = NULL` (fallback обязателен по дизайну).
+- Retention: cron `raw_retention_job` (03:30 UTC) удаляет объекты старше
+  `RAW_RETENTION_DAYS` (180) и обнуляет `raw_key` (чанками по 1000).
+- `ensure_bucket` при старте воркера: токен без права CreateBucket → warning,
+  не падаем (bucket создаётся заранее).
+- Админка: `GET /api/admin/listings/{id}/raw` → presigned GET на 10 минут;
+  прямого доступа к MinIO у UI нет.
+
+Включение: `RAW_PAYLOAD_ENABLED=true`, `S3_ENDPOINT_URL` (внутри сети —
+`http://minio:9000`), `docker compose up -d minio`.
+
+---
+
+## Монетизация: подписки и Telegram Stars
+
+Тарифы (`app/services/subscription.py`, ТЗ п. 10.2):
 
 | Тариф | Цена | Фильтры | AI/день | Instant |
 |---|---|---|---|---|
@@ -147,210 +617,175 @@ AI-агент отвечает на фактические вопросы (ра�
 | Pro | 500★/мес, 4800★/год (−20%) | 20 | 200 | да |
 | Business | 2500★/мес, 24000★/год | ∞ | ∞ | да |
 
-- **API**: `GET /api/subscription` (JWT — статус/лимиты/цены), `POST /api/payments/stars`
-  (JWT — pending-платёж + `createInvoiceLink` XTR для `openInvoice` в Mini App),
-  internal для бота: `GET /api/users/{id}/subscription`, `POST /api/payments/prepare`,
-  `POST /api/payments/success` (идемпотентно, `X-Internal-Token`).
-- **Энфорс лимитов**: 4-й фильтр на Free → 409 с апселлом; instant-фильтр на Free → 403.
-- **Бот**: `/subscribe` → тарифы кнопками → `sendInvoice(XTR)` → `pre_checkout_query` →
-  `successful_payment` → активация. Истёкшая подписка = Free (проверяется на лету).
-- **Cron** (`subscription_check_job`, 12:00 UTC): напоминания за 3 и 1 день
-  (Redis-дедуп `sub:reminded:{uid}:{days}`), даунгрейд на Free по истечении.
-- **Избранное**: таблица `favorites` (миграция 0002), `POST /api/listings/{id}/favorite`
-  (toggle), `DELETE`, `GET /api/favorites`, `GET /api/favorites/{id}`; в Mini App —
-  экран «Избранное» и кнопка на карточке.
+- `POST /api/payments/stars` — pending-платёж + `createInvoiceLink` (валюта
+  XTR); бот выдаёт инвойс, `pre_checkout_query` валидируется,
+  `successful_payment` активирует тариф идемпотентно.
+- Cron `subscription_check_job` (12:00 UTC) — напоминания об истечении.
+- Живой тестовый платёж XTR пока не проводился (код-путь готов).
 
-Проверка: `uv run pytest tests/ -q` (107 тестов). Живой E2E: инвойс Stars
-создаётся реальным токеном бота; полная оплата проверяется в Telegram
-(`successful_payment` приходит только в настоящем чату с ботом).
+---
 
+## Лиды и партнёрский контур с CPL-биллингом
 
-## Этап 4: Send Worker и уведомления
+**Лиды** (ТЗ, P1): юзер в диалоге/Mini App оставляет обращение →
+`POST /api/leads` → менеджер ведёт статусы (`PATCH /api/leads/{id}`:
+new/in_progress/closed/rejected). AI-квалификация (бюджет/срок/предоплата)
+сохраняется в `Lead.qualification` — квалифицированные лиды попадают в
+партнёрский пул.
 
-После парсинга Fetch Worker ставит `notify_new_listings` в RabbitMQ-очередь
-`send` (exchange `tasks`, routing key = имя задачи):
+**Партнёрский контур** (P2-11/14): ИП/перекупы/салоны покупают лиды (CPL).
 
-- **Send Worker** (`python -m app.workers.send`):
-  - **Instant** (п. 8.6): скан активных фильтров → `send_listing_notification` с rate limit 1 сообщение / 30 сек (`rl:notify:{uid}`, SET NX EX) и тихими часами (при тишине карточка уходит в digest-буфер).
-  - **Digest** (п. 8.6): cron 09:00 и 20:00 UTC — одно сообщение с 3–5 карточками из буфера `digest:{uid}` (при ошибке отправки буфер сохраняется).
-  - **Антидубли**: `sent_log` (ON CONFLICT DO NOTHING) + Redis `notified:{uid}:{lid}` TTL 7 дней.
-  - **Telegram API**: напрямую через httpx, обработка 429 (retry_after + повтор).
-- **Матчинг** (`app/services/notify.py`): `matches_criteria` (Python-side, согласовано с SQL-фильтром), `collect_for_filters` (свежие объявления за `NOTIFY_SCAN_WINDOW_SEC`), карточка по формату п. 8.5.
-- **API** (`/api/notifications/*`, internal-токен): `POST /settings` — режим instant/digest/off по всем фильтрам пользователя (используют `/stop` и `/resume` бота); `POST /scan` — ручной запуск скана.
-- **Бот**: команды `/stop` (отключить уведомления) и `/resume` (включить digest, п. 8.2).
+- Доступ по `X-API-Key` (`pi_…`, хранится только SHA-256; ротация мгновенно
+  инвалидает старый ключ). Rate limit 60 req/min на ключ (fixed window Redis).
+- Планы: `starter` / `pro` / `salon` — дневная квота лидов и CPL-тариф
+  (5 / 3 / 2 USD; `PARTNER_CPL_RATES`).
+- **Claim** — эксклюзивный: `partner_id` ставится атомарно, ПД (user_id)
+  отдаются только после claim. Batch-claim учитывает квоту **и** баланс
+  (`affordable = balance // cost`).
+- **Биллинг** (миграция 0014):
+  - при claim списывается цена лида; транзакция `charge_lead` пишется в
+    `partner_transactions` с `balance_after` (аудит-трейл);
+  - баланс < цены → claim отклонён (**402**), партнёр автоматически
+    `suspended` + алерт админу (дедуп 24 ч);
+  - пополнение `POST /api/admin/partners/{id}/billing` (amount > 0) снимает
+    suspended и пишет транзакцию `topup`; отрицательный amount — ручная
+    корректировка (`adjustment`), suspended не снимает;
+  - индивидуальный `cpl_rate` партнёра (PATCH админки) перекрывает тариф
+    плана; `reset_cpl_rate` возвращает план.
+- **Фидбек** партнёра по качеству лида (`accepted/deal` vs `junk/returned`);
+  события `partner_lead_claimed`, `partner_lead_feedback` — в `analytics_events`.
 
-Запуск воркера: `python -m app.workers.send` (в compose — сервис `worker_send`).
+---
 
-## Очереди задач (RabbitMQ)
+## Аналитика и воронки
 
-Очереди переведены с ARQ/Redis на RabbitMQ (`app/queue/rabbit.py`, aio-pika):
+`analytics_events` (миграция 0004) — только факты воронки, без ПД в props:
+`user_registered`, `search_completed`, `dialog_message`, `lead_created`,
+`partner_lead_claimed`, `partner_lead_feedback`, `subscription_activated`.
+`track()` никогда не ломает бизнес-поток (ошибка → warning).
 
-- exchange `tasks` (direct) → очереди `fetch` (Fetch Worker) и `send` (Send Worker);
-- формат сообщения — JSON `{"job", "args", "kwargs", "id"}` (семантика arq-задач);
-- ручные ack: успех → ack, после 3 неудачных попыток (backoff 2/4 сек) → `nack` в
-  dead-letter очередь `dead_letter` (exchange `tasks.dlx`) — задачи не теряются;
-- timeout задачи (`asyncio.wait_for`) и параллелизм (`asyncio.Semaphore`) — как в arq;
-- cron-задачи (дайджест 09:00/20:00 UTC, подписки 12:00 UTC) исполняет Send Worker,
-  от дублей при нескольких репликах защищает Redis-лок `cron:{job}:{время}`;
-- продюсеры (API, бот, воркеры) ставят задачи через `app.queue.enqueue_task(...)`,
-  коннект robust — переживает рестарт брокера.
+Дашборды (P2-13, `services/funnels.py`, read-only SQL):
+- `GET /api/admin/analytics/funnel?days=N` — distinct-юзеры на каждом этапе
+  search→dialog→lead→subscription, конверсии к предыдущему этапу
+  (`conv_prev_pct`) и к первому (`conv_first_pct`);
+- `GET /api/admin/analytics/retention?days=N` — когорты по дню
+  `user_registered`: размер когорты, D1/D7 абсолютные и в % (D7 «молодой»
+  когорты = 0, пока неделя не прошла).
 
-Постановка из hands: `python -c "import asyncio; from app.queue import enqueue_task; asyncio.run(enqueue_task('notify_new_listings'))"`.
+Быстрые агрегаты за 24 ч — в `GET /metrics` (`events_24h`).
 
-### Статусные уведомления и stale-cron (PLAN.md, фаза 3; миграции 0009-0010)
+---
 
-- **`sent_log.kind`** (`0010_sent_log_kind`): `new | price_drop | gone | returned`,
-  PK расширен до `(user_id, listing_id, kind)`. Redis-ключи: `notified:{uid}:{lid}`
-  (для `new` — исторический формат) и `notified:{uid}:{lid}:{kind}` для остальных.
-- **`stale_check_job`** (cron 04:00 UTC, fetch-воркер): `mark_stale` помечает
-  `is_active=false + disappeared_at` объявлениям с `last_seen_at` старше
-  `STALE_MAX_AGE_DAYS` (по умолчанию 3 дня), пропуская источники в circuit
-  breaker (`source_health.error_streak >= SOURCE_CB_ERROR_STREAK`).
-- **`listing_status_scan` → `send_listing_status`**: карточки «⬇️ Цена снизилась
-  (было → стало; старая цена из `listing_price_history`)», «🔴 Исчезло»,
-  «✅ Снова в продаже» уходят тем, кто уже получал карточку этого объявления
-  (аудитория — `sent_log`); действуют те же rate limit, тихие часы и антидубли.
-- `price_drop` / `returned` ставятся fetch-воркером сразу после парсинга
-  (id-списки `price_changed_ids` / `reactivated_ids` из `save_listings`).
+## Мониторинг и алерты
 
-### История цен в UI (PLAN.md, фаза 4)
+- **Health**: `/health` (liveness), `/health/detailed` (postgres/redis/rabbitmq;
+  503 только если лежит БД — остальные компоненты деградация, не смерть).
+- **Метрики**: `/metrics` (X-Internal-Token) — юзеры/фильтры/объявления/
+  уведомления 24 ч, разбивка по тарифам, health источников, события 24 ч.
+- **Health источников** (`source_health`): avg latency, error_streak;
+  circuit breaker: 5 ошибок подряд → источник временно отключается
+  (`SOURCE_CB_ERROR_STREAK`).
+- **Алерты** (`services/alerting.py`): Telegram на `ADMIN_CHAT_ID` с дедупом
+  `alert:{key}` (TTL 30 мин по умолчанию). Алертятся: DLQ ≥ 10, поломка
+  парсера, отключение источника CB, открытие CB перевода/прокси/RAG,
+  партнёр приостановлен за неуплату.
+- **ParserDoctor** (`doctor_mode` в конфиге источника): при поломке
+  селекторов GLM предлагает ремонт; `off` / `suggest` / `auto`.
+- `SENTRY_DSN` — опционально.
 
-- **Карточка** (`GET /api/listings/{id}`): `price_history` — точки
-  `listing_price_history` по возрастанию `recorded_at`; в Mini App — секция
-  «История цен» (новые сверху, текущая помечена) и плашка «🔴 Исчезло с продажи»
-  при `is_active=false`. В ленте истории нет (иначе N+1).
-- **Бейджи избранного** (`GET /api/favorites`): `first_price` — первая точка
-  истории одним батч-запросом; клиент показывает «⬇️ −N%» на карточке и
-  «⬇️ (было X)» в списке избранного при `price < first_price`, «🔴 Исчезло»
-  при `is_active=false`.
+---
 
-## Этап 3: AI-диалоговый агент
+## Безопасность
 
-Свободный текст пользователя → `POST /api/dialog/message` (internal-токен) → agent loop:
+- **JWT**: HS256; для Mini App — подпись `initData` валидируется по HMAC
+  (`APP_SECRET_KEY`, TTL initData 24 ч); для веба — логин/refresh (30 дней).
+- **X-Internal-Token** — отдельный секрет `INTERNAL_TOKEN` (пусто =
+  `APP_SECRET_KEY`): все админ-эндпоинты, `/metrics`, `/api/dialog/*`.
+  Админ-действия журналируются в `admin_actions` (payload без секретов).
+- **Партнёрские ключи**: только SHA-256 в БД; сырой ключ показывается один
+  раз при создании/ротации; префикс — для опознания в ЛК.
+- **ПД**: `user_id` лида отдаётся партнёру только после эксклюзивного claim;
+  пул лидов — без ПД.
+- **PQ-шифрование** (optional): ML-KEM-768 + X25519 для документов RAG
+  at-rest (`ENCRYPT_DOCUMENTS`).
+- **Минимум привилегий S3**: токен без права CreateBucket обрабатывается
+  мягко (warning, без падения); presigned GET — на 10 минут.
 
-- **LLM-провайдеры** (`app/ai/llm_client.py`): /chat/completions-совместимый (GLM/Ollama/DeepSeek), Anthropic, Mock — через httpx, без SDK. OpenAI выпилен.
-- **Tools** (`app/ai/tools.py`, ТЗ п. 7.3): `update_criteria`, `ask_clarification`, `answer_question`, `lookup_reference`, `preview_search`, `finalize_search`. Каждый патч критериев валидируется через Pydantic.
-- **Agent loop** (`app/ai/agent.py`): FAQ-ответы из кэша без LLM (п. 7.8), ранний выход при заполненных критичных полях (make/model + price_max + country/sources), история — последние 8 сообщений.
-- **DialogState** (`dialog:{user_id}` в Redis, TTL 24ч), архивация в `dialog_sessions` (п. 7.6).
-- **Финализация**: фильтр в `filters` (для будущих уведомлений) + ARQ-задачи парсинга по всем включённым источникам.
-- **Fallback (п. 7.9)**: если LLM недоступна, бот переключается на кнопочный режим (`app/bot/button_flow.py`).
+---
 
-Тест: `uv run pytest tests/ -q`. Для dev без LLM-ключа: `LLM_PROVIDER=mock`.
+## Модель данных и миграции
 
-## Этап 2: парсинг
+Основные таблицы (`app/db/models.py`): users, user_filters, sources,
+source_health, listings, listing_price_history, favorites, sent_log,
+analytics_events, leads (+partner-поля, qualification), partner_accounts,
+partner_api_keys, partner_transactions, payments, admin_actions, web_auth.
 
-Структура (ТЗ п. 6.2):
+| Миграция | Что делает |
+|---|---|
+| 0001 initial | ядро: users, sources, listings, filters, sent_log, … |
+| 0002 favorites | избранное |
+| 0003 web_auth | веб-авторизация (JWT по логину) |
+| 0004 analytics_events | события воронки |
+| 0005 add_che168_source | источник che168 |
+| 0006 partner_accounts | партнёры + API-ключи + partner-поля лидов |
+| 0007 onboarded_at | флаг онбординга |
+| 0008 admin_actions | аудит админ-действий |
+| 0009 listing_tracking | отслеживание объявлений |
+| 0010 sent_log_kind | тип уведомления в sent_log |
+| 0011 translations | title_raw/title_ru/source_language/translated_at |
+| 0012 raw_payload_s3 | DROP raw_payload → listings.raw_key (S3-ключ) |
+| 0013 partition_ready | PK (id, recorded_at), NOT NULL — подготовка к партиционированию по времени (pg_partman; план в PLAN §6) |
+| 0014 partner_billing | balance, cpl_rate + partner_transactions (CPL-журнал) |
 
-```
-app/adapters/
-├── __init__.py      # ADAPTER_CLASSES — карта имя → класс (ТЗ п. 6.4)
-├── base.py          # SourceAdapter протокол, BaseApiAdapter
-├── registry.py      # AdapterRegistry: конфиг из БД, секреты из env
-├── encar.py         # EncarApiAdapter (api.encar.com → UnifiedListing)
-└── common/
-    ├── http.py      # HttpClient: ретраи, 429 backoff, ротация прокси
-    ├── proxy.py     # ProxyPool (Redis: proxy:good/bad/cooldown)
-    ├── normalize.py # нормализация марок/топлива/кузова/КПП/привода
-    └── dedup.py     # кросс-дедуп по VIN/fuzzy, TTL 48ч
-```
+Накат: `uv run alembic upgrade head`. ⚠️ Перед продом прогнать на копии БД:
+`upgrade head` → `downgrade -1` → `upgrade head`.
 
-Запуск Fetch Worker:
+---
 
-```bash
-uv run python -m app.workers.fetch
-# или через compose: docker compose up worker_fetch
-```
-
-Регистрация источника (валидация adapter_class — ТЗ п. 6.4):
-
-```bash
-curl -X PUT http://localhost:8000/api/admin/sources/encar \
-  -H "X-Internal-Token: $APP_SECRET_KEY" -H "Content-Type: application/json" \
-  -d '{
-    "name": "encar", "adapter_class": "EncarApiAdapter", "kind": "api",
-    "enabled": true, "priority": 100, "rate_limit_per_min": 60,
-    "max_concurrency": 3, "timeout_sec": 30,
-    "capabilities": {"country": "KR", "price_currency": "KRW"},
-    "config": {"page_size": 20}
-  }'
-```
-
-Запуск парсинга вручную (по расписанию — Scheduler на этапе 8):
+## Тесты и качество
 
 ```bash
-curl -X POST "http://localhost:8000/api/admin/sources/encar/fetch?max_pages=1" \
-  -H "X-Internal-Token: $APP_SECRET_KEY"
+uv run pytest -q                 # 350 passed
+uv run ruff check app tests
+uv run mypy app                  # настроен
+cd frontend && npm run build     # tsc --noEmit + vite build
 ```
 
-Тесты: `uv run pytest` (контрактные тесты адаптера — мок ответа → `UnifiedListing`, ТЗ п. 14.3 этап 2).
+Покрытие: LLM-клиенты, RAG-клиент (fallback, CB, кэш), агент, уведомления,
+адаптеры (контракты, дедуп, che168), auth, PQ-крипто, мониторинг/алерты,
+cron/планировщик, аналитика/воронки, лиды, ParserDoctor, прокси-шлюз,
+партнёрский контур + биллинг, S3 storage, token bucket.
 
-## RAG-микросервис (services/rag)
+Тест-хелперы (`tests/conftest.py`): `FakeSession` (строковые PK, rollback,
+`get`, `executed_params`), `FakeRedis` (`ttls`), `MockLLMClient`
+(`script`, `.calls`).
 
-Локальный RAG-сервис на ядре [rag_service](https://github.com/Pavel14701/rag_service) (monorepo-версия):
-гибридный поиск (vector + BM25/RRF), агентный retrieval, multi-provider LLM, DLQ/retry через RabbitMQ.
+---
 
-Структура `services/rag/`:
-- `rag_core/` — общее ядро (domain / application / infrastructure, hexagonal);
-- `rag_worker/` — RabbitMQ-консьюмеры (`query_queue`, `ingest_queue`, `delete_queue`, `reindex_queue`), health/metrics на :8101;
-- `rag_api/` — HTTP-шлюз `POST /api/v1/ask` (internal token → JWT → RPC в `query_queue`), :8100;
-- `kb/` — база знаний (markdown: FAQ, таможня, доставка, риски, расходы);
-- `scripts/ingest_kb.py` — заливка kb в MinIO/Postgres/очередь индексации.
+## Прод-чеклист
 
-Инфраструктура в общем docker-compose: `qdrant`, `minio`, `rag_migrate*`, `rag_worker`, `rag_api`.
-Бэкенд ходит в шлюз через `RAG_SERVICE_URL` + `RAG_API_TOKEN` (клиент `app/ai/rag_client.py` уже готов;
-ниже порога `RAG_CONFIDENCE_THRESHOLD` — fallback на LLM-агента).
+Единственное, что отделяет от «зелёного» статуса — действия владельца
+(детали: `PROGRESS.md` §24 и §32):
 
-Запуск и заливка базы знаний:
-```bash
-docker compose up -d qdrant minio rag_worker rag_api
-docker compose exec rag_worker alembic upgrade head   # если rag_migrate_alembic не отработал
-uv run --project services/rag python scripts/ingest_kb.py --force
-```
+1. **Перевыпустить `BOT_TOKEN`** (@BotFather — старый отозван) → `.env`.
+2. `alembic upgrade head` — сначала на **копии БД** (upgrade → downgrade -1 → upgrade).
+3. Секреты: `APP_SECRET_KEY`, `INTERNAL_TOKEN`, `GLM_API_KEY`,
+   `RAG_API_TOKEN`, `RAG_JWT_SECRET`; сменить minioadmin/minioadmin и
+   guest/guest RabbitMQ.
+4. Живые проверки: Stars XTR-платёж; che168 (сверка HTML + `GEO=cn` →
+   `enabled=true`); RAG (`ingest_kb.py --force` + контрольный запрос);
+   MinIO e2e (fetch → presigned → retention); биллинг (партнёр → topup →
+   claim → списание).
+5. Опционально: `doctor_mode=suggest`, `TRANSLATE_ENABLED`,
+   `RAW_PAYLOAD_ENABLED`, `ENCRYPT_DOCUMENTS`.
+6. `APP_ENV=prod`, публичный HTTPS `MINIAPP_URL` (домен/TLS).
 
-## Перевод тайтлов (services/translate, фаза 5 PLAN.md)
+Дальше по бэклогу (P3): LLM cost tracking, ротация PQ-ключей, push ветки
+`refactor/monorepo`, рефакторинг веб-авторизации (nullable telegram_id).
 
-Optional-микросервис NLLB (`nllb-200-distilled-600M`, CPU, :8200): переводит
-`title` объявлений с корейского/китайского на русский. Перевод **некритичен**:
-сервис упал/выключен → UI показывает оригинальный тайтл (fallback).
 
-- Схема: `POST /translate {texts, source_lang, target_lang}` → `{translations}`
-  (батчи, `null` = не переведено; `source_lang="auto"` — детект по письменности);
-  `GET /health`. Bearer `API_TOKEN` — опционально.
-- Триггер — тот же `content_hash` (PLAN.md): NEW или смена хэша →
-  `save_listings.translate_ids` → задача `translate_listings` в очереди `fetch`
-  пишет `title_raw/title_ru/source_language/translated_at` (миграция `0011`).
-- Бэкенд-клиент `app/services/translate_client.py`: Redis-кэш
-  `tr:{tgt}:{src}:{sha1}` TTL 30 дней, retry, circuit breaker (3 ошибки →
-  пауза 5 мин + алерт), флаг `TRANSLATE_ENABLED` (по умолчанию выключен).
 
-Включение:
-```bash
-# .env: TRANSLATE_ENABLED=true, TRANSLATE_SERVICE_URL=http://localhost:8200
-docker compose up -d translate
-uv run alembic upgrade head   # 0011_translations
-```
 
-## Сырые ответы адаптеров в MinIO (raw_payload, фаза 6 PLAN.md)
 
-Сырые JSON от encar/kcar/che168 — «холодные» данные (аудит, отладка парсера):
-в PostgreSQL не хранятся (колонка `raw_payload` выпилена миграцией `0012`,
-вместо неё `listings.raw_key` — ключ S3-объекта). Загрузка через **aioboto3**
-(не блокирует event loop), MinIO — через `S3_ENDPOINT_URL`.
 
-- Ключ: `raw/{source}/{yyyy}/{mm}/{listing_id}_{content_hash}.json` — retention
-  по префиксу + дедупликация (хэш не менялся → объект не перезаписывается).
-  Metadata: source, listing_id, content_hash, fetched_at.
-- Fallback обязателен: MinIO недоступен/флаг выключен → объявления сохраняются,
-  `raw_key = NULL` (аудит теряется — не страшно).
-- Retention-крон `raw_retention_job` (03:30 UTC): удаляет объекты старше
-  `RAW_RETENTION_DAYS` (по умолчанию 180).
-- Админка: `GET /api/admin/listings/{id}/raw` (заголовок `X-Internal-Token`)
-  → presigned GET на 10 минут; прямого доступа к MinIO у UI нет.
 
-Включение:
-```bash
-# .env: RAW_PAYLOAD_ENABLED=true, S3_ENDPOINT_URL=http://localhost:9000
-#       (внутри docker-сети — http://minio:9000), S3_ACCESS_KEY/S3_SECRET_KEY
-docker compose up -d minio
-uv run alembic upgrade head   # 0012_raw_payload_s3
-```
