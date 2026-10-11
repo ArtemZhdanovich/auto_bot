@@ -16,11 +16,11 @@ class Settings(BaseSettings):
     minio_access_key: str = 'minioadmin'
     minio_secret_key: str = 'minioadmin'
     minio_bucket: str = 'documents'
-    # LLM provider selection: "deepseek" (default), "openai" (any OpenAI
-    # chat-completions compatible API: OpenAI, vLLM, Ollama, Together, ...)
-    # or "anthropic". Each provider has its own key/base URL; ``llm_model``
-    # overrides the provider default model when set.
-    llm_provider: str = 'deepseek'
+    # LLM provider selection: "glm" (GLM/Zhipu, default), "deepseek", "openai"
+    # (any OpenAI chat-completions compatible API: OpenAI, vLLM, Ollama,
+    # Together, ...) or "anthropic". Each provider has its own key/base
+    # URL; ``llm_model`` overrides the provider default model when set.
+    llm_provider: str = 'glm'
     llm_model: str | None = None
     # Per-request routing: comma-separated providers a request may choose
     # (empty = only the default provider), and an optional comma-separated
@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     llm_enabled_providers: str = ''
     llm_allowed_models: str = ''
     llm_max_tokens: int = 500
+    glm_api_key: str | None = None
+    # International z.ai endpoint; for bigmodel.cn keys use
+    # GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+    glm_base_url: str = 'https://api.z.ai/api/paas/v4'
     deepseek_api_key: str | None = None
     deepseek_base_url: str = 'https://api.deepseek.com/v1'
     openai_api_key: str | None = None
@@ -59,6 +63,12 @@ class Settings(BaseSettings):
     # TLS for backing services: MinIO HTTPS, Qdrant HTTPS (+ API key).
     # RabbitMQ TLS is enabled by using an amqps:// RABBITMQ_URL.
     minio_secure: bool = False
+    # Post-quantum at-rest encryption for stored documents (ML-KEM-768 +
+    # X25519 hybrid, AES-256-GCM). Keys are hex raw bytes; generate with
+    # ``app.core.pq_crypto.generate_keypair()`` (public ~2432 hex chars).
+    encrypt_documents: bool = False
+    pq_encryption_public_key: str | None = None
+    pq_encryption_private_key: str | None = None
     qdrant_https: bool = False
     qdrant_api_key: str | None = None
     # gRPC transport: faster serialization and ~32 MB message limits
@@ -233,9 +243,9 @@ class Settings(BaseSettings):
             normalized == 'openai-compatible'
         ):  # alias for self-hosted endpoints
             return 'openai'
-        if normalized not in {'deepseek', 'openai', 'anthropic'}:
+        if normalized not in {'glm', 'deepseek', 'openai', 'anthropic'}:
             raise ValueError(
-                'llm_provider must be one of: deepseek, openai, anthropic '
+                'llm_provider must be one of: glm, deepseek, openai, anthropic '
                 f'(got {value!r})'
             )
         return normalized

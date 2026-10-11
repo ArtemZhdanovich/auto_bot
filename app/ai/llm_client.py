@@ -222,13 +222,19 @@ def build_llm_client(
             temperature=temperature,
             transport=transport,
         )
-    # openai по умолчанию
-    if not settings.openai_api_key:
-        raise LLMError("OPENAI_API_KEY is not set")
-    return OpenAICompatibleClient(
-        api_key=settings.openai_api_key,
-        base_url=base_url or "https://api.openai.com/v1",
-        model=model,
-        temperature=temperature,
-        transport=transport,
-    )
+    # по умолчанию glm (GLM/Zhipu, OpenAI-совместимый /chat/completions)
+    if provider in ("glm", "openai"):
+        api_key = settings.glm_api_key if provider == "glm" else settings.openai_api_key
+        if not api_key:
+            raise LLMError(
+                "GLM_API_KEY is not set" if provider == "glm"
+                else "OPENAI_API_KEY is not set"
+            )
+        default_base = settings.glm_base_url if provider == "glm" else "https://api.openai.com/v1"
+        return OpenAICompatibleClient(
+            api_key=api_key,
+            base_url=base_url or default_base,
+            model=model,
+            temperature=temperature,
+            transport=transport,
+        )

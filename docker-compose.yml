@@ -145,8 +145,14 @@ services:
       MINIO_SECRET_KEY: minioadmin
       JWT_SECRET: ${RAG_JWT_SECRET:-${APP_SECRET_KEY}}
       EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
-      LLM_PROVIDER: ${RAG_LLM_PROVIDER:-deepseek}
+      LLM_PROVIDER: ${RAG_LLM_PROVIDER:-glm}
+      LLM_MODEL: ${RAG_LLM_MODEL:-glm-4.6}
+      GLM_API_KEY: ${GLM_API_KEY:-}
+      GLM_BASE_URL: ${GLM_BASE_URL:-https://api.z.ai/api/paas/v4}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      ENCRYPT_DOCUMENTS: ${ENCRYPT_DOCUMENTS:-false}
+      PQ_ENCRYPTION_PUBLIC_KEY: ${PQ_ENCRYPTION_PUBLIC_KEY:-}
+      PQ_ENCRYPTION_PRIVATE_KEY: ${PQ_ENCRYPTION_PRIVATE_KEY:-}
       REDIS_URL: redis://redis:6379/1
       METRICS_PORT: "8101"
       WORKER_QUEUES: "all"

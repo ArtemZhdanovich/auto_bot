@@ -40,7 +40,7 @@ from rag_core.application.interfaces import (
     TokenValidator,
     VectorStore,
 )
-from rag_core.infrastructure.file_storage import MinioStorage
+from rag_core.infrastructure.file_storage import EncryptedFileStorage, MinioStorage
 from rag_core.infrastructure.vector_store import QdrantStore
 from rag_core.infrastructure.repositories import (
     PostgresDocumentRepository,
@@ -49,6 +49,7 @@ from rag_core.infrastructure.embedding import (
     SentenceTransformerEmbedding,
 )
 from rag_core.infrastructure.llm import DeepSeekClient
+from rag_core.infrastructure.llm import GLMClient
 from rag_core.infrastructure.llm import OpenAIChatClient
 from rag_core.infrastructure.llm import AnthropicClient
 from rag_core.infrastructure.llm import LLMProviderSpec, LLMRouter
@@ -77,8 +78,26 @@ class AppProvider(Provider):
 
     @provide
     def file_storage(self, minio: Minio, settings: Settings) -> FileStorage:
-        """Expose MinIO storage behind the FileStorage port."""
-        return MinioStorage(minio, settings.minio_bucket)
+        """Expose MinIO storage behind the FileStorage port.
+
+        With ``ENCRYPT_DOCUMENTS=true`` objects are encrypted at rest
+        (post-quantum hybrid ML-KEM-768 + X25519, AES-256-GCM); requires
+        ``PQ_ENCRYPTION_PUBLIC_KEY`` (and ``PQ_ENCRYPTION_PRIVATE_KEY``
+        on readers).
+        """
+        storage = MinioStorage(minio, settings.minio_bucket)
+        if settings.encrypt_documents:
+            if not settings.pq_encryption_public_key:
+                raise ValueError(
+                    'PQ_ENCRYPTION_PUBLIC_KEY is required when '
+                    'ENCRYPT_DOCUMENTS=true'
+                )
+            return EncryptedFileStorage(
+                storage,
+                settings.pq_encryption_public_key,
+                settings.pq_encryption_private_key,
+            )
+        return storage
 
     @provide
     def qdrant_client(self, settings: Settings) -> QdrantClient:
@@ -228,17 +247,30 @@ class AppProvider(Provider):
         routing among several providers (request fields ``llm_provider`` /
         ``llm_model`` in the query message). ``LLM_ALLOWED_MODELS``
         restricts explicit model overrides. Each enabled provider requires
-        its API key at startup. Supported providers: ``deepseek``,
-        ``openai`` (any OpenAI chat-completions compatible endpoint) and
-        ``anthropic``.
+        its API key at startup. Supported providers: ``glm`` (GLM/Zhipu,
+        default), ``deepseek``, ``openai`` (any OpenAI chat-completions
+        compatible endpoint) and ``anthropic``.
         """
         cache = caches.pick(
             maxsize=settings.llm_cache_size, ttl=settings.llm_cache_ttl
         )
 
         deepseek_key = settings.deepseek_api_key or ''
+        glm_key = settings.glm_api_key or ''
         openai_key = settings.openai_api_key or ''
         anthropic_key = settings.anthropic_api_key or ''
+
+        def glm_factory(model: str) -> LLMGenerator:
+            return GLMClient(
+                glm_key,
+                settings.glm_base_url,
+                model=model,
+                max_tokens=settings.llm_max_tokens,
+                cache=cache,
+                circuit_breaker=breaker,
+                continue_on_truncation=settings.llm_continue_on_truncation,
+                http_client=http_client,
+            )
 
         def deepseek_factory(model: str) -> LLMGenerator:
             return DeepSeekClient(
@@ -277,16 +309,19 @@ class AppProvider(Provider):
             )
 
         factories = {
+            'glm': glm_factory,
             'deepseek': deepseek_factory,
             'openai': openai_factory,
             'anthropic': anthropic_factory,
         }
         defaults = {
+            'glm': 'glm-4.6',
             'deepseek': 'deepseek-chat',
             'openai': 'gpt-4o-mini',
             'anthropic': 'claude-3-5-haiku-latest',
         }
         keys = {
+            'glm': (glm_key, 'GLM_API_KEY'),
             'deepseek': (deepseek_key, 'DEEPSEEK_API_KEY'),
             'openai': (openai_key, 'OPENAI_API_KEY'),
             'anthropic': (anthropic_key, 'ANTHROPIC_API_KEY'),

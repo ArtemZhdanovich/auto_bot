@@ -427,6 +427,44 @@ class DeepSeekClient(OpenAIChatClient):
         )
 
 
+class GLMClient(OpenAIChatClient):
+    """Client for the Zhipu GLM API (OpenAI-compatible chat completions).
+
+    Works with both endpoints: international ``https://api.z.ai/api/paas/v4``
+    and mainland ``https://open.bigmodel.cn/api/paas/v4`` (pass via
+    ``base_url``).
+    """
+
+    provider = 'glm'
+    error_prefix = 'GLM API error'
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = 'https://api.z.ai/api/paas/v4',
+        timeout: float = 30.0,
+        http_transport: httpx.AsyncBaseTransport | None = None,
+        cache: Cache | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        continue_on_truncation: bool = False,
+        http_client: httpx.AsyncClient | None = None,
+        model: str = 'glm-4.6',
+        max_tokens: int = 500,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            http_transport=http_transport,
+            cache=cache,
+            circuit_breaker=circuit_breaker,
+            continue_on_truncation=continue_on_truncation,
+            http_client=http_client,
+        )
+
+
 # Builds a concrete client bound to a specific model name.
 ProviderFactory = Callable[[str], LLMGenerator]
 

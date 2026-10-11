@@ -78,6 +78,15 @@ async def main() -> None:
         ),
         MINIO_BUCKET,
     )
+    # Постквантовое шифрование at-rest (ML-KEM-768 + X25519 hybrid)
+    if os.environ.get('ENCRYPT_DOCUMENTS', '').lower() in ('1', 'true', 'yes'):
+        from rag_core.infrastructure.file_storage import EncryptedFileStorage
+
+        storage = EncryptedFileStorage(
+            storage,
+            os.environ['PQ_ENCRYPTION_PUBLIC_KEY'],
+            os.environ.get('PQ_ENCRYPTION_PRIVATE_KEY'),
+        )
 
     connection = await aio_pika.connect_robust(RABBITMQ_URL)
     channel = await connection.channel()

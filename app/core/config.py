@@ -47,13 +47,17 @@ class Settings(BaseSettings):
     refresh_token_ttl_sec: int = 60 * 60 * 24 * 30
     init_data_max_age_sec: int = 60 * 60 * 24
 
-    # LLM (этап 3, значения из ТЗ п. 11.6)
+    # LLM (этап 3): OpenAI-совместимые провайдеры; основной — GLM (Zhipu)
+    glm_api_key: str | None = None
+    # Международный эндпоинт z.ai; для ключей open.bigmodel.cn задайте
+    # GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+    glm_base_url: str = "https://api.z.ai/api/paas/v4"
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
-    llm_default_model: str = "gpt-4o-mini"
-    llm_advanced_model: str = "gpt-4o"
-    # openai | anthropic | ollama | mock ("mock" — для тестов/dev без LLM)
-    llm_provider: str = "openai"
+    llm_default_model: str = "glm-4.6"
+    llm_advanced_model: str = "glm-4.6"
+    # glm | openai | anthropic | ollama | mock ("mock" — для тестов/dev без LLM)
+    llm_provider: str = "glm"
     llm_base_url: str | None = None  # переопределение (например, Ollama/прокси)
     llm_temperature: float = 0.2
 
