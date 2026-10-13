@@ -15,15 +15,19 @@ from app.core.config import get_settings
 from app.core.deps import SessionDep
 from app.core.security import (
     InitDataError,
+    TokenError,
     create_access_token,
     create_refresh_token,
+    decode_token,
     validate_init_data,
 )
 from app.db.models import User
 from app.schemas.user import (
     AuthResponse,
     MagicLinkRequest,
+    RefreshRequest,
     TelegramAuthRequest,
+    TokenPair,
     UserOut,
 )
 from app.services.users import upsert_user
@@ -89,6 +93,37 @@ async def auth_telegram(body: TelegramAuthRequest, session: SessionDep) -> AuthR
 async def auth_magic_link(body: MagicLinkRequest) -> dict[str, str]:
     """Вход по ссылке из бота. Реализуется на этапах 3–4 (ТЗ п. 14.3)."""
     return {"detail": "magic-link auth will be implemented at stage 3-4"}
+
+
+@router.post("/refresh", response_model=TokenPair)
+async def auth_refresh(body: RefreshRequest, session: SessionDep) -> TokenPair:
+    """Обмен refresh-токена на новую пару access+refresh (веб-сессии, 0003)."""
+    settings = get_settings()
+    try:
+        payload = decode_token(body.refresh_token, settings)
+    except TokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        ) from exc
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not a refresh token"
+        )
+    try:
+        user_id = int(payload.get("sub", ""))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        ) from exc
+    user = await session.get(User, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+    return TokenPair(
+        access_token=create_access_token(user.telegram_id, settings),
+        refresh_token=create_refresh_token(user.telegram_id, settings),
+    )
 
 
 # ---------- Веб-регистрация (сайт): поиск доступен только зарегистрированным ----------
