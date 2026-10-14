@@ -19,8 +19,8 @@ class PartnerCreateIn(BaseModel):
     contact: str | None = Field(default=None, max_length=200)
     plan: PartnerPlan = "starter"
     daily_quota: int = Field(default=10, ge=1, le=1000)
-    balance: float = Field(default=0.0, ge=0, max=1_000_000)
-    cpl_rate: float | None = Field(default=None, ge=0, max=10_000)
+    balance: float = Field(default=0.0, ge=0, le=1_000_000)
+    cpl_rate: float | None = Field(default=None, ge=0, le=10_000)
 
 
 class PartnerUpdateIn(BaseModel):
@@ -32,7 +32,7 @@ class PartnerUpdateIn(BaseModel):
     plan: PartnerPlan | None = None
     daily_quota: int | None = Field(default=None, ge=1, le=1000)
     status: Literal["active", "suspended"] | None = None
-    cpl_rate: float | None = Field(default=None, ge=0, max=10_000)
+    cpl_rate: float | None = Field(default=None, ge=0, le=10_000)
     reset_cpl_rate: bool = False
 
 
@@ -159,5 +159,5 @@ class BillingTopupIn(BaseModel):
     amount < 0 — ручная корректировка (kind=adjustment).
     """
 
-    amount: float = Field(ge=-100_000, max=100_000)
+    amount: float = Field(ge=-100_000, le=100_000)
     comment: str | None = Field(default=None, max_length=500)

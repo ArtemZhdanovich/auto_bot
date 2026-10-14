@@ -28,3 +28,19 @@ frontend/tsconfig.tsbuildinfo
 .mypy_cache
 .pytest_cache
 .ruff_cache
+
+# Логи
+*.log
+*.log.*
+logs/
+*.out
+
+# Coverage (прогоны тестов)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ОС
+.DS_Store
+Thumbs.db

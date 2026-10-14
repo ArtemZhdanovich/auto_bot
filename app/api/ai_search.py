@@ -46,7 +46,7 @@ async def ai_message(
         ) from exc
     try:
         reply = await run_agent(
-            user.id,
+            user.telegram_id,
             body.text,
             session=session,
             redis=redis,
@@ -64,7 +64,7 @@ async def ai_reset(
     session: SessionDep,
     redis: Redis = Depends(get_redis),
 ) -> dict[str, bool]:
-    await reset_dialog(user.id, session=session, store=DialogStore(redis))
+    await reset_dialog(user.telegram_id, session=session, store=DialogStore(redis))
     return {"reset": True}
 
 
@@ -77,7 +77,7 @@ async def ai_finalize(
 ) -> dict[str, Any]:
     """Финализация диалога: сохранить фильтр + поставить задачи парсинга."""
     return await finalize_dialog(
-        user.id,
+        user.telegram_id,
         session=session,
         store=DialogStore(redis),
         enqueue=lambda c: _enqueue_fetch(session, c),

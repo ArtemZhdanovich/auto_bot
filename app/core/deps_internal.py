@@ -1,5 +1,6 @@
 """Вспомогательные зависимости для внутренних/admin эндпоинтов."""
 
+import hmac
 from functools import lru_cache
 
 from fastapi import Header, HTTPException, status
@@ -24,8 +25,13 @@ def check_internal_token(
     """Внутренние эндпоинты (бот/воркеры) — INTERNAL_TOKEN или APP_SECRET_KEY.
 
     Аннотация Header позволяет использовать и напрямую в Depends(router-level),
-    и с явной передачей значения из эндпоинтов admin."""
-    if x_internal_token != internal_token():
+    и с явной передачей значения из эндпоинтов admin.
+    Сравнение в постоянном времени (hmac.compare_digest) — не раскрываем секрет
+    через тайминги ответов.
+    """
+    if x_internal_token is None or not hmac.compare_digest(
+        x_internal_token, internal_token()
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token"
         )
