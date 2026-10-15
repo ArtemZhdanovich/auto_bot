@@ -55,6 +55,17 @@ export function ListingScreen() {
   }
 
   const title = `${listing.make ?? ""} ${listing.model ?? ""}`.trim();
+  // KRW/EUR → USD по фикс-курсу MVP (как в боте), иначе в калькулятор уйдут воны
+  const usd =
+    listing.price != null && listing.price > 0
+      ? Math.round(
+          (listing.currency ?? "USD").toUpperCase() === "KRW"
+            ? listing.price / 1350
+            : (listing.currency ?? "USD").toUpperCase() === "EUR"
+              ? listing.price * 1.08
+              : listing.price,
+        )
+      : null;
 
   return (
     <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -81,6 +92,9 @@ export function ListingScreen() {
         <Cell after={listing.mileage_km ? `${listing.mileage_km.toLocaleString("ru")} км` : "—"}>
           Пробег
         </Cell>
+        {usd != null && (listing.currency ?? "").toUpperCase() !== "USD" && (
+          <Cell after={<b>≈ {usd.toLocaleString("ru")} $</b>}>По курсу (оценка)</Cell>
+        )}
         <Cell after={listing.vin ?? "не указан"}>VIN</Cell>
         <Cell after={listing.source}>Источник</Cell>
       </Section>
@@ -133,7 +147,7 @@ export function ListingScreen() {
         onClick={() => {
           haptic();
           navigate(
-            `/calc?price=${listing.price ?? ""}&year=${listing.year ?? ""}`,
+            `/calc?${usd != null ? `price=${usd}&` : ""}year=${listing.year ?? ""}`,
           );
         }}
       >

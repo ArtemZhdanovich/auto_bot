@@ -41,8 +41,8 @@ export function CalcScreen() {
     const priceNum = parseFloat(p.replace(/\s/g, ""));
     const ccNum = parseInt(c, 10);
     const yearNum = parseInt(y, 10);
-    if (!priceNum || priceNum <= 0 || !yearNum || yearNum < 1980) {
-      setError("Проверьте цену и год");
+    if (!priceNum || priceNum <= 0 || !yearNum || yearNum < 1980 || yearNum > new Date().getFullYear() + 1) {
+      setError("Проверьте цену и год (1980 – след. год)");
       return;
     }
     setLoading(true);
@@ -73,6 +73,12 @@ export function CalcScreen() {
   }, []);
 
   const fmt = (n: number) => n.toLocaleString("ru-RU");
+  /** Группировка тысяч при вводе: 18400 → 18 400 */
+  const grouped = (raw: string) => {
+    const digits = raw.replace(/\D/g, "");
+    return digits ? Number(digits).toLocaleString("ru-RU") : "";
+  };
+  const CC_CHIPS = [1600, 2000, 2500, 3000];
 
   return (
     <div className="calc">
@@ -86,26 +92,41 @@ export function CalcScreen() {
           <span>Цена авто, $</span>
           <input
             inputMode="numeric"
-            value={price}
-            onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))}
-            placeholder="18000"
+            value={grouped(price)}
+            onChange={(e) => setPrice(e.target.value.replace(/\D/g, ""))}
+            placeholder="18 000"
           />
         </label>
         <label className="calc-field">
           <span>Объём двигателя, см³</span>
           <input
             inputMode="numeric"
-            value={cc}
-            onChange={(e) => setCc(e.target.value.replace(/[^\d]/g, ""))}
-            placeholder="2000"
+            value={grouped(cc)}
+            onChange={(e) => setCc(e.target.value.replace(/\D/g, ""))}
+            placeholder="2 000"
           />
         </label>
+        <div className="chip-row">
+          {CC_CHIPS.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={cc === String(v) ? "chip chip--active" : "chip"}
+              onClick={() => {
+                haptic("light");
+                setCc(String(v));
+              }}
+            >
+              {v} см³
+            </button>
+          ))}
+        </div>
         <label className="calc-field">
           <span>Год выпуска</span>
           <input
             inputMode="numeric"
             value={year}
-            onChange={(e) => setYear(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+            onChange={(e) => setYear(e.target.value.replace(/\D/g, "").slice(0, 4))}
             placeholder="2022"
           />
         </label>
@@ -141,7 +162,10 @@ export function CalcScreen() {
             {result.components.map((c) => (
               <div key={c.label} className="calc-row">
                 <span>{c.label}</span>
-                <b>{fmt(c.rub)} ₽</b>
+                <b>
+                  {fmt(c.rub)} ₽
+                  <small>≈ {fmt(Math.round(c.usd))} $</small>
+                </b>
               </div>
             ))}
           </div>

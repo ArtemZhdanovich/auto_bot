@@ -111,14 +111,17 @@ def _search_ready(criteria: dict) -> bool:
     return has_car and has_price and has_geo
 
 
-def _miniapp_button(text: str = "📱 Мини-приложение") -> InlineKeyboardButton | None:
+def _miniapp_button(text: str = "📱 Мини-приложение", path: str = "") -> InlineKeyboardButton | None:
     """Кнопка в мини-апп: web_app только для https (требование Telegram),
-    для http — обычная url-кнопка (откроется в браузере)."""
+    для http — обычная url-кнопка (откроется в браузере).
+    path — маршрут внутри приложения (напр. «/calc?price=18000»)."""
     from aiogram.types import WebAppInfo
 
     url = _miniapp_url()
     if not url:
         return None
+    if path:
+        url = url.rstrip("/") + (path if path.startswith("/") else "/" + path)
     if url.startswith("https://"):
         return InlineKeyboardButton(text=text, web_app=WebAppInfo(url=url))
     return InlineKeyboardButton(text=text, url=url)
@@ -760,9 +763,9 @@ async def dlg_callback(cb, state: FSMContext) -> None:
         await _agent_turn(cb.message, option, state, user_id=user_id)
 
 
-def _miniapp_kb() -> InlineKeyboardMarkup | None:
+def _miniapp_kb(path: str = "") -> InlineKeyboardMarkup | None:
     rows = []
-    mini = _miniapp_button("📱 Открыть приложение")
+    mini = _miniapp_button("📱 Открыть в приложении", path)
     if mini:
         rows.append([mini])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
@@ -791,7 +794,10 @@ async def calc_from_card(cb) -> None:
     if out is None:
         await cb.message.answer("Сервис расчёта недоступен, попробуйте позже.")
         return
-    await cb.message.answer(_format_calc_out(out), reply_markup=_miniapp_kb())
+    await cb.message.answer(
+        _format_calc_out(out),
+        reply_markup=_miniapp_kb(f"/calc?price={out['price_usd']:.0f}&cc={out['engine_cc']}&year={out['year']}"),
+    )
 
 
 @router.message(Command("calc"))
@@ -807,13 +813,14 @@ async def cmd_calc(message: Message, command: CommandObject | None) -> None:
             out = await backend.calc_delivery(price, cc, year)
             if out is not None:
                 await message.answer(
-                    _format_calc_out(out), reply_markup=_miniapp_kb()
+                    _format_calc_out(out),
+                    reply_markup=_miniapp_kb(f"/calc?price={price:.0f}&cc={cc}&year={year}"),
                 )
                 return
     await message.answer(
         "🧮 Пришлите одной строкой: <b>цена $, объём см³, год</b>\n"
         "Например: <code>18000 2000 2022</code> (объём можно опустить: <code>18000 2022</code>)",
-        reply_markup=_miniapp_kb(),
+        reply_markup=_miniapp_kb("/calc"),
     )
 
 
