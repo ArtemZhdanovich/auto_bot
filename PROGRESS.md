@@ -840,3 +840,26 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
    из-за чего fallback на url-кнопку в `_miniapp_button` был недостижим.
    Теперь `_miniapp_url` возвращает сырой URL, схема проверяется в
    `_miniapp_button` (https → web_app, http → url-кнопка).
+
+### 33. Исследование CarAPIS (проверено вживую, не интегрировано)
+Источник: https://carapis.com/ru/developers/ — каталог 2.8M объявлений
+(~80 площадок, единая JSON-схема + оценка относительно рынка).
+- **MCP-сервер (ключевая находка)**: `https://mcp.carapis.com/mcp/` —
+  бесплатно, БЕЗ ключа и без дневного лимита. Инструменты: search
+  (бренд/модель/годы/цена USD/пробег/площадка, limit≤25), get по UUID,
+  facets, market_summary (min/медиана/max по срезу).
+- **Покрытие (facets по source)**: encar 113 633, kcar 8 780.
+  **che168 и китайских площадок НЕТ.**
+- **Качество данных**: поля id/source/brand/model/trim/year/mileage/
+  fuel_type/transmission/body_type/color/price_usd + valuation
+  {estimated_usd, low/high, confidence_0_1, percentile_rank,
+  comparable_count, is_undervalued}. Пример: Palisade 2022, 48.8k км,
+  $18 394 при оценке рынка $24 842 (undervalued, 170 компарабелей).
+- **Ограничения**: в бесплатном MCP нет URL и ID исходного объявления
+  (только внутренний UUID) → для синхронизации непригоден; поиск
+  медленный (~30 с на запрос) — не годится в реальном времени;
+  REST-тариф: 100 запросов/день бесплатно (с URL объявлений),
+  Production 5k/день — цена в кабинете.
+- **Вывод**: парсеры encar/kcar не заменять. Ценность — фича «оценка
+  рынка» (undervalued-лоты, медианные цены при финализации критериев)
+  или инструмент AI-агента. Решение по интеграции отложено.
