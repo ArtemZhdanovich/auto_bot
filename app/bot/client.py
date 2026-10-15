@@ -133,6 +133,12 @@ class BackendClient:
         """GET /api/listings/{id} — карточка для deep link listing_{id} (ТЗ §5.3)."""
         return await self._get(f"/api/listings/{listing_id}")
 
+    async def get_listing_by_url(self, url: str) -> dict | None:
+        """GET /api/listings/by-url — «скинь ссылку, покажу карточку»."""
+        from urllib.parse import quote_plus
+
+        return await self._get(f"/api/listings/by-url?url={quote_plus(url)}")
+
     async def search_listings(
         self, params: dict | None = None, limit: int = 5
     ) -> list[dict] | None:

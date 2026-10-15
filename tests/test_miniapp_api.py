@@ -260,3 +260,66 @@ async def test_get_listing_with_price_history(client):
     history = body["price_history"]
     assert [p["price"] for p in history] == [18000.0, 17500.0, 17000.0]
     assert body["price"] == 17000.0
+
+
+# ---------- GET /api/listings/by-url (бот: «скинь ссылку» → карточка) ----------
+
+
+def _listing_row(**kw):
+    from datetime import UTC, datetime
+
+    from app.db.models import Listing
+
+    base = dict(
+        id=9,
+        source="encar",
+        source_id="s-9",
+        url="https://encar.com/car/12345678",
+        make="Kia",
+        model="Carnival",
+        year=2021,
+        price=32000.0,
+        currency="USD",
+        images=[],
+        parsed_at=datetime.now(UTC),
+        is_active=True,
+    )
+    base.update(kw)
+    return Listing(**base)
+
+
+@pytest.mark.asyncio
+async def test_by_url_found(client):
+    http, session = client
+    session.set_result([_listing_row()])
+    resp = await http.get(
+        "/api/listings/by-url", params={"url": "https://m.encar.com/car/12345678/"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["source_id"] == "s-9"
+    assert resp.json()["make"] == "Kia"
+
+
+@pytest.mark.asyncio
+async def test_by_url_404(client):
+    http, session = client
+    session.set_result([])
+    resp = await http.get(
+        "/api/listings/by-url", params={"url": "https://encar.com/car/000"}
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_by_url_validation(client):
+    http, _session = client
+    resp = await http.get("/api/listings/by-url", params={"url": "x"})
+    assert resp.status_code == 422
+
+
+def test_norm_url_variants():
+    from app.api.listings import _norm_url
+
+    assert _norm_url("HTTPS://WWW.Encar.com/car/1/") == "encar.com/car/1"
+    assert _norm_url("http://m.encar.com/car/1") == "encar.com/car/1"
+    assert _norm_url("  encar.com/car/1  ") == "encar.com/car/1"

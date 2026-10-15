@@ -1,5 +1,7 @@
 """Лента объявлений для Mini App (этап 5, ТЗ п. 9.2.4–9.2.5)."""
 
+import re
+
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
@@ -72,6 +74,36 @@ async def list_listings(
             {"results": total, "filters": len(conditions)},
         )
     return ListingListOut(total=total, items=items)
+
+
+@router.get("/by-url", response_model=ListingOut)
+async def get_listing_by_url(
+    session: SessionDep,
+    url: str = Query(min_length=8, max_length=512),
+) -> ListingOut:
+    """Объявление по ссылке — бот: «скинь ссылку, покажу карточку».
+
+    Сравнение по нормализованному хвосту URL: без схемы, www/m.,
+    завершающего слеша (пользователь копирует ссылку в любом виде).
+    """
+    needle = _norm_url(url)
+    result = await session.execute(
+        select(Listing).where(Listing.url.ilike(f"%{needle}%"))
+    )
+    listing = result.scalar_one_or_none()
+    if listing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found"
+        )
+    return ListingOut.model_validate(listing)
+
+
+def _norm_url(url: str) -> str:
+    """Нормализация ссылки для поиска: без схемы, www/m., финального слеша."""
+    u = url.strip().lower()
+    u = re.sub(r"^https?://", "", u)
+    u = re.sub(r"^(www|m)\.", "", u)
+    return u.rstrip("/")
 
 
 @router.get("/{listing_id}", response_model=ListingOut)

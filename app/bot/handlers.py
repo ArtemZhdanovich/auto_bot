@@ -27,10 +27,12 @@ HELP_TEXT = (
     "/start — онбординг\n"
     "/help — справка\n"
     "/reset — сбросить текущий диалог\n"
-    "/calc — расчёт доставки и растаможки (цена, объём, год)\n"
+    "/calc — расчёт доставки: <code>18000 2000 2022</code>\n"
+    "       сравнение: <code>18000 2000 2022 vs 15000 1600 2021</code>\n"
     "/stop — отключить уведомления\n"
     "/resume — включить уведомления\n"
     "/subscribe — подписка Pro/Business (Stars)\n\n"
+    "🔗 Скиньте ссылку с encar/kcar — покажу карточку с расчётом доставки.\n"
     "Просто напишите текстом, какую машину ищете — я помогу с подбором."
 )
 
@@ -922,8 +924,25 @@ async def _agent_turn(
     await send_dialog_reply(message, reply, state)
 
 
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def _extract_url(text: str) -> str | None:
+    """Первая ссылка из текста (без хвостовой пунктуации)."""
+    m = _URL_RE.search(text or "")
+    return m.group(0).rstrip(").,>;") if m else None
+
+
 @router.message(F.text)
 async def fallback_text(message: Message, state: FSMContext) -> None:
-    """Свободный текст → AI-агент через backend (ТЗ п. 7.13)."""
-    await _agent_turn(message, message.text or "", state)
+    """Свободный текст: ссылка на объяву → карточка; остальное → AI (ТЗ п. 7.13)."""
+    text = message.text or ""
+    url = _extract_url(text)
+    if url:
+        listing = await backend.get_listing_by_url(url)
+        if listing:
+            await _send_car_cards(message, [listing])
+            return
+        # ссылка не из нашей базы — пусть AI ответит по делу
+    await _agent_turn(message, text, state)
 

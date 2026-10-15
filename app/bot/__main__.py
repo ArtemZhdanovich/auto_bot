@@ -37,6 +37,32 @@ async def main() -> None:
 
     await bot.delete_webhook(drop_pending_updates=True)
 
+    # Антифлуд: сообщения и колбэки — скользящее окно на пользователя.
+    from app.bot.throttle import FloodMiddleware
+
+    flood = FloodMiddleware()
+    dp.message.outer_middleware(flood)
+    dp.callback_query.outer_middleware(flood)
+
+    @dp.errors()
+    async def on_error(event, exc: Exception) -> bool:
+        """Глобальный обработчик: лог + вежливое сообщение вместо тишины."""
+        logger.exception("handler_error: %s", exc)
+        message = getattr(event, "message", None)
+        cb = getattr(event, "callback_query", None)
+        try:
+            if message is not None:
+                await message.answer(
+                    "😔 Что-то пошло не так — я уже разбираюсь. Попробуйте ещё раз."
+                )
+            elif cb is not None:
+                await cb.answer(
+                    "Что-то сломалось, попробуйте ещё раз", show_alert=True
+                )
+        except Exception:  # уведомление не должно маскировать исходную ошибку
+            logger.debug("error_notify_failed", exc_info=True)
+        return True  # ошибку обработали — не роняем polling
+
     # Регистрация команд и кнопки-меню с Mini App, чтобы WebApp реально
     # открывался из клиента Telegram (кнопка слева от поля ввода).
     from aiogram.types import (

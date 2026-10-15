@@ -317,3 +317,58 @@ def test_menu_ai_action_clears_state():
     asyncio.run(h.main_menu_callback(cb, state))
     state.clear.assert_awaited_once()
     assert len(cb.message.answers) == 1
+
+
+# ---------- fallback_text: ссылка на объяву → карточка ----------
+
+
+def test_extract_url_strips_punctuation():
+    assert h._extract_url("глянь https://encar.com/car/1.") == "https://encar.com/car/1"
+    assert h._extract_url("https://kcar.com/x?q=1, ок?") == "https://kcar.com/x?q=1"
+    assert h._extract_url("просто текст") is None
+    assert h._extract_url("") is None
+
+
+def test_fallback_text_url_found_sends_card(monkeypatch):
+    monkeypatch.setattr(h, "_miniapp_url", lambda: "https://x:8443")
+    listing = {"id": 9, "make": "Kia", "model": "Carnival", "images": []}
+    monkeypatch.setattr(
+        h.backend, "get_listing_by_url", AsyncMock(return_value=listing)
+    )
+    cards = AsyncMock()
+    monkeypatch.setattr(h, "_send_car_cards", cards)
+    agent = AsyncMock()
+    monkeypatch.setattr(h, "_agent_turn", agent)
+    msg = FakeMsg()
+    msg.text = "глянь https://encar.com/car/1"
+    asyncio.run(h.fallback_text(msg, AsyncMock()))
+    h.backend.get_listing_by_url.assert_awaited_once_with("https://encar.com/car/1")
+    cards.assert_awaited_once()
+    agent.assert_not_called()
+
+
+def test_fallback_text_url_unknown_goes_to_agent(monkeypatch):
+    monkeypatch.setattr(h, "_miniapp_url", lambda: "https://x:8443")
+    monkeypatch.setattr(h.backend, "get_listing_by_url", AsyncMock(return_value=None))
+    cards = AsyncMock()
+    monkeypatch.setattr(h, "_send_car_cards", cards)
+    agent = AsyncMock()
+    monkeypatch.setattr(h, "_agent_turn", agent)
+    msg = FakeMsg()
+    msg.text = "глянь https://encar.com/car/1"
+    asyncio.run(h.fallback_text(msg, AsyncMock()))
+    cards.assert_not_called()
+    agent.assert_awaited_once()
+
+
+def test_fallback_text_plain_text_goes_to_agent(monkeypatch):
+    monkeypatch.setattr(h, "_miniapp_url", lambda: "https://x:8443")
+    get_by_url = AsyncMock()
+    monkeypatch.setattr(h.backend, "get_listing_by_url", get_by_url)
+    agent = AsyncMock()
+    monkeypatch.setattr(h, "_agent_turn", agent)
+    msg = FakeMsg()
+    msg.text = "хочу машину до 20000"
+    asyncio.run(h.fallback_text(msg, AsyncMock()))
+    get_by_url.assert_not_called()
+    agent.assert_awaited_once()
