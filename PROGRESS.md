@@ -828,3 +828,15 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 Тесты: `tests/test_bot_dialog_ui.py` — 7 шт (формат, эвристика,
 токены хода, кнопка поиска по эвристике, http/https мини-апп).
 **457 тестов зелёные, ruff clean.** Бот пересобран и задеплоен в стек.
+
+### 32. Инцидент: AI-режим 502 + кнопка мини-аппа не появлялась
+1. **502 на /api/dialog/message**: в mono-стеке одновременно с backend был
+   поднят gateway (micro-профиль) с DNS-алиасом `backend` — имя `backend`
+   резолвилось в два контейнера (round-robin), запросы бота случайным
+   образом уходили в gateway и зацикливались → 502. Фикс: gateway
+   остановлен (`docker compose rm -sf gateway`); в mono он не нужен.
+   ПРАВИЛО: gateway и backend одновременно не поднимать — алиас конфликтует.
+2. **Кнопка мини-аппа**: `_miniapp_url()` фильтровал не-https в пустоту,
+   из-за чего fallback на url-кнопку в `_miniapp_button` был недостижим.
+   Теперь `_miniapp_url` возвращает сырой URL, схема проверяется в
+   `_miniapp_button` (https → web_app, http → url-кнопка).
