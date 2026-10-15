@@ -32,6 +32,26 @@ class HttpClient:
         self._transport = transport
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        return await self._request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        return await self._request("POST", url, **kwargs)
+
+    async def get_json(self, url: str, **kwargs: Any) -> Any:
+        resp = await self.get(url, **kwargs)
+        return resp.json()
+
+    async def post_json(self, url: str, **kwargs: Any) -> Any:
+        resp = await self.post(url, **kwargs)
+        return resp.json()
+
+    async def close(self) -> None:
+        """Совместимость с адаптерами: клиенты создаются на запрос."""
+        return None
+
+    # --- internals ------------------------------------------------------
+
+    async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         last_error: Exception | None = None
         for attempt in range(self._max_retries):
             proxy = await self._proxy_pool.get() if self._proxy_pool else None
@@ -42,7 +62,7 @@ class HttpClient:
                     follow_redirects=True,
                     transport=self._transport,
                 ) as client:
-                    resp = await client.get(url, **kwargs)
+                    resp = await client.request(method, url, **kwargs)
                     if resp.status_code == 429:
                         await asyncio.sleep(2**attempt)
                         continue
@@ -57,11 +77,3 @@ class HttpClient:
                 # 4xx/5xx после raise_for_status — не ретраим
                 raise FetchError(f"HTTP {exc.response.status_code} for {url}") from exc
         raise FetchError(f"Failed to fetch {url}: {last_error}")
-
-    async def get_json(self, url: str, **kwargs: Any) -> Any:
-        resp = await self.get(url, **kwargs)
-        return resp.json()
-
-    async def close(self) -> None:
-        """Совместимость с адаптерами: клиенты создаются на запрос."""
-        return None

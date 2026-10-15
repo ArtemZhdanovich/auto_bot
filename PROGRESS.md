@@ -710,6 +710,7 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 | `15400e9` | Encar: новый API-контракт (sr/inav/cursor, q с `_.`, корейские фасеты, FormYear/Year, USD→KRW) |
 | `10dcceb` (PR #1) | Микросервисы: gateway + 6 доменных сервисов (профили mono/micro), auth refresh, багфиксы (`max→le`, `user.telegram_id`, html.escape) |
 | (этот merge) | Мерж PR #1 + правки: env-оверрайды DATABASE_URL/REDIS_URL/RABBITMQ у 6 svc, `depends_on required:false` (bot/miniapp в micro), mvp.sh `--profile mono`, `/metrics` вынесен в `app/api/metrics.py` (admin + gateway-прокси), ParserDoctor: инъекция redis в send_alert + изоляция Telegram в тестах (442 теста, ruff clean) |
+| (этот коммит) | KCar: живой API (`/bc/search/list`, AES-enc из бандла фронта, wr_-фильтры, top-N) + персистентность доктора: admin PUT сливает config/capabilities/retry_policy, mvp.sh создаёт источник только при отсутствии; MAKE_MAP + корейские марки (447 тестов, ruff clean) |
 
 ## 28. Ревью PR #1 (feat/microservices) — найденные и исправленные проблемы
 
@@ -731,5 +732,44 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 Конфликт мержа (docker-compose.yml) разрулен: профили PR + env-оверрайды локальных
 коммитов сохранены.
+
+## 29. KCar: живой API + фикс персистентности ParserDoctor
+
+1. **kcar.com — источник снова рабочий.** Старый контракт
+   (`api.kcar.com/dst/...`, GET `?page=&count=`) мёртв (404). Восстановлен
+   актуальный: `POST https://api.kcar.com/bc/search/list`, тело
+   `{"enc": base64(AES-CBC(JSON))}` — ключ `SKFJ2424DasfaJRI`, iv
+   `sfq241sf3dscs321` (воспроизведено из фронтового бандла `_nuxt/*.js`,
+   `setEncDef`), PKCS7. Ответ `{"data": {"totalCnt", "rows": [...]}}`.
+   Пагинации в API нет (page/pageNo/... игнорируются — проверено запросами):
+   адаптер берёт top-N (`limit`, по умолчанию 100) свежих объявлений,
+   `has_more=False`. Фильтры `wr_*` (make/model/годы YYYYMM/цена в манах/
+   пробег/топливо — код «001»=가솔린 подтверждён живым ответом; остальные
+   коды не шлём). Карта полей: carCd/prc(ман)/milg/prdcnYr/mnuftrNm/
+   modelNm/grdNm+grdDtlNm/carWhlNm/fuelNm/trnsmsnNm/cntrRgnNm/lsizeImgPath;
+   карточка: `/bc/detail/CarInfoDtl?carCd=<carCd>`. Live-check: 100 items,
+   Hyundai с 2018 → total 7480.
+   `HttpClient` получил `post/post_json` (общий `_request` с ретраями/429).
+2. **Персистентность ParserDoctor.** Корень бага «ремонт слетает после
+   рестарта»: `PUT /api/admin/sources/{name}` замещал `config` целиком, а
+   `mvp.sh up --parse` при каждом старте перезаписывал конфиг
+   `{"page_size": 20}`. Исправлено дважды:
+   - admin PUT теперь СЛИВАЕТ словари `config/capabilities/retry_policy`
+     (ключи из body перекрывают, остальные сохраняются); скалярные поля —
+     как раньше;
+   - `mvp.sh` создаёт источник только если его ещё нет (GET `/sources`
+     → PUT при 404), существующий конфиг не трогает.
+   Регресс-тесты: `test_upsert_source_merges_config`,
+   `test_upsert_source_new_creates_with_body_config`.
+3. **normalize**: MAKE_MAP дополнен корейскими именами марок из живых API
+   (벤츠→Mercedes-Benz, 포르쉐→Porsche и т.д. — иначе kcar/encar значения
+   не нормализовались).
+4. **che168** (вне этого коммита): desktop за Ali WAF + EdgeOne captcha;
+   обход уровня 1 (acw_tc + solve-куки, Baidu-referer) даёт живой HTML
+   нестабильно (вероятностный WAF), уровень 2 — капча. Нужны прокси
+   (DataImpulse creds пустые) или headless-браузер; адаптер триажит
+   капчу как ban-исход.
+
+**447 тестов зелёные, ruff clean.**
 
 

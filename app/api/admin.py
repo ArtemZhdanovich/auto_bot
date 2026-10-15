@@ -104,9 +104,16 @@ async def upsert_source(
     for field in (
         "adapter_class", "kind", "enabled", "priority", "schedule_cron",
         "rate_limit_per_min", "max_concurrency", "timeout_sec",
-        "retry_policy", "credentials_ref", "capabilities", "config",
+        "credentials_ref",
     ):
         setattr(source, field, getattr(body, field))
+    # Словари (config/capabilities/retry_policy) СЛИВАЮТСЯ: ключи из body
+    # перекрывают существующие, остальные сохраняются. Иначе перезапись
+    # конфига (например, сидирование mvp.sh с {"page_size": 20}) уничтожала
+    # бы селекторы/doctor-режим, восстановленные ParserDoctor'ом.
+    for field in ("retry_policy", "capabilities", "config"):
+        merged = {**(getattr(source, field) or {}), **(getattr(body, field) or {})}
+        setattr(source, field, merged)
     await session.commit()
     await session.refresh(source)
     return SourceConfig.model_validate(source, from_attributes=True)

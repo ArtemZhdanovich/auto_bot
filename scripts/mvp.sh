@@ -98,14 +98,21 @@ cmd_up() {
     $COMPOSE up -d worker_fetch
     TOKEN=$(grep -E '^INTERNAL_TOKEN=..*' .env | head -1 | cut -d= -f2- || true)
     [ -n "$TOKEN" ] || TOKEN=$(grep -E '^APP_SECRET_KEY=' .env | head -1 | cut -d= -f2-)
-    # источник создаётся/обновляется через админ-API (сидирования в миграциях нет)
-    curl -sf -X PUT "$BASE_URL/api/admin/sources/encar" \
-      -H "X-Internal-Token: $TOKEN" -H "Content-Type: application/json" \
-      -d '{"name":"encar","adapter_class":"EncarApiAdapter","kind":"api",
-           "enabled":true,"priority":100,
-           "capabilities":{"country":"KR","price_currency":"KRW"},
-           "config":{"page_size":20}}' >/dev/null \
-      || warn "не удалось создать источник encar (проверьте INTERNAL_TOKEN)"
+    # Источник создаётся ТОЛЬКО если его ещё нет (сидирования в миграциях нет).
+    # Повторный PUT затирал бы config (селекторы/doctor_mode от ParserDoctor),
+    # поэтому при существующем источнике ничего не перезаписываем.
+    if curl -sf "$BASE_URL/api/admin/sources" -H "X-Internal-Token: $TOKEN" \
+        | grep -q '"encar"'; then
+      log "источник encar уже настроен — конфиг не трогаю"
+    else
+      curl -sf -X PUT "$BASE_URL/api/admin/sources/encar" \
+        -H "X-Internal-Token: $TOKEN" -H "Content-Type: application/json" \
+        -d '{"name":"encar","adapter_class":"EncarApiAdapter","kind":"api",
+             "enabled":true,"priority":100,
+             "capabilities":{"country":"KR","price_currency":"KRW"},
+             "config":{"page_size":20}}' >/dev/null \
+        || warn "не удалось создать источник encar (проверьте INTERNAL_TOKEN)"
+    fi
     curl -sf -X POST "$BASE_URL/api/admin/sources/encar/fetch?max_pages=1" \
       -H "X-Internal-Token: $TOKEN" >/dev/null \
       || warn "fetch не запустился (нужна сеть до encar.com; без прокси может 403)"
