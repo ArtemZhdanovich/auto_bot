@@ -1,4 +1,8 @@
-"""Контрактные тесты EncarApiAdapter (этап 2: мок ответа → UnifiedListing)."""
+"""Контрактные тесты EncarApiAdapter (этап 2: мок ответа → UnifiedListing).
+
+Проверяется контракт окт 2026: sr/inav/cursor обязательны, q — новый синтаксис
+с разделителем `_.` и корейскими значениями фасетов.
+"""
 
 from urllib.parse import parse_qs, urlparse
 
@@ -11,17 +15,15 @@ from app.schemas.criteria import SearchCriteria
 
 SAMPLE_ITEM = {
     "Id": "361895918",
-    "Subject": "팰리세이드 2.2 4WD 캘리그래피",
-    "Manufacturer": "Hyundai",
-    "Model": "Palisade",
+    "Manufacturer": "현대",
+    "Model": "팰리세이드",
     "Badge": "Caligraphy",
-    "Year": 2022,
+    "FormYear": "2022",
+    "Year": 202208.0,
     "Price": 3850,  # ман (x10000 = KRW)
     "Mileage": 42000,
     "FuelType": "디젤",
-    "Transmission": "오토",
-    "Color": "흰색",
-    "OfficeCity": "부산",
+    "OfficeCityState": "부산",
     "Photos": ["photo/nc1/2024/01/1.jpg", "/photo/nc1/2024/01/2.jpg"],
 }
 
@@ -49,6 +51,10 @@ def make_adapter(responses: list[dict]) -> tuple[EncarApiAdapter, list[httpx.Req
     return adapter, requests
 
 
+def _params_of(request: httpx.Request) -> dict[str, list[str]]:
+    return parse_qs(urlparse(str(request.url)).query, keep_blank_values=True)
+
+
 async def test_fetch_maps_to_unified_listing():
     adapter, requests = make_adapter([_payload([SAMPLE_ITEM], total=1)])
     result = await adapter.fetch(SearchCriteria())
@@ -59,22 +65,35 @@ async def test_fetch_maps_to_unified_listing():
     assert item.source == "encar"
     assert item.source_id == "361895918"
     assert str(item.url) == "https://fem.encar.com/car/detail/361895918"
-    assert item.make == "Hyundai"
-    assert item.model == "Palisade"
+    assert item.make == "Hyundai"  # 현대 → Hyundai
+    assert item.model == "팰리세이드"
+    assert item.title == "현대 팰리세이드"  # Subject больше нет в списке
     assert item.generation == "Caligraphy"
-    assert item.year == 2022
+    assert item.year == 2022  # FormYear '2022' (Year 202208.0 → тоже 2022)
     assert item.price == 38_500_000  # ман → KRW
     assert item.currency == "KRW"
     assert item.mileage_km == 42000
     assert item.fuel == "diesel"  # 디젤 → diesel
-    assert item.transmission == "automatic"  # 오토 → automatic
-    assert item.location == "부산"
+    assert item.location == "부산"  # OfficeCityState
     assert item.seller_type == "dealer"
     assert [str(i) for i in item.images] == [
         "https://ci.encar.com/photo/nc1/2024/01/1.jpg",
         "https://ci.encar.com/photo/nc1/2024/01/2.jpg",
     ]
     assert item.raw == SAMPLE_ITEM  # raw_payload сохраняется (ТЗ п. 6.1)
+    await adapter.close()
+
+
+async def test_request_has_new_contract_params():
+    """sr/inav/cursor обязательны: без sr API отдаёт пустой SearchResults."""
+    adapter, requests = make_adapter([_payload([SAMPLE_ITEM], total=1)])
+    await adapter.fetch(SearchCriteria(), cursor="2")
+
+    params = _params_of(requests[0])
+    assert params["count"] == ["true"]
+    assert params["sr"] == ["|ModifiedDate|40|20"]  # страница 2 → offset 40
+    assert params["inav"] == ["|Metadata|Sort"]
+    assert params["cursor"] == [""]
     await adapter.close()
 
 
@@ -99,27 +118,64 @@ async def test_fetch_pagination_cursor():
     await adapter.close()
 
 
-async def test_build_q_filters():
+async def test_build_q_filters_new_syntax():
     adapter, requests = make_adapter([])
     criteria = SearchCriteria(
         make="현대", model="Palisade", year_from=2022, year_to=2024,
-        price_max=45000, mileage_max=50000, fuel="diesel",
+        price_max=45_000_000, mileage_max=50000, fuel="diesel",
     )
     await adapter.fetch(criteria)
 
-    q = parse_qs(urlparse(str(requests[0].url)).query)["q"][0]
-    assert q.startswith("(And.Hidden.N.)")
-    assert "(And Make.Hyundai. Model.Palisade.)" in q
-    assert "(And.Price.0.45000.)" in q
-    assert "(And.Year.2022.2024.)" in q
-    assert "(And.Mileage.0.50000.)" in q
-    assert "(And.FuelType.diesel.)" in q
+    q = _params_of(requests[0])["q"][0]
+    # Новый синтаксис: одно (And …), разделитель `_.`, корейские фасеты.
+    assert q == (
+        "(And.Hidden.N"
+        "._.Manufacturer.현대"
+        "._.ModelGroup.팰리세이드"
+        "._.Price.range(0..4500)"  # 45 млн KRW → 4500 ман
+        "._.Year.range(202201..202412)"
+        "._.Mileage.range(0..50000)"
+        "._.FuelType.디젤.)"
+    )
     await adapter.close()
 
 
-async def test_healthcheck_true_on_200():
-    adapter, _ = make_adapter([_payload([])])
+async def test_build_q_usd_currency_converted():
+    adapter, requests = make_adapter([])
+    criteria = SearchCriteria(price_min=30000, price_max=45000, currency="USD")
+    await adapter.fetch(criteria)
+
+    q = _params_of(requests[0])["q"][0]
+    # 30000$ * 1400 = 42 млн KRW → 4200 ман; 45000$ → 6300 ман
+    assert "Price.range(4200..6300)" in q
+    await adapter.close()
+
+
+async def test_build_q_skips_unknown_make_and_model():
+    """Неизвестные марка/модель не ломают запрос (фильтр просто опускается)."""
+    adapter, requests = make_adapter([])
+    await adapter.fetch(SearchCriteria(make="Lada", model="Vesta"))
+    q = _params_of(requests[0])["q"][0]
+    assert q == "(And.Hidden.N.)"
+    await adapter.close()
+
+
+async def test_healthcheck_true_on_count_and_results():
+    adapter, _ = make_adapter([_payload([SAMPLE_ITEM], total=192000)])
     assert await adapter.healthcheck() is True
+    await adapter.close()
+
+
+async def test_healthcheck_true_on_count_only():
+    # 200 с Count и пустым SearchResults — контракт «Count без sr».
+    adapter, _ = make_adapter([_payload([], total=192000)])
+    assert await adapter.healthcheck() is True
+    await adapter.close()
+
+
+async def test_healthcheck_false_on_empty_payload():
+    adapter, _ = make_adapter([{}])
+    assert await adapter.healthcheck() is False
     await adapter.close()
 
 
