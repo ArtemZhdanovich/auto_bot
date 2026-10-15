@@ -327,10 +327,13 @@ def _price_usd(listing: dict) -> float | None:
 
 def _format_calc_out(out: dict) -> str:
     """Человекочитаемая смета из ответа /api/calc/delivery."""
+    header = (
+        f"Авто {out['price_usd']:,.0f} $ · {out['engine_cc']} см³ · "
+        f"{out['year']} г. ({out['age_group']})\n"
+    ).replace(",", " ")
     lines = [
         "🚚 <b>Расчёт «под ключ»</b> (Корея → Владивосток)\n",
-        f"Авто {out['price_usd']:,.0f} $ · {out['engine_cc']} см³ · "
-        f"{out['year']} г. ({out['age_group']})\n",
+        header,
     ]
     for c in out.get("components", []):
         lines.append(f"• {c['label']}: {c['rub']:,.0f} ₽".replace(",", " "))

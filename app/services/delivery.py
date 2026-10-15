@@ -146,7 +146,7 @@ def calc_delivery(
 
 
 def format_breakdown(b: DeliveryBreakdown) -> str:
-    """Человекочитаемая сводка для бота."""
+    """Человекочитаемая сводка для бота (числа с пробелами, не «18,000»)."""
     lines = ["🚚 <b>Расчёт: авто + доставка + таможня</b> (Корея → Владивосток)"]
     lines.append(f"\nАвто: {b.price_usd:,.0f} $ · {b.engine_cc} см³ · {b.year} г. ({b.age_group})\n")
     for c in b.components:
@@ -154,4 +154,4 @@ def format_breakdown(b: DeliveryBreakdown) -> str:
     lines.append(f"\n<b>Итого «под ключ»: ~{b.total_rub:,.0f} ₽ (~{b.total_usd:,.0f} $)</b>")
     lines.append("\n<i>Ставки для физлица (личное пользование), курс фиксированный. "
                  "Точную смету даст менеджер — в приложении кнопка «Связаться».</i>")
-    return "\n".join(lines)
+    return "\n".join(lines).replace(",", " ")

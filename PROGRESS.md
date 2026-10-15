@@ -679,7 +679,7 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 ## 26. Тесты и качество
 
-- `uv run pytest` → **350 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
+- `uv run pytest` → **489 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
   кэш), агент, уведомления, адаптеры (контракты, дедуп, che168), auth,
   PQ-крипто, мониторинг/алерты, cron/планировщик, аналитика, лиды,
   ParserDoctor, прокси (GatewayProxyPool, фабрика), партнёрский контур
@@ -914,3 +914,21 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   /api/calc/delivery и /api/calc/compare считают; бот с MINIAPP_URL=https.
 - Грабли: CRLF в entrypoint-ssl.sh (Windows) → «no such file or directory»;
   лечится `sed -i 's/\r$//'` перед сборкой.
+
+## 35. Полное тест-покрытие MVP-калькулятора (+26 тестов → 489)
+
+- **tests/test_calc_api.py** (9): /api/calc/delivery (200 + числа: пошлина
+  5832 $, 7 компонентов, тотал > цены, ₽/$ согласованы; default engine_cc;
+  4×валидация 422), /api/calc/compare (сортировка по итогу, пропуск битых
+  items, автотайтл, пустой список → 422).
+- **tests/test_bot_calc.py** (14): _price_usd (KRW/EUR/USD/мусор),
+  _format_calc_out (7 строк, группировка «18 000 $»), _miniapp_button с path
+  (https → web_app с query, http → url-фолбэк), _miniapp_kb,
+  _car_card_kb (🔗/🚚/calc:{id}, без url/miniapp), build_listing_caption
+  (KRW-цена, отсутствие цены, лимит 1024).
+- **tests/test_agent.py** (+3): tool calc_delivery — полная разбивка 7 строк
+  (агент не выдумывает цифры), битые аргументы → просьба уточнить,
+  схема tool для LLM (required price_usd+year).
+- **Найденные тестами баги (исправлены)**: «18,000 $» вместо «18 000 $»
+  в сметах бота (_format_calc_out) и format_breakdown — запятые десятичного
+  разделителя локали f-string не заменялись на пробелы.

@@ -148,3 +148,57 @@ async def test_unknown_tool_is_handled(fake_redis: FakeRedis, fake_session):
     llm = _llm(LLMResult(tool_calls=[ToolCall(id="1", name="delete_everything", arguments={})]))
     reply = await run_agent(7, "сделай что-нибудь", session=fake_session, redis=fake_redis, llm=llm)
     assert "переформулируйте" in reply.text.lower()  # не падаем на неизвестном tool
+
+
+# ---------- tool calc_delivery (MVP: расчёт «под ключ» силами агента) ----------
+
+
+@pytest.mark.asyncio
+async def test_calc_delivery_tool_returns_breakdown(fake_redis: FakeRedis, fake_session):
+    """Агент считает смету инструментом, а не выдумывает цифры (п. 7.3)."""
+    from app.ai.agent import ToolContext, _execute_tool
+    from app.services.dialog import new_state
+
+    state = new_state(11)
+    ctx = ToolContext(session=fake_session, redis=fake_redis)
+    outcome = await _execute_tool(
+        ToolCall(
+            id="1",
+            name="calc_delivery",
+            arguments={"price_usd": 18000, "engine_cc": 2000, "year": 2022},
+        ),
+        state,
+        ctx,
+    )
+    assert outcome.text is not None
+    assert "Итого" in outcome.text
+    assert "Корея → Владивосток" in outcome.text
+    assert "18 000 $" in outcome.text
+    assert outcome.text.count("• ") == 7  # полная разбивка, не пересказ LLM
+
+
+@pytest.mark.asyncio
+async def test_calc_delivery_tool_bad_args(fake_redis: FakeRedis, fake_session):
+    """Без цены/года — вежливая просьба уточнить, без расчёта и без падения."""
+    from app.ai.agent import ToolContext, _execute_tool
+    from app.services.dialog import new_state
+
+    state = new_state(12)
+    ctx = ToolContext(session=fake_session, redis=fake_redis)
+    outcome = await _execute_tool(
+        ToolCall(id="2", name="calc_delivery", arguments={"year": 2022}),
+        state,
+        ctx,
+    )
+    assert "уточните" in (outcome.text or "").lower()
+
+
+def test_calc_delivery_tool_in_tools_schema():
+    """Tool объявлен в схеме для LLM: year обязателен, engine_cc опционален."""
+    from app.ai.tools import TOOLS
+
+    tool = next(t for t in TOOLS if t["name"] == "calc_delivery")
+    props = tool["parameters"]["properties"]
+    assert set(props) == {"price_usd", "engine_cc", "year"}
+    assert tool["parameters"]["required"] == ["price_usd", "year"]
+
