@@ -1,7 +1,6 @@
 """Хендлеры бота. Команды + AI-диалог через backend (этап 3, ТЗ п. 7)."""
 
 import html
-import json
 import logging
 
 from aiogram import F, Router
@@ -42,31 +41,145 @@ START_TEXT = (
 )
 
 
-def build_reply_kb(reply: dict) -> InlineKeyboardMarkup:
-    """Кнопки под каждым ответом: опции агента + «Создать поиск» (ТЗ п. 7.4)."""
+COUNTRY_LABELS = {
+    "KR": "🇰🇷 Корея",
+    "CN": "🇨🇳 Китай",
+    "DE": "🇩🇪 Германия",
+    "US": "🇺🇸 США",
+    "JP": "🇯🇵 Япония",
+}
+
+_FIELD_LABELS = [
+    ("make", "Марка"),
+    ("model", "Модель"),
+    ("year_from", "Год от"),
+    ("year_to", "Год до"),
+    ("price_min", "Цена от"),
+    ("price_max", "Цена до"),
+    ("currency", "Валюта"),
+    ("mileage_max", "Пробег до, км"),
+    ("fuel", "Топливо"),
+    ("transmission", "КПП"),
+    ("drive", "Привод"),
+    ("body_type", "Кузов"),
+    ("color", "Цвет"),
+    ("engine_volume_min", "Объём от"),
+    ("engine_volume_max", "Объём до"),
+    ("country", "Страна"),
+    ("location", "Локация"),
+]
+
+
+def _fmt_value(field: str, value: object) -> str:
+    """Значение критерия по-человечески (страны — флагами, цены — с пробелами)."""
+    if field == "country":
+        return COUNTRY_LABELS.get(str(value), str(value))
+    if field in ("price_min", "price_max", "mileage_max"):
+        try:
+            return f"{int(value):,}".replace(",", " ")
+        except (TypeError, ValueError):
+            return str(value)
+    if field == "sources" and isinstance(value, list):
+        return ", ".join(str(s) for s in value)
+    return str(value)
+
+
+def format_criteria(criteria: dict) -> str:
+    """Критерии поиска человекочитаемым списком (никакого JSON)."""
+    lines = []
+    for field, label in _FIELD_LABELS:
+        value = criteria.get(field)
+        if value is not None and value != "":
+            lines.append(f"• {label}: <b>{html.escape(_fmt_value(field, value))}</b>")
+    if criteria.get("sources"):
+        lines.append(
+            "• Источники: <b>"
+            + html.escape(", ".join(str(s) for s in criteria["sources"]))
+            + "</b>"
+        )
+    return "\n".join(lines)
+
+
+def _search_ready(criteria: dict) -> bool:
+    """Эвристика готовности (те же поля, что в промпте агента)."""
+    has_car = bool(criteria.get("make") or criteria.get("model"))
+    has_price = bool(criteria.get("price_max") or criteria.get("price_min"))
+    has_geo = bool(criteria.get("country") or criteria.get("sources"))
+    return has_car and has_price and has_geo
+
+
+def _miniapp_button(text: str = "📱 Мини-приложение") -> InlineKeyboardButton | None:
+    """Кнопка в мини-апп: web_app только для https (требование Telegram),
+    для http — обычная url-кнопка (откроется в браузере)."""
+    from aiogram.types import WebAppInfo
+
+    url = _miniapp_url()
+    if not url:
+        return None
+    if url.startswith("https://"):
+        return InlineKeyboardButton(text=text, web_app=WebAppInfo(url=url))
+    return InlineKeyboardButton(text=text, url=url)
+
+
+def build_dialog_kb(reply: dict, turn: int, criteria: dict) -> InlineKeyboardMarkup:
+    """Инлайн-панель активного ассистента: опции + навигация (ТЗ п. 7.4).
+
+    Кнопки опций несут токен хода (turn) — клики по устаревшим кнопкам
+    игнорируются и не ломают ход диалога при множественном выборе.
+    """
     rows = [
-        [InlineKeyboardButton(text=opt, callback_data=f"dlg:opt:{i}")]
+        [InlineKeyboardButton(text=opt, callback_data=f"dlg:opt:{turn}:{i}")]
         for i, opt in enumerate(reply.get("options", []))
     ]
-    if reply.get("finalize_ready"):
+    if reply.get("finalize_ready") or _search_ready(criteria):
         rows.append(
-            [InlineKeyboardButton(text="🔎 Искать", callback_data="dlg:finalize")]
+            [InlineKeyboardButton(text="🔎 Запустить поиск", callback_data="dlg:finalize")]
         )
-    rows.append([InlineKeyboardButton(text="🔄 Сбросить", callback_data="dlg:reset")])
+    miniapp = _miniapp_button()
+    if miniapp:
+        rows.append([miniapp])
+    rows.append([InlineKeyboardButton(text="🔄 Сбросить диалог", callback_data="dlg:reset")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def send_dialog_reply(message: Message, reply: dict, state: FSMContext) -> None:
-    """Показать ответ агента; кнопки-опции храним в FSM-data (короткий срок)."""
-    await state.update_data(dlg_options=reply.get("options", []))
-    criteria = reply.get("criteria") or {}
-    filled = {k: v for k, v in criteria.items() if v is not None and v != []}
-    text = html.escape(reply.get("text", ""))
+def _panel_text(reply: dict, criteria: dict) -> str:
+    """Текст панели ассистента: ответ + заполненные критерии списком."""
+    text = html.escape(reply.get("text", "")).strip()
+    filled = {k: v for k, v in (criteria or {}).items() if v is not None and v != []}
     if filled:
-        text += "\n\n<i>Критерии:</i> " + html.escape(
-            json.dumps(filled, ensure_ascii=False)
-        )
-    await message.answer(text, reply_markup=build_reply_kb(reply))
+        text += "\n\n📋 <b>Параметры поиска:</b>\n" + format_criteria(filled)
+    return text
+
+
+async def _show_panel(
+    message: Message, state: FSMContext, text: str, kb: InlineKeyboardMarkup
+) -> None:
+    """Одно «живое» сообщение-панель: редактируется на месте вместо новых."""
+    data = await state.get_data()
+    panel_id = data.get("panel_msg_id")
+    if panel_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=panel_id,
+                text=text,
+                reply_markup=kb,
+            )
+            return
+        except Exception:
+            logger.debug("panel_edit_missed: msg_id=%s", panel_id)
+    panel = await message.answer(text, reply_markup=kb)
+    await state.update_data(panel_msg_id=panel.message_id)
+
+
+async def send_dialog_reply(message: Message, reply: dict, state: FSMContext) -> None:
+    """Показать ответ агента на панели; опции храним в FSM с токеном хода."""
+    data = await state.get_data()
+    turn = int(data.get("dlg_turn", 0)) + 1
+    options = reply.get("options", [])[:8]
+    criteria = reply.get("criteria") or {}
+    await state.update_data(dlg_turn=turn, dlg_options=options)
+    await _show_panel(message, state, _panel_text(reply, criteria), build_dialog_kb(reply, turn, criteria))
 
 
 @router.message(CommandStart(deep_link=True))
@@ -134,16 +247,10 @@ def build_listing_caption(listing: dict) -> str:
 
 def build_listing_kb(url: str) -> InlineKeyboardMarkup:
     """Кнопки карточки: приложение (фото/детали) + источник (UI/UX ТЗ §5.5)."""
-    from aiogram.types import WebAppInfo
-
     rows: list[list[InlineKeyboardButton]] = []
-    miniapp = _miniapp_url()
+    miniapp = _miniapp_button("📱 Фото и детали")
     if miniapp:
-        rows.append(
-            [InlineKeyboardButton(
-                text="📱 Фото и детали", web_app=WebAppInfo(url=miniapp)
-            )]
-        )
+        rows.append([miniapp])
     if url:
         rows.append([InlineKeyboardButton(text="🔗 Открыть у источника", url=url)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -175,20 +282,10 @@ async def handle_deep_link(message: Message, args: str) -> bool:
         return True
 
     if args.startswith("filter_"):
-        from aiogram.types import WebAppInfo
-
-        miniapp = _miniapp_url()
-        rows: list[list[InlineKeyboardButton]] = []
-        if miniapp:
-            rows.append(
-                [InlineKeyboardButton(
-                    text="📱 Открыть фильтр в приложении",
-                    web_app=WebAppInfo(url=miniapp),
-                )]
-            )
+        miniapp = _miniapp_button("📱 Открыть фильтр в приложении")
+        kb = InlineKeyboardMarkup(inline_keyboard=[[miniapp]]) if miniapp else None
         await message.answer(
-            "🔍 Фильтр найден — управление им в приложении.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+            "🔍 Фильтр найден — управление им в приложении.", reply_markup=kb
         )
         return True
 
@@ -206,9 +303,6 @@ async def handle_deep_link(message: Message, args: str) -> bool:
 
 def build_main_menu_kb() -> InlineKeyboardMarkup:
     """Главное инлайн-меню бота (WebApp + быстрые действия)."""
-    from aiogram.types import WebAppInfo
-
-    miniapp_url = _miniapp_url()  # только HTTPS, иначе кнопки не будет
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -216,12 +310,9 @@ def build_main_menu_kb() -> InlineKeyboardMarkup:
             )
         ],
     ]
-    if miniapp_url:
-        rows.append(
-            [InlineKeyboardButton(
-                text="📱 Открыть приложение", web_app=WebAppInfo(url=miniapp_url)
-            )]
-        )
+    miniapp_btn = _miniapp_button("📱 Открыть приложение")
+    if miniapp_btn:
+        rows.append([miniapp_btn])
     rows.extend([
         [
             InlineKeyboardButton(text="🔔 Уведомления", callback_data="menu:notify"),
@@ -487,45 +578,88 @@ async def on_successful_payment(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("dlg:"))
 async def dlg_callback(cb, state: FSMContext) -> None:
-    """Кнопки диалога: опции агента, «Искать», сброс."""
-    await cb.answer()
+    """Кнопки панели диалога: опции агента (с токеном хода), «Искать», сброс."""
     data = cb.data or ""
     user_id = cb.from_user.id
 
     if data == "dlg:reset":
+        await cb.answer()
         await state.clear()
         await backend.dialog_reset(user_id)
-        await cb.message.answer("Диалог сброшен. Опишите, какую машину ищете.")
+        try:
+            await cb.message.edit_text(
+                "Диалог сброшен. Опишите, какую машину ищете.",
+                reply_markup=build_main_menu_kb(),
+            )
+        except Exception:
+            await cb.message.answer(
+                "Диалог сброшен. Опишите, какую машину ищете.",
+                reply_markup=build_main_menu_kb(),
+            )
         return
 
     if data == "dlg:finalize":
-        await cb.message.answer("🔎 Запускаю поиск…")
+        await cb.answer()
         result = await backend.dialog_finalize(user_id)
         if result is None:
             await cb.message.answer("Backend недоступен, попробуйте позже.")
-        else:
-            sources = ", ".join(result.get("sources", [])) or "нет активных источников"
+            return
+        sources = ", ".join(result.get("sources", [])) or "нет активных источников"
+        kb_rows: list[list[InlineKeyboardButton]] = []
+        mini = _miniapp_button("📱 Смотреть подборку")
+        if mini:
+            kb_rows.append([mini])
+        kb_rows.append(
+            [InlineKeyboardButton(text="🔄 Новый поиск", callback_data="dlg:reset")]
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        try:
+            await cb.message.edit_text(
+                "✅ <b>Поиск запущен.</b>\n"
+                f"Источники: {sources}\n"
+                "Пришлю уведомления о новых вариантах — их также можно "
+                "смотреть в мини-приложении.",
+                reply_markup=kb,
+            )
+        except Exception:
             await cb.message.answer(
                 "✅ Поиск запущен. Источники: "
-                f"{sources}. Пришлю уведомления о новых вариантах."
+                f"{sources}. Пришлю уведомления о новых вариантах.",
+                reply_markup=kb,
             )
         return
 
     if data.startswith("dlg:opt:"):
+        parts = data.split(":")
+        # dlg:opt:{turn}:{idx} — клик по устаревшей кнопке игнорируем
+        if len(parts) != 4:
+            await cb.answer()
+            return
+        _, _, turn_str, idx_str = parts
         fsm_data = await state.get_data()
+        if int(turn_str) != int(fsm_data.get("dlg_turn", -1)):
+            await cb.answer("Эта кнопка уже устарела — отвечайте актуальной.", show_alert=False)
+            return
         options = fsm_data.get("dlg_options", [])
         try:
-            idx = int(data.rsplit(":", 1)[1])
-            option = options[idx]
+            option = options[int(idx_str)]
         except (ValueError, IndexError):
-            await cb.message.answer("Кнопка устарела — напишите ответ текстом.")
+            await cb.answer("Кнопка устарела — напишите ответ текстом.")
             return
-        await _agent_turn(cb.message, option, state)
+        await cb.answer()
+        await _agent_turn(cb.message, option, state, user_id=user_id)
 
 
-async def _agent_turn(message: Message, text: str, state: FSMContext) -> None:
-    """Один ход диалога; при недоступности LLM — кнопочный режим (п. 7.9)."""
-    user_id = message.from_user.id if message.from_user else 0
+async def _agent_turn(
+    message: Message, text: str, state: FSMContext, *, user_id: int | None = None
+) -> None:
+    """Один ход диалога; при недоступности LLM — кнопочный режим (п. 7.9).
+
+    user_id берём явно: из callback-сообщения (это сообщение бота-панели)
+    достать id пользователя нельзя.
+    """
+    if user_id is None:
+        user_id = message.from_user.id if message.from_user else 0
     reply = await backend.dialog_message(user_id, text)
     if reply is None:
         from app.bot.button_flow import start_button_flow
