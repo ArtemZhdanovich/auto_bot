@@ -133,6 +133,25 @@ class BackendClient:
         """GET /api/listings/{id} — карточка для deep link listing_{id} (ТЗ §5.3)."""
         return await self._get(f"/api/listings/{listing_id}")
 
+    async def search_listings(
+        self, params: dict | None = None, limit: int = 5
+    ) -> list[dict] | None:
+        """GET /api/listings — топ-объявления по критериям (фото-карточки в боте)."""
+        query = {"limit": limit, "offset": 0}
+        query.update(params or {})
+        qs = "&".join(f"{k}={v}" for k, v in query.items() if v is not None)
+        data = await self._get(f"/api/listings?{qs}")
+        return (data or {}).get("items")
+
+    async def calc_delivery(
+        self, price_usd: float, engine_cc: int, year: int
+    ) -> dict | None:
+        """POST /api/calc/delivery — расчёт «под ключ» Корея → РФ."""
+        return await self._post(
+            "/api/calc/delivery",
+            {"price_usd": price_usd, "engine_cc": engine_cc, "year": year},
+        )
+
     async def prepare_payment(
         self, user_id: int, tier: str, period_days: int
     ) -> dict | None:

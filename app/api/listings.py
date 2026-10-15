@@ -26,8 +26,15 @@ async def list_listings(
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
 ) -> ListingListOut:
-    """Лента с фильтрами, новые сверху (пагинация limit/offset)."""
+    """Лента с фильтрами, новые сверху (пагинация limit/offset).
+
+    MVP: только Корея — если source не указан явно, отдаём encar+kcar.
+    """
     conditions = []
+    if source:
+        conditions.append(func.lower(Listing.source) == source.lower())
+    else:
+        conditions.append(Listing.source.in_(("encar", "kcar")))
     if make:
         conditions.append(func.lower(Listing.make) == make.lower())
     if model:
@@ -44,9 +51,6 @@ async def list_listings(
         conditions.append(func.lower(Listing.currency) == currency.lower())
     if mileage_max is not None:
         conditions.append(Listing.mileage_km <= mileage_max)
-    if source:
-        conditions.append(func.lower(Listing.source) == source.lower())
-
     query = select(Listing)
     count_query = select(func.count()).select_from(Listing)
     if conditions:

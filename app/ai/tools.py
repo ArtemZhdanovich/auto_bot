@@ -97,6 +97,24 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "calc_delivery",
+        "description": (
+            "Рассчитать стоимость авто из Кореи «под ключ» во Владивостоке: "
+            "авто + море + брокер + СБКТС/ЭПТС + пошлина + сбор + утильсбор. "
+            "Использовать, когда пользователь спрашивает про итоговую цену, "
+            "растаможку, доставку или сравнивает варианты."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "price_usd": {"type": "number", "description": "Цена авто в USD"},
+                "engine_cc": {"type": "integer", "description": "Объём двигателя в см³"},
+                "year": {"type": "integer", "description": "Год выпуска"},
+            },
+            "required": ["price_usd", "year"],
+        },
+    },
+    {
         "name": "finalize_search",
         "description": (
             "Пользователь готов искать. Зафиксировать критерии и запустить "

@@ -10,6 +10,11 @@ RUN npm run build
 
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
-# /api проксируется на backend-сервис compose-сети
-RUN printf 'server { listen 80; location / { root /usr/share/nginx/html; try_files $uri /index.html; } location /api { proxy_pass http://backend:8000; } }\n' > /etc/nginx/conf.d/default.conf
-EXPOSE 80
+# HTTPS (self-signed, генерируется в entrypoint) + проксирование /api на backend
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY frontend/entrypoint-ssl.sh /entrypoint-ssl.sh
+RUN chmod +x /entrypoint-ssl.sh && apk add --no-cache openssl
+ENV NG_HOST_IP=127.0.0.1
+EXPOSE 80 443
+ENTRYPOINT ["/entrypoint-ssl.sh"]
+CMD ["nginx", "-g", "daemon off;"]

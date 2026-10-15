@@ -122,6 +122,9 @@ services:
     profiles: ["mono", "micro"]
     ports:
       - "8080:80"
+      - "8443:443"          # HTTPS (self-signed) — для web_app-кнопки и браузера
+    environment:
+      NG_HOST_IP: ${LAN_IP:-127.0.0.1}   # LAN-IP хоста → SAN сертификата
     depends_on:
       backend: { condition: service_healthy, required: false }   # профиль mono
       gateway: { condition: service_healthy, required: false }   # профиль micro (alias backend)

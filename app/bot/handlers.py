@@ -2,6 +2,7 @@
 
 import html
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
@@ -26,6 +27,7 @@ HELP_TEXT = (
     "/start — онбординг\n"
     "/help — справка\n"
     "/reset — сбросить текущий диалог\n"
+    "/calc — расчёт доставки и растаможки (цена, объём, год)\n"
     "/stop — отключить уведомления\n"
     "/resume — включить уведомления\n"
     "/subscribe — подписка Pro/Business (Stars)\n\n"
@@ -33,11 +35,12 @@ HELP_TEXT = (
 )
 
 START_TEXT = (
-    "👋 Привет, {name}!\n\n"
-    "Я помогу подобрать автомобиль из Кореи, Китая, Европы, США или Японии.\n\n"
+    "👋 Привет, {name}! Я Артём — ваш менеджер по авто из Кореи. 🇰🇷\n\n"
+    "Подбираю машины с encar и kcar, считаю цену «под ключ» с доставкой "
+    "и растаможкой, слежу за новыми лотами.\n\n"
     "Опишите словами, что ищете — например: "
-    "<i>«Hyundai Palisade 2022–2024, дизель, до 45к $»</i> — и я начну подбор.\n\n"
-    + HELP_TEXT
+    "<i>«Hyundai Palisade 2022–2024, дизель, до 45к $»</i>.\n\n"
+    "Или откройте приложение — там лента, карточки и калькулятор доставки."
 )
 
 
@@ -178,7 +181,7 @@ async def send_dialog_reply(message: Message, reply: dict, state: FSMContext) ->
     turn = int(data.get("dlg_turn", 0)) + 1
     options = reply.get("options", [])[:8]
     criteria = reply.get("criteria") or {}
-    await state.update_data(dlg_turn=turn, dlg_options=options)
+    await state.update_data(dlg_turn=turn, dlg_options=options, dlg_criteria=criteria)
     await _show_panel(message, state, _panel_text(reply, criteria), build_dialog_kb(reply, turn, criteria))
 
 
@@ -302,6 +305,81 @@ async def handle_deep_link(message: Message, args: str) -> bool:
     return False
 
 
+def _price_usd(listing: dict) -> float | None:
+    """Цена объявления в USD (KRW/EUR конвертируем по фиксированному курсу MVP)."""
+    price = listing.get("price")
+    if not price:
+        return None
+    currency = (listing.get("currency") or "USD").upper()
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return None
+    if currency == "KRW":
+        return round(p / 1350.0)
+    if currency == "EUR":
+        return round(p * 1.08)
+    return round(p)
+
+
+def _format_calc_out(out: dict) -> str:
+    """Человекочитаемая смета из ответа /api/calc/delivery."""
+    lines = [
+        "🚚 <b>Расчёт «под ключ»</b> (Корея → Владивосток)\n",
+        f"Авто {out['price_usd']:,.0f} $ · {out['engine_cc']} см³ · "
+        f"{out['year']} г. ({out['age_group']})\n",
+    ]
+    for c in out.get("components", []):
+        lines.append(f"• {c['label']}: {c['rub']:,.0f} ₽".replace(",", " "))
+    lines.append(
+        f"\n<b>Итого: ~{out['total_rub']:,.0f} ₽ (~{out['total_usd']:,.0f} $)</b>".replace(",", " ")
+    )
+    lines.append("\n<i>Оценка для физлица (личное пользование). Точную смету даст менеджер.</i>")
+    return "\n".join(lines)
+
+
+def _car_card_kb(listing: dict) -> InlineKeyboardMarkup:
+    """Кнопки фото-карточки: объявление, доставка, приложение."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if listing.get("url"):
+        rows.append([InlineKeyboardButton(text="🔗 Открыть объявление", url=listing["url"])])
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="🚚 Доставка и растаможка", callback_data=f"calc:{listing['id']}"
+            )
+        ]
+    )
+    mini = _miniapp_button("📱 Смотреть в приложении")
+    if mini:
+        rows.append([mini])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _send_car_cards(message: Message, items: list[dict]) -> None:
+    """Фото-карточки топ-объявлений: картинка-хотлинк + объявление + доставка."""
+    sent = 0
+    for listing in items[:5]:
+        images = listing.get("images") or []
+        caption = build_listing_caption(listing)
+        kb = _car_card_kb(listing)
+        if images:
+            try:
+                await message.answer_photo(
+                    photo=str(images[0]), caption=caption, reply_markup=kb
+                )
+                sent += 1
+                continue
+            except Exception as exc:  # картинка недоступна → текстовая карточка
+                logger.debug("photo_send_failed id=%s: %s", listing.get("id"), exc)
+        await message.answer(caption, reply_markup=kb)
+        sent += 1
+    if not sent:
+        await message.answer(
+            "Пока ничего не нашлось — поищу на источниках и пришлю уведомления."
+        )
+
+
 def build_main_menu_kb() -> InlineKeyboardMarkup:
     """Главное инлайн-меню бота (WebApp + быстрые действия)."""
     rows: list[list[InlineKeyboardButton]] = [
@@ -314,6 +392,9 @@ def build_main_menu_kb() -> InlineKeyboardMarkup:
     miniapp_btn = _miniapp_button("📱 Открыть приложение")
     if miniapp_btn:
         rows.append([miniapp_btn])
+    rows.append(
+        [InlineKeyboardButton(text="🧮 Калькулятор доставки", callback_data="menu:calc")]
+    )
     rows.extend([
         [
             InlineKeyboardButton(text="🔔 Уведомления", callback_data="menu:notify"),
@@ -413,6 +494,15 @@ async def main_menu_callback(cb, state: FSMContext) -> None:
         await cb.message.answer(
             "Диалог сброшен. Опишите, какую машину ищете.",
             reply_markup=build_main_menu_kb(),
+        )
+        return
+    if action == "calc":
+        await cb.message.answer(
+            "🧮 <b>Калькулятор доставки</b> (Корея → Владивосток)\n\n"
+            "Пришлите одной строкой: <b>цена $, объём см³, год</b>\n"
+            "Например: <code>18000 2000 2022</code>\n\n"
+            "Или откройте калькулятор в приложении — там красивые карточки.",
+            reply_markup=_miniapp_kb(),
         )
         return
     if action == "help":
@@ -628,6 +718,25 @@ async def dlg_callback(cb, state: FSMContext) -> None:
                 f"{sources}. Пришлю уведомления о новых вариантах.",
                 reply_markup=kb,
             )
+        # Сразу показываем живые варианты фото-карточками (MVP: менеджер-опыт)
+        fsm = await state.get_data()
+        criteria = fsm.get("dlg_criteria") or {}
+        params: dict = {}
+        for src_field, query_field in (
+            ("make", "make"),
+            ("model", "model"),
+            ("year_from", "year_from"),
+            ("price_max", "price_max"),
+            ("mileage_max", "mileage_max"),
+        ):
+            if criteria.get(src_field):
+                params[query_field] = criteria[src_field]
+        items = await backend.search_listings(params, limit=5)
+        if items:
+            await cb.message.answer(
+                "🔥 <b>Вот что уже есть по вашим критериям:</b>"
+            )
+            await _send_car_cards(cb.message, items)
         return
 
     if data.startswith("dlg:opt:"):
@@ -649,6 +758,62 @@ async def dlg_callback(cb, state: FSMContext) -> None:
             return
         await cb.answer()
         await _agent_turn(cb.message, option, state, user_id=user_id)
+
+
+def _miniapp_kb() -> InlineKeyboardMarkup | None:
+    rows = []
+    mini = _miniapp_button("📱 Открыть приложение")
+    if mini:
+        rows.append([mini])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+
+@router.callback_query(F.data.startswith("calc:"))
+async def calc_from_card(cb) -> None:
+    """🚚 Доставка и растаможка прямо с фото-карточки объявления."""
+    await cb.answer("Считаю…")
+    try:
+        listing_id = int((cb.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        return
+    listing = await backend.get_listing(listing_id)
+    if not listing:
+        await cb.message.answer("Объявление не найдено.")
+        return
+    price_usd = _price_usd(listing)
+    if not price_usd or not listing.get("year"):
+        await cb.message.answer(
+            "У объявления нет цены или года — посчитаю вручную: пришлите "
+            "<code>цена $ объём год</code> (например <code>18000 2000 2022</code>)."
+        )
+        return
+    out = await backend.calc_delivery(price_usd, int(listing.get("engine_volume") or 2000), int(listing["year"]))
+    if out is None:
+        await cb.message.answer("Сервис расчёта недоступен, попробуйте позже.")
+        return
+    await cb.message.answer(_format_calc_out(out), reply_markup=_miniapp_kb())
+
+
+@router.message(Command("calc"))
+async def cmd_calc(message: Message, command: CommandObject | None) -> None:
+    """/calc 18000 2000 2022 — смета «под ключ» Корея → РФ."""
+    nums = [n.replace(" ", "") for n in re.findall(r"[\d][\d ]*", command.args or "")]
+    if len(nums) >= 2:
+        price = float(nums[0])
+        cc = int(nums[1]) if len(nums) >= 3 else 2000
+        year = int(nums[-1])
+        if 1900 <= year <= 2100 and price > 0:
+            out = await backend.calc_delivery(price, cc, year)
+            if out is not None:
+                await message.answer(
+                    _format_calc_out(out), reply_markup=_miniapp_kb()
+                )
+                return
+    await message.answer(
+        "🧮 Пришлите одной строкой: <b>цена $, объём см³, год</b>\n"
+        "Например: <code>18000 2000 2022</code> (объём можно опустить: <code>18000 2022</code>)",
+        reply_markup=_miniapp_kb(),
+    )
 
 
 async def _agent_turn(

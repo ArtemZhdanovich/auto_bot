@@ -152,6 +152,17 @@ async def _execute_tool(
         )
         return ToolOutcome(text=f"Вот что есть сейчас:\n{bullets}")
 
+    if tc.name == "calc_delivery":
+        from app.services.delivery import calc_delivery, format_breakdown
+
+        price = float(args.get("price_usd") or 0)
+        year = int(args.get("year") or 0)
+        cc = int(args.get("engine_cc") or 2000)
+        if price <= 0 or year < 1980:
+            return ToolOutcome(text="Нужны цена в $ и год выпуска — уточните, пожалуйста.")
+        breakdown = calc_delivery(price, cc, year)
+        return ToolOutcome(text=format_breakdown(breakdown))
+
     if tc.name == "finalize_search":
         patch = args.get("criteria")
         if isinstance(patch, dict):

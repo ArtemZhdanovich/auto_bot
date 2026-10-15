@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Placeholder, Section, Cell } from "@telegram-apps/telegram-ui";
-import { Heart, ExternalLink } from "lucide-react";
+import { Heart, ExternalLink, Truck } from "lucide-react";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
@@ -126,6 +126,18 @@ export function ListingScreen() {
         onClick={() => void toggleFavorite()}
       >
         {favorited ? "В избранном" : "В избранное"}
+      </Button>
+      <Button
+        size="l"
+        before={<Truck size={18} />}
+        onClick={() => {
+          haptic();
+          navigate(
+            `/calc?price=${listing.price ?? ""}&year=${listing.year ?? ""}`,
+          );
+        }}
+      >
+        Доставка и растаможка
       </Button>
       <Button
         size="l"

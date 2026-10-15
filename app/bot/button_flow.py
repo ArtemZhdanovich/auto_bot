@@ -27,16 +27,13 @@ class ButtonForm(StatesGroup):
     model = State()
     year = State()
     budget = State()
-    country = State()
 
 
 POPULAR_MAKES = ["Hyundai", "Kia", "Genesis", "BMW", "Mercedes-Benz", "Toyota", "Lexus"]
 YEAR_OPTIONS = ["2020–2022", "2022–2024", "2023–2025", "Не важно"]
 BUDGET_OPTIONS = ["до 30 000 $", "30 000–45 000 $", "45 000–60 000 $", "60 000+ $"]
-COUNTRY_OPTIONS = ["Корея", "Китай", "Германия", "США", "Япония"]
-COUNTRY_CODES = {"корея": "KR", "китай": "CN", "германия": "DE", "сша": "US", "япония": "JP"}
 
-_STEP_TOTAL = 5
+_STEP_TOTAL = 4  # MVP: только Корея — шаг страны убран
 
 
 def _kb(field: str, options: list[str]) -> InlineKeyboardMarkup:
@@ -168,20 +165,8 @@ async def _apply_choice(
         return
     if field == "budget":
         await state.update_data(**_parse_budget(choice_text))
-        await state.set_state(ButtonForm.country)
-        await _show_step(
-            cb_message,
-            state,
-            f"✅ Бюджет: <b>{html.escape(choice_text)}</b>\n\n"
-            f"<b>Шаг 5/{_STEP_TOTAL}.</b> Страна:",
-            kb=_kb("country", COUNTRY_OPTIONS),
-        )
-        return
-    if field == "country":
         data = await state.get_data()
-        code = COUNTRY_CODES.get(choice_text.strip().lower())
-        if code:
-            data["country"] = code
+        data["country"] = "KR"  # MVP: работаем только с Кореей
         data["created_from_dialog"] = True
         await _finalize(cb_message, state, data)
 
@@ -206,7 +191,6 @@ async def btn_click(cb: CallbackQuery, state: FSMContext) -> None:
         "make": POPULAR_MAKES,
         "year": YEAR_OPTIONS,
         "budget": BUDGET_OPTIONS,
-        "country": COUNTRY_OPTIONS,
     }.get(field)
     if catalog is None:
         await cb.answer("Неизвестная кнопка.")
@@ -264,22 +248,7 @@ async def fsm_year(message: Message, state: FSMContext) -> None:
 @router.message(ButtonForm.budget, F.text)
 async def fsm_budget(message: Message, state: FSMContext) -> None:
     await state.update_data(**_parse_budget(message.text or ""))
-    await state.set_state(ButtonForm.country)
-    shown = html.escape(message.text or "—")
-    await _show_step(
-        message,
-        state,
-        f"✅ Бюджет: <b>{shown}</b>\n\n"
-        f"<b>Шаг 5/{_STEP_TOTAL}.</b> Страна:",
-        kb=_kb("country", COUNTRY_OPTIONS),
-    )
-
-
-@router.message(ButtonForm.country, F.text)
-async def fsm_country(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    code = COUNTRY_CODES.get((message.text or "").strip().lower())
-    if code:
-        data["country"] = code
+    data["country"] = "KR"  # MVP: работаем только с Кореей
     data["created_from_dialog"] = True
     await _finalize(message, state, data)
