@@ -679,7 +679,7 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 ## 26. Тесты и качество
 
-- `uv run pytest` → **489 passed**: LLM-клиенты, RAG-клиент (fallback, CB,
+- `uv run pytest` → **504 passed** (vitest: +9): LLM-клиенты, RAG-клиент (fallback, CB,
   кэш), агент, уведомления, адаптеры (контракты, дедуп, che168), auth,
   PQ-крипто, мониторинг/алерты, cron/планировщик, аналитика, лиды,
   ParserDoctor, прокси (GatewayProxyPool, фабрика), партнёрский контур
@@ -932,3 +932,17 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 - **Найденные тестами баги (исправлены)**: «18,000 $» вместо «18 000 $»
   в сметах бота (_format_calc_out) и format_breakdown — запятые десятичного
   разделителя локали f-string не заменялись на пробелы.
+
+## 36. Сравнение «под ключ» end-to-end + тестовая база фронтенда (+15 тестов → 504 py + 9 vitest)
+
+**Фича сравнения ( ранее только API):**
+- бот: `/calc A vs B` (разделители `vs`/`;`/`|`/перенос) → `POST /api/calc/compare`, медали + дельта; `client.compare_delivery`
+- бот: меню «⚖️ Сравнить» → хинт + миниапп `/compare`; команда `/calc` добавлена в set_my_commands
+- вебапп: экран `/compare` (2–4 варианта, бары, «лучший итог»), кнопка из калькулятора с сид-параметрами, deep-link `?v=18000x2000x2022,...`
+
+**Тесты:**
+- `tests/test_bot_calc.py` +9: интеграция `cmd_calc` (один вариант, 2 числа, «18 000», vs-сравнение, фоллбэк при недоступном бэкенде, мусор→help), `menu:compare`/`menu:ai`; фейки `FakeMsg`/`FakeCb`
+- фронтенд: vitest (`npm test`), `src/lib/fx.ts` — общие чистые хелперы (`toUsd`, `digits`, `parseQueryVariants`); Listing/Compare переведены на него; `fx.test.ts` 9 тестов
+- пойманные тестами баги: regex `\d[\d ]*` склеивал числа в одно (парсер вариантов переписан + склейка тысяч «18 000»); `parseQueryVariants` терял год в коротком формате `18000x2022`
+
+Итог: `pytest` → **504 passed**, `vitest` → **9 passed**, ruff/mypy clean, bot+miniapp пересобраны.
