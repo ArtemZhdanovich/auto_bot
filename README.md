@@ -11,7 +11,7 @@ Telegram-бот + Mini App для подбора автомобилей из К�
 - **Языки/рантайм**: Python 3.13 (asyncio), TypeScript/React 18
 - **Менеджер пакетов**: `uv` (Python), `npm` (frontend)
 - **БД/инфраструктура**: PostgreSQL 16, Redis 7, RabbitMQ 3, Qdrant, MinIO (S3)
-- **Тесты**: 350 passed, `ruff` clean, `mypy` настроен
+- **Тесты**: все зелёные (`uv run pytest -q`), `ruff` clean, `mypy` настроен
 
 ---
 
@@ -140,9 +140,16 @@ app/
                       # payment, lead, partner, rag
 frontend/             # Mini App (React + Vite + TS + telegram-ui)
 services/
+├── gateway/          # API Gateway (профиль micro): маршрутизация /api/*
+├── identity/         # микросервис: auth, users, me
+├── catalog/          # микросервис: listings, favorites, filters, notifications
+├── billing/          # микросервис: payments, subscription
+├── partners/         # микросервис: partners (CPL), leads
+├── dialog/           # микросервис: dialog, ai_search (LLM/RAG)
+├── admin/            # микросервис: admin, аналитика, ассистент
 ├── rag/              # RAG-микросервис (ядро rag_service)
 └── translate/        # NLLB-перевод тайтлов
-tests/                # 350 тестов; хелперы FakeSession/FakeRedis/MockLLMClient
+tests/                # 435 тестов; хелперы FakeSession/FakeRedis/MockLLMClient
 TZ.md                 # исходное ТЗ
 PLAN.md               # план фаз 1–7 (перевод, S3, партиционирование, …)
 PROGRESS.md           # статус-дашборд: что готово / что ждёт владельца
@@ -229,14 +236,21 @@ cd frontend && npm install && npm run dev     # :8080
 Проверка: `http://localhost:8000/health`, Swagger: `http://localhost:8000/docs`,
 Mini App: `http://localhost:8080` (вне Telegram — read-only лента).
 
-### Всё сразу через compose
+### Всё сразу через compose (профили)
 
 ```bash
 cp .env.example .env
-docker compose up --build
+
+docker compose --profile mono up --build    # монолит (backend :8000)
+docker compose --profile micro up --build   # микросервисы (gateway :8010)
 ```
 
-### Микросервисы (опционально)
+Профиль `micro` поднимает gateway и 6 доменных сервисов; gateway получает
+сетевой алиас `backend`, поэтому бот и Mini App работают без правок конфига
+(см. раздел «Микросервисы» ниже). Без флага поднимается только
+инфраструктура.
+
+### Микросервисы RAG/перевод (опционально, в обоих профилях)
 
 ```bash
 # RAG (нужны GLM_API_KEY, RAG_API_TOKEN в .env)
@@ -256,11 +270,18 @@ docker compose up -d translate   # + TRANSLATE_ENABLED=true в .env
 | `postgres` | postgres:16 | 5432 | БД `autoselect` (юзер `app`), healthcheck `pg_isready`. Пароль `DB_PASSWORD` |
 | `redis` | redis:7-alpine | 6379 | Дедуп, FSM, кэши, лимитеры, digest-буферы (DB 0); RAG использует DB 1 |
 | `rabbitmq` | rabbitmq:3-management | 5672, **15672 UI** | Очереди `fetch`/`send` + DLQ; guest/guest по умолчанию |
-| `backend` | build . | **8000** | FastAPI; healthcheck `/health` |
-| `bot` | build . | — | `python -m app.bot`; внутри сети ходит в `http://backend:8000` |
-| `worker_fetch` | build . | — | Парсинг, кроны 03:30/04:00 UTC |
-| `worker_send` | build . | — | Рассылка; Token Bucket на Redis |
-| `miniapp` | frontend/Dockerfile | **8080** | Vite build → nginx, `/api` → backend |
+| `backend` *(mono)* | build . | **8000** | Монолит: все роутеры одного FastAPI; healthcheck `/health` |
+| `bot` *(mono+micro)* | build . | — | `python -m app.bot`; внутри сети ходит в `http://backend:8000` |
+| `worker_fetch` *(mono+micro)* | build . | — | Парсинг, кроны 03:30/04:00 UTC |
+| `worker_send` *(mono+micro)* | build . | — | Рассылка; Token Bucket на Redis |
+| `miniapp` *(mono+micro)* | frontend/Dockerfile | **8080** | Vite build → nginx, `/api` → backend |
+| `gateway` *(micro)* | build . | **8010** | Единая точка входа `/api/*`; сетевой алиас `backend` |
+| `identity` *(micro)* | build . | 8101 | auth / users / me |
+| `catalog` *(micro)* | build . | 8102 | listings / favorites / filters / notifications |
+| `billing` *(micro)* | build . | 8103 | payments / subscription |
+| `partners` *(micro)* | build . | 8104 | partner API / admin партнёров / leads |
+| `dialog` *(micro)* | build . | 8105 | dialog / ai (LLM, RAG) |
+| `admin` *(micro)* | build . | 8106 | админ-контур, аналитика, ассистент |
 | `qdrant` | qdrant/qdrant | 6333 | Векторный индекс RAG |
 | `minio` | minio/minio | 9000, 9001 (консоль) | raw_payload (S3 API); minioadmin/minioadmin — **сменить в проде** |
 | `rag_migrate` | postgres:16 | — | one-shot: создаёт БД `rag` в общем postgres |
@@ -272,6 +293,54 @@ docker compose up -d translate   # + TRANSLATE_ENABLED=true в .env
 Все сервисы с `env_file: .env` — S3/перевод/RAG-переменные пробрасываются
 автоматически. Внутри docker-сети имена хостов: `postgres`, `redis`,
 `rabbitmq`, `minio`, `qdrant`, `backend` (например, `S3_ENDPOINT_URL=http://minio:9000`).
+
+---
+
+## Микросервисы (профиль micro)
+
+Монолит (`app/main.py`, профиль `mono`) и микросервисы используют **одни и
+те же роутеры** (`app/api/*`) и общий shared kernel (`app/core`, `app/db`,
+`app/queue`, `app/schemas`) — различается только точка входа. Это даёт
+выбор режима флагом compose без ветвления кода.
+
+| Сервис | Домен | Роутеры |
+|---|---|---|
+| `identity` | авторизация и профили | auth, users, me |
+| `catalog` | объявления и подборки | listings, favorites, filters, notifications |
+| `billing` | монетизация Stars | payments, subscription |
+| `partners` | CPL-контур и лиды | partners (+admin), leads |
+| `dialog` | AI-диалог | dialog, ai_search |
+| `admin` | админ-контур | admin (аналитика, ассистент, источники) |
+| `gateway` | маршрутизация | `/api/*` → сервис по таблице `services/gateway/routing.py` |
+
+**Ключевые решения:**
+
+- **Ноль правок у потребителей.** Gateway слушает :8000 внутри сети и имеет
+  алиас `backend` — бот (`APP_BASE_URL=http://backend:8000`) и nginx Mini App
+  (`proxy_pass http://backend:8000`) не меняются.
+- **Аутентификация на границе домена.** Gateway только маршрутизирует
+  (метод/path/query/заголовки/тело); `X-Internal-Token`, `Authorization` и
+  `X-API-Key` проходят сквозь него, проверяют их доменные сервисы.
+- **Специфичные маршруты раньше общих**: `/api/users/{id}/subscription` →
+  billing (до правила `/api/users` → identity), `/api/admin/partners` →
+  partners (до `/api/admin` → admin). Таблица покрыта юнит-тестами.
+- **Отказ домена ≠ отказ платформы**: недоступный сервис → gateway отвечает
+  502 с именем сервиса; `GET /health/detailed` агрегирует пинги всех шести.
+
+**Локально (без Docker), по процессам:**
+
+```bash
+uv run uvicorn services.gateway.main:app --port 8010   # gateway
+uv run uvicorn services.identity.main:app --port 8101  # и т.д. 8102–8106
+```
+
+**Тесты сервисов** (`tests/`): `test_gateway_routing.py` — юнит-таблицы
+маршрутов (специфичность, `{param}`, неизвестные пути);
+`test_gateway_proxy.py` — прокси на httpx.MockTransport (метод/тело/заголовки/
+query, 404 мимо таблицы, 502 упавшего апстрима, агрегированный health);
+`test_services_smoke.py` — смоук каждого сервиса: `/health`, границы домена
+(ровно свои префиксы, без чужих), по одному представительному эндпоинту
+через реальные dependency-overrides.
 
 ---
 
@@ -371,7 +440,7 @@ docker compose up -d translate   # + TRANSLATE_ENABLED=true в .env
 например, открытие карточки/фильтра из Mini App.
 
 **AI-диалог** (`_agent_turn`): свободный текст → AI-агент (см. ниже);
-ошибки LLM > 5 подряд → переключение на кнопочный режим (fallback_text).
+backend/LLM недоступен → переключение на кнопочный режим (fallback, п. 7.9).
 
 **Платежи Stars**: `pre_checkout_query` валидируется, `successful_payment`
 активирует тариф (идемпотентно по charge id).
@@ -384,15 +453,19 @@ docker compose up -d translate   # + TRANSLATE_ENABLED=true в .env
 
 | Схема | Заголовок | Кто | Что защищает |
 |---|---|---|---|
-| JWT (Telegram initData или web-логин) | `Authorization: Bearer` | юзеры Mini App | users/me/filters/listings/favorites/payments/notifications/leads |
-| Internal Token | `X-Internal-Token` | админка/крон/бот | `/api/admin/*`, `/metrics`, `/api/dialog/*` |
+| JWT (Telegram initData или web-логин) | `Authorization: Bearer` | юзеры Mini App | users/me/filters/listings/favorites/payments |
+| Internal Token | `X-Internal-Token` | админка/крон/бот | `/api/admin/*`, `/metrics`, `/api/dialog/*`, `/api/notifications/*`, `/api/leads/*` |
 | Partner API Key | `X-API-Key` | партнёры (CPL) | `/api/partner/*` |
 
 ### Пользователи и профили
 - `POST /api/auth/telegram` — валидация initData (HMAC, TTL 24 ч) → JWT.
-- `POST /api/auth/web`, `POST /api/auth/refresh` — веб-авторизация (миграция 0003).
-- `GET /api/users/me`, `PATCH /api/users/me` (обновление профиля/онбординга),
-  `GET /api/me/summary` — сводка для профиля (тариф, лимиты).
+- `POST /api/auth/register`, `POST /api/auth/login` — веб-регистрация/вход
+  (миграция 0003); `POST /api/auth/refresh` — обмен refresh-токена на новую
+  пару (access 1 ч / refresh 30 дней). `POST /api/auth/magic-link` — заглушка
+  (501, этапы 3–4 ТЗ).
+- `GET /api/me` — профиль; `POST /api/me/onboarded` — флаг онбординга
+  (UI/UX ТЗ §2.8); `POST /api/users/upsert` (internal) — создание/обновление
+  пользователя ботом.
 
 ### Фильтры и лента
 - `GET/POST/PATCH/DELETE /api/filters[/{id}]` — CRUD, лимит 20 на юзера
@@ -409,7 +482,8 @@ docker compose up -d translate   # + TRANSLATE_ENABLED=true в .env
   `POST /api/ai/reset`, `POST /api/ai/finalize` — сброс/финализация критериев.
 
 ### Уведомления
-- `POST /api/notifications/settings` — instant/digest, тихие часы.
+- `POST /api/notifications/settings` (internal) — instant/digest, тихие часы
+  (вызывает бот: /stop //resume и меню «Уведомления»).
 - `POST /api/notifications/scan` (internal) — принудительное сканирование.
 
 ### Лиды (воронка диалог → обращение)
@@ -765,7 +839,7 @@ partner_api_keys, partner_transactions, payments, admin_actions, web_auth.
 ## Тесты и качество
 
 ```bash
-uv run pytest -q                 # 350 passed
+uv run pytest -q                 # все зелёные
 uv run ruff check app tests
 uv run mypy app                  # настроен
 cd frontend && npm run build     # tsc --noEmit + vite build

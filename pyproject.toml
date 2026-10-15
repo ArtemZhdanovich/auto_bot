@@ -38,5 +38,6 @@ packages = ["app"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]  # импорт services.* (микросервисы) из корня репозитория
 
 

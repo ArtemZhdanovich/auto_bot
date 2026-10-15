@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.config import get_settings
 from app.core.deps import get_current_user
 from app.db.models import Payment
 from app.db.session import get_session
@@ -17,6 +18,24 @@ TEST_USER = SimpleNamespace(
     subscription_tier="free",
     subscription_until=None,
 )
+
+
+@pytest.fixture
+def internal_env(monkeypatch):
+    """Детерминированные настройки для платёжных/internal тестов.
+
+    Явно задаём INTERNAL_TOKEN и BOT_TOKEN, чтобы тесты не зависели от
+    переменных окружения и наличия .env (в проде оба обязаны быть заданы).
+    """
+    settings = get_settings()
+    monkeypatch.setattr(settings, "internal_token", "test-internal-token")
+    monkeypatch.setattr(settings, "bot_token", "123:test")
+
+
+@pytest.fixture
+def internal_headers(internal_env) -> dict[str, str]:
+    """Заголовки под internal_env: токен совпадает с замоканным INTERNAL_TOKEN."""
+    return {"X-Internal-Token": "test-internal-token"}
 
 
 @pytest.fixture
@@ -76,8 +95,11 @@ async def test_subscription_status_expired_pro_is_free(client):
 
 
 @pytest.mark.asyncio
-async def test_stars_invoice_creates_pending_payment(client, monkeypatch):
-    """Инвойс: pending-платёж в БД + ссылка от createInvoiceLink (ТЗ п. 9.6)."""
+async def test_stars_invoice_creates_pending_payment(client, internal_env, monkeypatch):
+    """Инвойс: pending-платёж в БД + ссылка от createInvoiceLink (ТЗ п. 9.6).
+
+    internal_env задаёт BOT_TOKEN (без него эндпоинт отвечает 503).
+    """
     from app.api import payments as payments_api
 
     async def fake_link(**kwargs):
@@ -114,12 +136,12 @@ async def test_stars_invoice_rejects_free_tier(client):
 
 
 @pytest.mark.asyncio
-async def test_prepare_payment_internal(client):
+async def test_prepare_payment_internal(client, internal_headers):
     http, session = client
     resp = await http.post(
         "/api/payments/prepare",
         json={"user_id": 809464979, "tier": "business", "period_days": 30},
-        headers={"X-Internal-Token": "change-me"},
+        headers=internal_headers,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -138,7 +160,7 @@ async def test_prepare_requires_internal_token(client):
 
 
 @pytest.mark.asyncio
-async def test_payment_success_activates_subscription(client):
+async def test_payment_success_activates_subscription(client, internal_headers):
     """successful_payment: платёж → paid, подписка активна, идемпотентно."""
     http, session = client
     payment = Payment(
@@ -172,7 +194,7 @@ async def test_payment_success_activates_subscription(client):
         "amount": 500,
     }
     resp = await http.post(
-        "/api/payments/success", json=body, headers={"X-Internal-Token": "change-me"}
+        "/api/payments/success", json=body, headers=internal_headers
     )
     assert resp.status_code == 200
     assert resp.json()["activated"] is True
@@ -183,9 +205,7 @@ async def test_payment_success_activates_subscription(client):
 
     # retry того же successful_payment не продлевает повторно
     until_before = user.subscription_until
-    resp2 = await http.post(
-        "/api/payments/success", json=body, headers={"X-Internal-Token": "change-me"}
-    )
+    resp2 = await http.post("/api/payments/success", json=body, headers=internal_headers)
     assert resp2.status_code == 200
     assert user.subscription_until == until_before
 

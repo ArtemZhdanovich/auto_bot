@@ -145,6 +145,15 @@ class Settings(BaseSettings):
     proxy_dataimpulse_fail_threshold: int = 5  # ConnectError подряд → пауза шлюза
     proxy_dataimpulse_fail_cooldown_sec: int = 300  # пауза: ходим напрямую
 
+    # --- Микросервисы (профиль micro; gateway маршрутизирует /api/*) ---
+    gateway_timeout_sec: float = 15.0
+    svc_identity_url: str = "http://localhost:8101"
+    svc_catalog_url: str = "http://localhost:8102"
+    svc_billing_url: str = "http://localhost:8103"
+    svc_partners_url: str = "http://localhost:8104"
+    svc_dialog_url: str = "http://localhost:8105"
+    svc_admin_url: str = "http://localhost:8106"
+
     # Alerting / мониторинг (этап 8, ТЗ п. 10)
     alerts_enabled: bool = True  # алерты в Telegram на ADMIN_CHAT_ID
     alert_dedup_ttl_sec: int = 1800  # базовое подавление повторов alert:{key}

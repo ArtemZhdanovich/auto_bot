@@ -8,6 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
+# Микросервисы (профиль micro): общий код — пакет app, точки входа — services/*
+COPY services/__init__.py services/_base.py ./services/
+COPY services/gateway ./services/gateway
+COPY services/identity ./services/identity
+COPY services/catalog ./services/catalog
+COPY services/billing ./services/billing
+COPY services/partners ./services/partners
+COPY services/dialog ./services/dialog
+COPY services/admin ./services/admin
 RUN pip install --no-cache-dir .
 
 ENV PYTHONUNBUFFERED=1

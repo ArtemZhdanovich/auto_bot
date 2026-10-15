@@ -1,4 +1,16 @@
-# Dev/staging окружение (ТЗ п. 11.2; воркеры и Mini App добавляются на этапах 2–5)
+# Dev/staging окружение (ТЗ п. 11.2).
+#
+# Два режима развёртывания (docker compose profiles):
+#   --profile mono   — монолит: backend со всеми роутерами на :8000;
+#   --profile micro  — микросервисы: gateway (:8010, хост) + 6 доменных
+#                      сервисов (:8101–8106); gateway получает сетевой
+#                      алиас `backend`, поэтому бот и Mini App не меняются.
+# Инфраструктура (postgres/redis/rabbitmq/qdrant/minio/rag/translate)
+# общая для обоих режимов. Бот, воркеры и Mini App стартуют в любом
+# из профилей: --profile mono или --profile micro.
+# Примеры:
+#   docker compose --profile mono up -d
+#   docker compose --profile micro up -d
 services:
   postgres:
     image: postgres:16
@@ -43,6 +55,7 @@ services:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     env_file: .env
+    profiles: ["mono"]
     environment:
       # .env может держать localhost (запуск по процессам) — в compose хост другой
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
@@ -62,8 +75,10 @@ services:
     build: .
     command: python -m app.bot
     env_file: .env
+    profiles: ["mono", "micro"]
     environment:
       # Внутри compose бот ходит в backend по имени сервиса
+      # (в профиле micro это alias gateway'а)
       APP_BASE_URL: http://backend:8000
       # FSM-хранилище бота — Redis; .env может держать localhost (запуск по процессам)
       REDIS_URL: redis://redis:6379/0
@@ -75,6 +90,7 @@ services:
     build: .
     command: python -m app.workers.fetch
     env_file: .env
+    profiles: ["mono", "micro"]
     environment:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
@@ -88,6 +104,7 @@ services:
     build: .
     command: python -m app.workers.send
     env_file: .env
+    profiles: ["mono", "micro"]
     environment:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
@@ -101,10 +118,127 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    profiles: ["mono", "micro"]
     ports:
       - "8080:80"
     depends_on:
       backend: { condition: service_healthy }
+
+  # ---------- Микросервисы (профиль micro; docker compose --profile micro up) ----------
+
+  # Единая точка входа /api/*; алиас backend — бот и nginx Mini App
+  # ходят в него без изменения конфигурации.
+  gateway:
+    build: .
+    command: uvicorn services.gateway.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    profiles: ["micro"]
+    environment:
+      SVC_IDENTITY_URL: http://identity:8101
+      SVC_CATALOG_URL: http://catalog:8102
+      SVC_BILLING_URL: http://billing:8103
+      SVC_PARTNERS_URL: http://partners:8104
+      SVC_DIALOG_URL: http://dialog:8105
+      SVC_ADMIN_URL: http://admin:8106
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    ports:
+      - "8010:8000"
+    networks:
+      default:
+        aliases: [backend]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+
+  identity:
+    build: .
+    command: uvicorn services.identity.main:app --host 0.0.0.0 --port 8101
+    env_file: .env
+    profiles: ["micro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8101:8101"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8101/health"]
+      interval: 30s
+
+  catalog:
+    build: .
+    command: uvicorn services.catalog.main:app --host 0.0.0.0 --port 8102
+    env_file: .env
+    profiles: ["micro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8102:8102"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8102/health"]
+      interval: 30s
+
+  billing:
+    build: .
+    command: uvicorn services.billing.main:app --host 0.0.0.0 --port 8103
+    env_file: .env
+    profiles: ["micro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8103:8103"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8103/health"]
+      interval: 30s
+
+  partners:
+    build: .
+    command: uvicorn services.partners.main:app --host 0.0.0.0 --port 8104
+    env_file: .env
+    profiles: ["micro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8104:8104"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8104/health"]
+      interval: 30s
+
+  dialog:
+    build: .
+    command: uvicorn services.dialog.main:app --host 0.0.0.0 --port 8105
+    env_file: .env
+    profiles: ["micro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }   # финализация ставит fetch-задачи
+    ports:
+      - "8105:8105"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8105/health"]
+      interval: 30s
+
+  admin:
+    build: .
+    command: uvicorn services.admin.main:app --host 0.0.0.0 --port 8106
+    env_file: .env
+    profiles: ["micro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }   # ручной fetch ставит задачу
+    ports:
+      - "8106:8106"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8106/health"]
+      interval: 30s
+
 
   # ---------- RAG-микросервис (ядро из rag_service) ----------
   qdrant:

@@ -1,5 +1,6 @@
 """Кнопочный fallback, когда LLM недоступна (ТЗ п. 7.9)."""
 
+import html
 import re
 
 from aiogram import F, Router
@@ -72,7 +73,7 @@ async def _finalize(message: Message, state: FSMContext, data: dict) -> None:
     sources = ", ".join(result.get("sources", [])) or "нет активных источников"
     await message.answer(
         "🔎 Поиск запущен! Критерии:\n"
-        f"<code>{result['criteria']}</code>\n\n"
+        f"<code>{html.escape(str(result['criteria']))}</code>\n\n"
         f"Источники: {sources}\nПришлю уведомления о подходящих вариантах.",
         reply_markup=None,
     )
