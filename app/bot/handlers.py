@@ -399,7 +399,10 @@ def build_main_menu_kb() -> InlineKeyboardMarkup:
     if miniapp_btn:
         rows.append([miniapp_btn])
     rows.append(
-        [InlineKeyboardButton(text="🧮 Калькулятор доставки", callback_data="menu:calc")]
+        [
+            InlineKeyboardButton(text="🧮 Калькулятор доставки", callback_data="menu:calc"),
+            InlineKeyboardButton(text="⚖️ Сравнить", callback_data="menu:compare"),
+        ]
     )
     rows.extend([
         [
@@ -432,6 +435,15 @@ async def main_menu_callback(cb, state: FSMContext) -> None:
     if action == "ai":
         await state.clear()
         await cb.message.answer(MENU_AI_HINT)
+        return
+    if action == "compare":
+        await cb.message.answer(
+            "⚖️ <b>Сравнение «под ключ»</b>\n\n"
+            "Пришлите варианты строкой:\n"
+            "<code>18000 2000 2022 vs 15000 1600 2021</code>\n\n"
+            "Или сравните визуально в приложении — там бары и дельта к лучшему:",
+            reply_markup=_miniapp_kb("/compare"),
+        )
         return
     if action == "notify":
         kb = InlineKeyboardMarkup(
@@ -803,26 +815,89 @@ async def calc_from_card(cb) -> None:
     )
 
 
+def _parse_variants(text: str) -> list[tuple[float, int, int]]:
+    """Варианты для сравнения из строки: «18000 2000 2022 vs 15000 1600 2021».
+
+    Разделители вариантов: «vs», «;», «|», перенос строки.
+    В каждом варианте: цена $, [объём см³], год.
+    """
+    chunks = re.split(r"(?:\bvs\b|;|\||\n)+", text, flags=re.IGNORECASE)
+    out: list[tuple[float, int, int]] = []
+    for chunk in chunks:
+        raw = re.findall(r"\d+", chunk)
+        # склейка тысяч: «18 000» → 18000 (короткое число + ровно 3 цифры)
+        merged: list[str] = []
+        i = 0
+        while i < len(raw):
+            if i + 1 < len(raw) and len(raw[i]) <= 2 and len(raw[i + 1]) == 3:
+                merged.append(raw[i] + raw[i + 1])
+                i += 2
+            else:
+                merged.append(raw[i])
+                i += 1
+        if len(merged) < 2:
+            continue
+        price = float(merged[0])
+        cc = int(merged[1]) if len(merged) >= 3 else 2000
+        year = int(merged[-1])
+        if price > 0 and 1900 <= year <= 2100 and 50 <= cc <= 10_000:
+            out.append((price, cc, year))
+    return out
+
+
+def _format_compare_out(items: list[dict]) -> str:
+    """Сравнение вариантов «под ключ» (items уже отсортированы по итогу)."""
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    best = items[0]["total_usd"] if items else 0
+    lines = ["⚖️ <b>Сравнение «под ключ»</b> (Корея → Владивосток)\n"]
+    for i, it in enumerate(items):
+        mark = medals[i] if i < len(medals) else "•"
+        line = (
+            f"{mark} <b>{it['title']}</b>\n"
+            f"     {it['price_usd']:,.0f} $ → <b>~{it['total_usd']:,.0f} $</b>".replace(",", " ")
+        )
+        if i > 0 and best:
+            diff = it["total_usd"] - best
+            line += f" (+{diff:,.0f} $)".replace(",", " ")
+        lines.append(line + "\n")
+    lines.append("<i>Пошлина зависит от возраста и объёма — иногда «дешевле» авто\nвыходит дороже под ключ. Проверяйте итог.</i>")
+    return "\n".join(lines)
+
+
 @router.message(Command("calc"))
 async def cmd_calc(message: Message, command: CommandObject | None) -> None:
-    """/calc 18000 2000 2022 — смета «под ключ» Корея → РФ."""
+    """/calc 18000 2000 2022 — смета; «A vs B» — сравнение вариантов."""
     raw_args = command.args if command else ""
-    nums = [n.replace(" ", "") for n in re.findall(r"[\d][\d ]*", raw_args)]
-    if len(nums) >= 2:
-        price = float(nums[0])
-        cc = int(nums[1]) if len(nums) >= 3 else 2000
-        year = int(nums[-1])
-        if 1900 <= year <= 2100 and price > 0:
-            out = await backend.calc_delivery(price, cc, year)
-            if out is not None:
-                await message.answer(
-                    _format_calc_out(out),
-                    reply_markup=_miniapp_kb(f"/calc?price={price:.0f}&cc={cc}&year={year}"),
-                )
-                return
+    variants = _parse_variants(raw_args)
+
+    # Несколько вариантов → сравнение «под ключ»
+    if len(variants) >= 2:
+        payload = [
+            {"price_usd": p, "engine_cc": c, "year": y, "title": f"{p:,.0f} $ · {c} см³ · {y}".replace(",", " ")}
+            for p, c, y in variants
+        ]
+        out = await backend.compare_delivery(payload[:10])
+        if out and out.get("items"):
+            await message.answer(
+                _format_compare_out(out["items"]),
+                reply_markup=_miniapp_kb("/compare"),
+            )
+            return
+
+    if len(variants) == 1:
+        price, cc, year = variants[0]
+        out = await backend.calc_delivery(price, cc, year)
+        if out is not None:
+            await message.answer(
+                _format_calc_out(out),
+                reply_markup=_miniapp_kb(f"/calc?price={price:.0f}&cc={cc}&year={year}"),
+            )
+            return
     await message.answer(
         "🧮 Пришлите одной строкой: <b>цена $, объём см³, год</b>\n"
-        "Например: <code>18000 2000 2022</code> (объём можно опустить: <code>18000 2022</code>)",
+        "Например: <code>18000 2000 2022</code> (объём можно опустить: <code>18000 2022</code>)\n\n"
+        "⚖️ А можно сразу сравнить два-три варианта:\n"
+        "<code>18000 2000 2022 vs 15000 1600 2021</code>",
         reply_markup=_miniapp_kb("/calc"),
     )
 

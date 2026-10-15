@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
@@ -15,6 +15,26 @@ interface CalcComponent {
   label: string;
   usd: number;
   rub: number;
+}
+
+/** Кнопка перехода к сравнению (bot → webapp идея: продолжай в удобном UI). */
+function CompareBtn({ price, cc, year }: { price: string; cc: string; year: string }) {
+  const navigate = useNavigate();
+  const ready = Boolean(price && year);
+  return (
+    <button
+      type="button"
+      className="chip chip--ghost"
+      disabled={!ready}
+      style={{ opacity: ready ? 1 : 0.5, marginTop: 8 }}
+      onClick={() => {
+        haptic("light");
+        navigate("/compare", { state: { seed: { price, cc, year } } });
+      }}
+    >
+      ⚖️ Сравнить с другим вариантом
+    </button>
+  );
 }
 
 interface CalcOut {
@@ -133,6 +153,7 @@ export function CalcScreen() {
         <Button size="l" stretched loading={loading} onClick={() => void calc(price, cc, year)}>
           Рассчитать
         </Button>
+        <CompareBtn price={price} cc={cc} year={year} />
       </div>
 
       {error && (

@@ -13,6 +13,7 @@ import { ListingScreen } from "./screens/Listing";
 import { FiltersScreen } from "./screens/Filters";
 import { AiSearchScreen } from "./screens/AiSearch";
 import { CalcScreen } from "./screens/Calc";
+import { CompareScreen } from "./screens/Compare";
 import { FavoritesScreen } from "./screens/Favorites";
 import { ProfileScreen } from "./screens/Profile";
 import { OnboardingScreen } from "./screens/Onboarding";
@@ -184,6 +185,7 @@ function MiniApp() {
                 <Route path="/" element={<FeedScreen />} />
                 <Route path="/listing/:id" element={<ListingScreen />} />
                 <Route path="/calc" element={<CalcScreen />} />
+                <Route path="/compare" element={<CompareScreen />} />
                 <Route path="/ai" element={<AiSearchScreen />} />
                 <Route path="/filters" element={<FiltersScreen />} />
                 <Route path="/favorites" element={<FavoritesScreen />} />

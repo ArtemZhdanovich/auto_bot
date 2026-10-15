@@ -146,3 +146,59 @@ def test_caption_without_price():
     caption = build_listing_caption({"make": "Kia", "model": "K5"})
     assert "цена не указана" in caption
     assert len(caption) <= 1024
+
+
+# ---------- _parse_variants / _format_compare_out / menu:compare ----------
+
+
+def test_parse_variants_vs():
+    assert h._parse_variants("18000 2000 2022 vs 15000 1600 2021") == [
+        (18000.0, 2000, 2022),
+        (15000.0, 1600, 2021),
+    ]
+
+
+def test_parse_variants_semicolons_and_newlines():
+    assert h._parse_variants("18000 2000 2022; 15000 2021\n20000 3000 2023") == [
+        (18000.0, 2000, 2022),
+        (15000.0, 2000, 2021),
+        (20000.0, 3000, 2023),
+    ]
+
+
+def test_parse_variants_defaults_cc_and_ignores_garbage():
+    # только цена+год -> cc=2000; мусорный чанк без чисел пропущен
+    assert h._parse_variants("абв\n18000 2022") == [(18000.0, 2000, 2022)]
+    assert h._parse_variants("привет") == []
+
+
+def test_parse_variants_rejects_bad_ranges():
+    assert h._parse_variants("0 2000 2022 vs 15000 99999 2021 vs 15000 2000 1800") == []
+
+
+def test_format_compare_out_medals_and_delta():
+    items = [
+        {"title": "A", "price_usd": 15000, "total_usd": 30000, "total_rub": 2760000, "age_group": "3-5 лет"},
+        {"title": "B", "price_usd": 18000, "total_usd": 32500, "total_rub": 2990000, "age_group": "до 3 лет"},
+    ]
+    out = h._format_compare_out(items)
+    assert "\U0001F947" in out and "A" in out
+    assert "+2 500 $" in out  # дельта к лучшему, разделители — пробелы
+    assert "30 000" in out and "32 500" in out
+
+
+def test_main_menu_has_compare_button():
+    kb = h.build_main_menu_kb()
+    datas = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert "menu:compare" in datas and "menu:calc" in datas
+
+
+def test_compare_delivery_client_post():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    h.backend._post = AsyncMock(return_value={"items": []})
+    asyncio.run(h.backend.compare_delivery([{"price_usd": 1, "engine_cc": 2, "year": 3}]))
+    path, payload = h.backend._post.call_args.args
+    assert path == "/api/calc/compare"
+    assert payload["items"][0]["price_usd"] == 1

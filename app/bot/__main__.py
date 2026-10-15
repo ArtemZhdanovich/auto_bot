@@ -49,6 +49,7 @@ async def main() -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Запуск / главное меню"),
+            BotCommand(command="calc", description="Калькулятор: цена $ объём год"),
             BotCommand(command="menu", description="Меню"),
             BotCommand(command="reset", description="Сбросить диалог подбора"),
             BotCommand(command="help", description="Помощь"),

@@ -152,6 +152,10 @@ class BackendClient:
             {"price_usd": price_usd, "engine_cc": engine_cc, "year": year},
         )
 
+    async def compare_delivery(self, items: list[dict]) -> dict | None:
+        """POST /api/calc/compare — сравнение вариантов «под ключ»."""
+        return await self._post("/api/calc/compare", {"items": items})
+
     async def prepare_payment(
         self, user_id: int, tier: str, period_days: int
     ) -> dict | None:

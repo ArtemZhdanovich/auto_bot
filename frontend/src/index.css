@@ -712,3 +712,80 @@ main {
   opacity: 0.7;
   line-height: 1.45;
 }
+
+/* === Compare (⚖️ сравнение «под ключ») === */
+.compare-variant {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--tg-theme-secondary-bg-color, #e8e8ec);
+  border-radius: 14px;
+}
+.compare-variant__label {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+.compare-variant__fields {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.8fr;
+  gap: 8px;
+}
+.compare-remove {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: #e5484d;
+  font-size: 13px;
+  padding: 0;
+}
+.compare-item {
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--tg-theme-secondary-bg-color, #e8e8ec);
+}
+.compare-item--best {
+  border-color: #30a46c;
+  background: color-mix(in srgb, #30a46c 7%, transparent);
+}
+.compare-item__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 15px;
+}
+.compare-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #30a46c;
+  border: 1px solid #30a46c;
+  border-radius: 8px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.compare-bar {
+  margin: 8px 0 6px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--tg-theme-secondary-bg-color, #e8e8ec);
+  overflow: hidden;
+}
+.compare-bar__fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4d7cfe, #7a5cff);
+}
+.compare-item--best .compare-bar__fill {
+  background: linear-gradient(90deg, #30a46c, #46c78c);
+}
+.compare-item__sub {
+  font-size: 13px;
+  opacity: 0.75;
+}
+.compare-delta {
+  color: #e5484d;
+  font-weight: 600;
+}
