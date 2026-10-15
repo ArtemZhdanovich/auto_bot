@@ -10,12 +10,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
-
-interface Variant {
-  price: string;
-  cc: string;
-  year: string;
-}
+import { digits, parseQueryVariants, type Variant } from "../lib/fx";
 
 interface CompareItem {
   title: string;
@@ -26,18 +21,6 @@ interface CompareItem {
 }
 
 const fmt = (n: number) => Math.round(n).toLocaleString("ru-RU");
-const digits = (s: string) => s.replace(/\D/g, "");
-
-function parseQueryVariants(q: string | null): Variant[] {
-  if (!q) return [];
-  return q
-    .split(",")
-    .map((raw) => {
-      const [p, c, y] = raw.trim().split("x");
-      return { price: p ?? "", cc: c ?? "2000", year: y ?? "" };
-    })
-    .filter((v) => digits(v.price) && digits(v.year));
-}
 
 export function CompareScreen() {
   const location = useLocation();

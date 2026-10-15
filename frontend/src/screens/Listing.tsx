@@ -11,6 +11,7 @@ import { useToast } from "../ui/Toast";
 import { SkeletonCard } from "../ui/Skeleton";
 import { ErrorState } from "../ui/States";
 import type { Listing } from "../api/types";
+import { toUsd } from "../lib/fx";
 
 export function ListingScreen() {
   const { id } = useParams<{ id: string }>();
@@ -56,16 +57,7 @@ export function ListingScreen() {
 
   const title = `${listing.make ?? ""} ${listing.model ?? ""}`.trim();
   // KRW/EUR → USD по фикс-курсу MVP (как в боте), иначе в калькулятор уйдут воны
-  const usd =
-    listing.price != null && listing.price > 0
-      ? Math.round(
-          (listing.currency ?? "USD").toUpperCase() === "KRW"
-            ? listing.price / 1350
-            : (listing.currency ?? "USD").toUpperCase() === "EUR"
-              ? listing.price * 1.08
-              : listing.price,
-        )
-      : null;
+  const usd = toUsd(listing.price, listing.currency);
 
   return (
     <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
