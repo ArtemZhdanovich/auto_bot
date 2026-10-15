@@ -155,3 +155,27 @@ def test_upsert_source_new_creates_with_body_config():
     assert r.status_code == 200, r.text
     assert r.json()["config"] == {"page_size": 100}
     assert session.committed is True
+
+
+def test_source_config_null_db_fields_to_defaults():
+    """NULL retry_policy/capabilities/config в БД не роняют GET /sources (500)."""
+    from app.db.models import Source
+    from app.schemas.criteria import SourceConfig
+
+    row = Source(
+        name="legacy",
+        adapter_class="KCarApiAdapter",
+        kind="api",
+        enabled=True,
+        priority=100,
+        rate_limit_per_min=60,
+        max_concurrency=3,
+        timeout_sec=30,
+        retry_policy=None,
+        capabilities=None,
+        config=None,
+    )
+    cfg = SourceConfig.model_validate(row, from_attributes=True)
+    assert cfg.retry_policy == {"max": 3, "backoff": "exponential"}
+    assert cfg.capabilities == {}
+    assert cfg.config == {}

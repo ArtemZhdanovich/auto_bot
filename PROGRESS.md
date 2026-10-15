@@ -772,4 +772,29 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 **447 тестов зелёные, ruff clean.**
 
+### 30. E2E-валидация персистентности + живой синк kcar в стеке (коммит «fix: e2e hardening…»)
+1. **E2E e2e-проверка фикса персистентности пройдена**: сломанный→«отремонтированный»
+   конфиг encar (`doctor_note` в config) + включённый kcar пережили
+   рестарт `mvp.sh up --parse` — ни PUT-reseeding, ни перезапись конфига.
+2. **Фикс найден по ходу e2e**: строки источников с NULL `retry_policy`/
+   `capabilities`/`config` в БД роняли `GET /api/admin/sources` целиком
+   (500, ValidationError в SourceConfig) — добавлен `field_validator`,
+   None → дефолты. Тест `test_source_config_null_db_fields_to_defaults`.
+3. **`HttpClient._request`: таймауты теперь ретраятся** — kcar отдаёт тело
+   списка медленно (httpx.ReadTimeout после 200), раньше не ловился вовсе.
+   Добавлены `httpx.TimeoutException` в retryable с backoff 2^attempt.
+   Тесты: `tests/test_http_client.py` (успех после ретрая; исчерпание →
+   FetchError).
+4. **kcar введён в бой в стеке**: источник включён (enabled, cron */15,
+   timeout 60s, page_size 100), образ worker_fetch пересобран (в старом
+   был мёртвый эндпоинт `/dst/...`), circuit breaker сброшен.
+   Live: `POST /bc/search/list` → **100 новых объявлений сохранено**
+   (в БД kcar=102, encar=44).
+   Нюансы эксплуатации: circuit breaker (5 ошибок подряд + cooldown 10м)
+   сбрасывается `UPDATE source_health SET error_streak=0 ...`; воркер
+   читает список источников на старте — после включения источника нужен
+   `docker compose restart worker_fetch`.
+
+**450 тестов зелёные, ruff clean.**
+
 

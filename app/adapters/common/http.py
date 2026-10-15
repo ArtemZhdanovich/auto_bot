@@ -68,10 +68,12 @@ class HttpClient:
                         continue
                     resp.raise_for_status()
                     return resp
-            except (httpx.ProxyError, httpx.ConnectError) as exc:
+            except (httpx.ProxyError, httpx.ConnectError, httpx.TimeoutException) as exc:
                 last_error = exc
                 if self._proxy_pool and proxy:
                     await self._proxy_pool.mark_bad(proxy)
+                if isinstance(exc, httpx.TimeoutException):
+                    await asyncio.sleep(2**attempt)
                 continue
             except httpx.HTTPStatusError as exc:
                 # 4xx/5xx после raise_for_status — не ретраим

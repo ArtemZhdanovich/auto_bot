@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 
 class SearchCriteria(BaseModel):
@@ -66,6 +66,16 @@ class SourceConfig(BaseModel):
     credentials_ref: str | None = None
     capabilities: dict[str, Any] = {}
     config: dict[str, Any] = {}
+
+    @field_validator("retry_policy", "capabilities", "config", mode="before")
+    @classmethod
+    def _none_to_default(cls, v: Any, info: ValidationInfo) -> Any:
+        """NULL-колонки БД → дефолты (иначе GET /sources падает с 500)."""
+        if v is None:
+            return {"retry_policy": {"max": 3, "backoff": "exponential"}}.get(
+                info.field_name, {}
+            )
+        return v
 
 
 class SourceHealth(BaseModel):
