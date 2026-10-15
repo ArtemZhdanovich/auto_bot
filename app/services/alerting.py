@@ -77,9 +77,12 @@ async def send_alert(
     *,
     dedup_key: str | None = None,
     dedup_ttl: int | None = None,
+    redis: Any | None = None,
 ) -> bool:
     """Отправить алерт в Telegram. dedup_key подавляет повторы на TTL.
 
+    redis — необязательная точка инъекции клиента дедупликации (тесты,
+    воркеры со своим пулом); без неё берётся общий клиент из настроек.
     Возвращает True, если алерт отправлен (или прошёл дедуп-проверку).
     """
     settings = get_settings()
@@ -91,19 +94,19 @@ async def send_alert(
         return False
 
     if dedup_key:
-        redis = _get_redis()
-        if redis is not None:
+        client = redis if redis is not None else _get_redis()
+        if client is not None:
             base_ttl = dedup_ttl or settings.alert_dedup_ttl_sec
             # эскалация: каждый повторный алерт глушится вдвое дольше
             # (30 мин → 1 ч → 2 ч → далее cap 2 ч), счётчик живёт сутки
-            prev = await redis.get(f"alert_count:{dedup_key}")
+            prev = await client.get(f"alert_count:{dedup_key}")
             ttl = min(base_ttl * (2 ** int(prev or 0)), 2 * 3600)
-            got = await redis.set(f"alert:{dedup_key}", "1", nx=True, ex=ttl)
+            got = await client.set(f"alert:{dedup_key}", "1", nx=True, ex=ttl)
             if not got:
                 return False  # недавно уже отправляли
             sent = await _send_telegram(settings.bot_token, chat_id, text)
             if sent:
-                await redis.setex(
+                await client.setex(
                     f"alert_count:{dedup_key}", 24 * 3600, int(prev or 0) + 1
                 )
             return sent

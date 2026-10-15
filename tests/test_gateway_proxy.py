@@ -68,6 +68,25 @@ def gateway(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_metrics_proxied_to_admin(gateway):
+    """GET /metrics (вне /api/*) пробрасывается в admin-домен напрямую."""
+    http, calls = gateway
+    resp = await http.get("/metrics", headers={"X-Internal-Token": "secret"})
+    assert resp.status_code == 200
+    assert calls == [
+        {
+            "service": "admin",
+            "method": "GET",
+            "path": "/metrics",
+            "query": "",
+            "body": b"",
+            "internal_token": "secret",
+            "auth": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_proxy_forwards_method_path_body_headers(gateway):
     http, calls = gateway
     resp = await http.post(

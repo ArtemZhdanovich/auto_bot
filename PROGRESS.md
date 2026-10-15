@@ -707,5 +707,29 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 | `c987714` | SQL-дашборды воронок (P2-13): funnel + retention D1/D7 admin-эндпоинты |
 | (см. git) | Биллинг партнёров (P2-14): CPL-списания, баланс, suspended/reactivate, миграция 0014 |
 | (отд. репо) | rag_service monorepo: 361 тест, ветка `refactor/monorepo` (не запушена) |
+| `15400e9` | Encar: новый API-контракт (sr/inav/cursor, q с `_.`, корейские фасеты, FormYear/Year, USD→KRW) |
+| `10dcceb` (PR #1) | Микросервисы: gateway + 6 доменных сервисов (профили mono/micro), auth refresh, багфиксы (`max→le`, `user.telegram_id`, html.escape) |
+| (этот merge) | Мерж PR #1 + правки: env-оверрайды DATABASE_URL/REDIS_URL/RABBITMQ у 6 svc, `depends_on required:false` (bot/miniapp в micro), mvp.sh `--profile mono`, `/metrics` вынесен в `app/api/metrics.py` (admin + gateway-прокси), ParserDoctor: инъекция redis в send_alert + изоляция Telegram в тестах (442 теста, ruff clean) |
+
+## 28. Ревью PR #1 (feat/microservices) — найденные и исправленные проблемы
+
+1. **compose**: у 6 доменных сервисов (identity/catalog/billing/partners/dialog/admin)
+   не было `environment:`-оверрайдов `DATABASE_URL/REDIS_URL/RABBITMQ_URL` — при
+   `localhost` в `.env` они не связывались бы с инфраструктурой (тот же баг, что
+   ранее исправлен для backend/workers).
+2. **compose**: `bot` и `miniapp` зависели от `backend` (профиль mono) — в профиле
+   `micro` не стартовали; заменено на `depends_on ... required: false` для
+   backend+gateway (Compose ≥2.20).
+3. **mvp.sh**: переведён на `--profile mono` (иначе сервисы с профилями не поднимутся).
+4. **`GET /metrics`** (ТЗ п.10) жил только в `app/main.py` — в режиме micro gateway
+   (только `/api/*`) отдавал 404: роут вынесен в `app/api/metrics.py`, подключён
+   монолитом и admin-сервисом, gateway проксирует `/metrics` → admin.
+5. **ParserDoctor**: `send_alert` ходил в реальный Redis через `_get_redis()` —
+   тесты падали при остановленном Docker (9 падений); добавлена инъекция
+   `redis=` в `send_alert`, проброс через `_repair`/`_triage_result`, в тестах
+   изолирован реальный Telegram (`_send_telegram` → stub).
+
+Конфликт мержа (docker-compose.yml) разрулен: профили PR + env-оверрайды локальных
+коммитов сохранены.
 
 

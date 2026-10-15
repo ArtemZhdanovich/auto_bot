@@ -2,13 +2,10 @@
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
-from typing import Any
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from app.api import (
     admin,
@@ -20,22 +17,13 @@ from app.api import (
     leads,
     listings,
     me,
+    metrics,
     notifications,
     partners,
     payments,
     users,
 )
 from app.core.config import get_settings
-from app.core.deps import SessionDep
-from app.core.deps_internal import check_internal_token
-from app.db.models import (
-    AnalyticsEvent,
-    Listing,
-    SentLog,
-    SourceHealth,
-    User,
-    UserFilter,
-)
 from app.db.session import session_factory
 
 settings = get_settings()
@@ -118,102 +106,10 @@ async def health_detailed() -> JSONResponse:
     )
 
 
-async def _scalar(session: AsyncSession, stmt: Any) -> int | None:
-    try:
-        return (await session.execute(stmt)).scalar_one()
-    except Exception:  # noqa: BLE001 — метрика не может ломать эндпоинт
-        return None
-
-
-@app.get(
-    "/metrics",
-    tags=["system"],
-    dependencies=[Depends(check_internal_token)],  # агрегаты — не для публичного доступа
-)
-async def metrics(session: SessionDep) -> dict[str, Any]:
-    """Базовые метрики для мониторинга (этап 8): пользователи, объявления,
-    уведомления, health источников. Счётчики: агрегаты, без персональных данных."""
-    day_ago = datetime.now(UTC) - timedelta(hours=24)
-
-    users_total = await _scalar(session, select(func.count()).select_from(User))
-    users_new_24h = await _scalar(
-        session,
-        select(func.count()).select_from(User).where(User.created_at >= day_ago),
-    )
-    filters_total = await _scalar(
-        session, select(func.count()).select_from(UserFilter)
-    )
-    listings_total = await _scalar(
-        session, select(func.count()).select_from(Listing)
-    )
-    listings_new_24h = await _scalar(
-        session,
-        select(func.count())
-        .select_from(Listing)
-        .where(Listing.updated_at >= day_ago),
-    )
-    notifications_sent_24h = await _scalar(
-        session,
-        select(func.count()).select_from(SentLog).where(SentLog.sent_at >= day_ago),
-    )
-
-    try:
-        result = await session.execute(
-            select(User.subscription_tier, func.count())
-            .select_from(User)
-            .group_by(User.subscription_tier)
-        )
-        users_by_tier = {tier: int(n) for tier, n in result.all()}
-    except Exception:  # noqa: BLE001
-        users_by_tier = {}
-
-    sources: list[dict[str, Any]] = []
-    try:
-        result = await session.execute(select(SourceHealth))
-        for health in result.scalars().all():
-            sources.append(
-                {
-                    "source_name": health.source_name,
-                    "avg_latency_ms": health.avg_latency_ms,
-                    "error_streak": health.error_streak,
-                    "last_success_at": (
-                        health.last_success_at.isoformat()
-                        if health.last_success_at
-                        else None
-                    ),
-                }
-            )
-    except Exception:  # noqa: BLE001
-        pass
-
-    events_24h: dict[str, int] = {}
-    try:
-        result = await session.execute(
-            select(AnalyticsEvent.name, func.count())
-            .where(AnalyticsEvent.created_at >= day_ago)
-            .group_by(AnalyticsEvent.name)
-        )
-        events_24h = {name: int(n) for name, n in result.all()}
-    except Exception:  # noqa: BLE001
-        pass
-
-    return {
-        "users": {
-            "total": users_total,
-            "new_24h": users_new_24h,
-            "by_tier": users_by_tier,
-        },
-        "filters": {"total": filters_total},
-        "listings": {"total": listings_total, "new_24h": listings_new_24h},
-        "notifications_sent_24h": notifications_sent_24h,
-        "sources": sources,
-        "events_24h": events_24h,
-    }
-
-
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(me.router)
+app.include_router(metrics.router)  # GET /metrics (этап 8) — общий роутер с admin
 app.include_router(filters.router)
 app.include_router(listings.router)
 app.include_router(favorites.router)

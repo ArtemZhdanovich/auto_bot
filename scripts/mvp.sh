@@ -27,7 +27,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-COMPOSE="docker compose"
+# Профиль mono: mvp.sh работает с монолитом (backend/bot/workers/miniapp).
+# Режим микросервисов: docker compose --profile micro up --build (см. README).
+COMPOSE="docker compose --profile mono"
 BASE_URL="${APP_BASE_URL:-http://localhost:8000}"
 MINIAPP_URL="${MINIAPP_URL:-http://localhost:8080}"
 CORE="postgres redis rabbitmq"

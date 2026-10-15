@@ -5,6 +5,7 @@ LLM, ошибка LLM — во всех случаях конфиг не пор�
 """
 
 import httpx
+import pytest
 
 from app.adapters.che168 import Che168HtmlAdapter
 from app.adapters.common.http import HttpClient
@@ -12,6 +13,16 @@ from app.ai.llm_client import LLMError, LLMResult, MockLLMClient
 from app.db.models import Source
 from app.services.parser_doctor import extract_json, repair_parser
 from conftest import FakeRedis, FakeSession
+
+
+@pytest.fixture(autouse=True)
+def _no_real_telegram(monkeypatch):
+    """Тесты не должны ходить в реальный Telegram (BOT_TOKEN из .env)."""
+
+    async def _fake_send(bot_token: str, chat_id: int, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr("app.services.alerting._send_telegram", _fake_send)
 
 # «Новая вёрстка» (то, к чему якобы переехал сайт) — старые селекторы тут не работают
 NEW_LAYOUT = """

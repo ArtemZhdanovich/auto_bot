@@ -103,6 +103,13 @@ def test_smoke_domain_boundaries(name: str):
     assert _api_prefixes(app) == EXPECTED_PREFIXES[name]
 
 
+def test_smoke_admin_exposes_metrics_route():
+    """Метрики мониторинга доступны в admin-домене (gateway проксирует /metrics)."""
+    paths = _iter_api_paths(create_admin().routes)
+    assert "/metrics" in paths
+    assert "/metrics" not in _iter_api_paths(create_catalog().routes)
+
+
 def test_smoke_no_context_leaks_across_services():
     """Ключевые пути каждого контекста есть только у одного сервиса."""
     paths = {

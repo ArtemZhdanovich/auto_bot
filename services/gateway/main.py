@@ -14,7 +14,6 @@ X-API-Key) проходят сквозь него без изменений — 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -104,18 +103,8 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
             },
         )
 
-    @app.api_route(
-        "/api/{path:path}",
-        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-    )
-    async def proxy(path: str, request: Request) -> Response:
-        """Проксировать запрос в сервис по таблице маршрутов."""
-        target = resolve_service(request.url.path)
-        if target is None or target not in SERVICE_NAMES:
-            return JSONResponse(
-                status_code=404,
-                content={"detail": f"no route for {request.url.path}"},
-            )
+    async def _forward(target: str, request: Request) -> Response:
+        """Отправить запрос в `target` (таблица маршрутов уже разрешила имя)."""
         base = service_urls()[target]
         headers = {
             k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP
@@ -140,6 +129,26 @@ def create_app(transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
             status_code=upstream.status_code,
             media_type=upstream.headers.get("content-type"),
         )
+
+    @app.api_route(
+        "/api/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    )
+    async def proxy(path: str, request: Request) -> Response:
+        """Проксировать запрос в сервис по таблице маршрутов."""
+        target = resolve_service(request.url.path)
+        if target is None or target not in SERVICE_NAMES:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"no route for {request.url.path}"},
+            )
+        return await _forward(target, request)
+
+    @app.api_route("/metrics", methods=["GET"], tags=["system"])
+    async def metrics_proxy(request: Request) -> Response:
+        """GET /metrics (мониторинг, X-Internal-Token) — роут вне /api/*:
+        живёт в admin-домене (app/api/metrics.py), пробрасывается напрямую."""
+        return await _forward("admin", request)
 
     return app
 

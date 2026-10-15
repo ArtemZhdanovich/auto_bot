@@ -83,7 +83,8 @@ services:
       # FSM-хранилище бота — Redis; .env может держать localhost (запуск по процессам)
       REDIS_URL: redis://redis:6379/0
     depends_on:
-      backend: { condition: service_healthy }
+      backend: { condition: service_healthy, required: false }   # профиль mono
+      gateway: { condition: service_healthy, required: false }   # профиль micro (alias backend)
       rabbitmq: { condition: service_healthy }
 
   worker_fetch:
@@ -122,7 +123,8 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      backend: { condition: service_healthy }
+      backend: { condition: service_healthy, required: false }   # профиль mono
+      gateway: { condition: service_healthy, required: false }   # профиль micro (alias backend)
 
   # ---------- Микросервисы (профиль micro; docker compose --profile micro up) ----------
 
@@ -158,6 +160,11 @@ services:
     command: uvicorn services.identity.main:app --host 0.0.0.0 --port 8101
     env_file: .env
     profiles: ["micro"]
+    environment:
+      # .env может держать localhost (запуск по процессам) — в compose хост другой
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -172,6 +179,10 @@ services:
     command: uvicorn services.catalog.main:app --host 0.0.0.0 --port 8102
     env_file: .env
     profiles: ["micro"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -186,6 +197,10 @@ services:
     command: uvicorn services.billing.main:app --host 0.0.0.0 --port 8103
     env_file: .env
     profiles: ["micro"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -200,6 +215,10 @@ services:
     command: uvicorn services.partners.main:app --host 0.0.0.0 --port 8104
     env_file: .env
     profiles: ["micro"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -214,6 +233,10 @@ services:
     command: uvicorn services.dialog.main:app --host 0.0.0.0 --port 8105
     env_file: .env
     profiles: ["micro"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -229,6 +252,10 @@ services:
     command: uvicorn services.admin.main:app --host 0.0.0.0 --port 8106
     env_file: .env
     profiles: ["micro"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

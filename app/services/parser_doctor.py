@@ -183,7 +183,9 @@ async def _repair(
     status, html, fetch_error = await _fetch_list_page(adapter, config)
     triage = classify_fetch_error(fetch_error) if status is None else classify_page(html)
     if triage != "markup_change":
-        return await _triage_result(source_name, triage, status, fetch_error)
+        return await _triage_result(
+            source_name, triage, status, fetch_error, redis=redis
+        )
 
     # Cooldown ставим только перед LLM-ремонтом: бан/падение сервера
     # триажится при каждом запуске врача, без «остывания»
@@ -207,6 +209,7 @@ async def _repair(
         await send_alert(
             f"🩺 ParserDoctor {source_name}: LLM недоступен, парсер остался сломан ({exc})",
             dedup_key=f"doctor_llm:{source_name}",
+            redis=redis,
         )
         return {"source": source_name, "status": "llm_error"}
     proposal = extract_json(result.text)
@@ -222,6 +225,7 @@ async def _repair(
             f"🩺 ParserDoctor {source_name}: предложение LLM не прошло валидацию, "
             f"конфиг не тронут. Предложено: {json.dumps(new_selectors, ensure_ascii=False)}",
             dedup_key=f"doctor_invalid:{source_name}",
+            redis=redis,
         )
         return {"source": source_name, "status": "invalid", "proposed": new_selectors}
 
@@ -238,6 +242,7 @@ async def _repair(
             f"Было: {json.dumps(old_selectors, ensure_ascii=False)}\n"
             f"Стало: {json.dumps(new_selectors, ensure_ascii=False)}",
             dedup_key=f"doctor_repaired:{source_name}",
+            redis=redis,
         )
         logger.warning("parser_repaired: source=%s selectors=%s", source_name, new_selectors)
         return {"source": source_name, "status": "repaired", "items": parsed}
@@ -247,12 +252,18 @@ async def _repair(
         f"(проверено на живом HTML, {parsed} карточек — примените через admin API):\n"
         f"{json.dumps(new_selectors, ensure_ascii=False)}",
         dedup_key=f"doctor_suggest:{source_name}",
+        redis=redis,
     )
     return {"source": source_name, "status": "suggested", "items": parsed}
 
 
 async def _triage_result(
-    source_name: str, triage: str, status: int | None, error: str | None
+    source_name: str,
+    triage: str,
+    status: int | None,
+    error: str | None,
+    *,
+    redis: Any | None = None,
 ) -> dict[str, Any]:
     """Алерт с причиной без вызова LLM: бан / недоступен / страница переехала."""
     details = f"HTTP {status}" if status is not None else f"сеть: {(error or '')[:200]}"
@@ -274,7 +285,11 @@ async def _triage_result(
     logger.warning(
         "parser_doctor_triage: source=%s triage=%s (%s)", source_name, triage, details
     )
-    await send_alert(text, dedup_key=f"doctor_triage_{triage}:{source_name}")
+    await send_alert(
+        text,
+        dedup_key=f"doctor_triage_{triage}:{source_name}",
+        redis=redis,
+    )
     return {
         "source": source_name,
         "status": triage,
