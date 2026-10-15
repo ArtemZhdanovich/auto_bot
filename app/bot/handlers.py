@@ -79,7 +79,7 @@ def _fmt_value(field: str, value: object) -> str:
         return COUNTRY_LABELS.get(str(value), str(value))
     if field in ("price_min", "price_max", "mileage_max"):
         try:
-            return f"{int(value):,}".replace(",", " ")
+            return f"{int(str(value)):,}".replace(",", " ")
         except (TypeError, ValueError):
             return str(value)
     if field == "sources" and isinstance(value, list):
@@ -797,7 +797,8 @@ async def calc_from_card(cb) -> None:
 @router.message(Command("calc"))
 async def cmd_calc(message: Message, command: CommandObject | None) -> None:
     """/calc 18000 2000 2022 — смета «под ключ» Корея → РФ."""
-    nums = [n.replace(" ", "") for n in re.findall(r"[\d][\d ]*", command.args or "")]
+    raw_args = command.args if command else ""
+    nums = [n.replace(" ", "") for n in re.findall(r"[\d][\d ]*", raw_args)]
     if len(nums) >= 2:
         price = float(nums[0])
         cc = int(nums[1]) if len(nums) >= 3 else 2000
