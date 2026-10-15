@@ -1,7 +1,13 @@
 /** Юнит-тесты математики AI-анализа (vitest, node — без React). */
 import { describe, expect, it } from "vitest";
 
-import { buildChartData, deltaPct, VERDICT_LABEL } from "./analysis";
+import {
+  buildChartData,
+  deltaPct,
+  fairPosition,
+  formatCompact,
+  VERDICT_LABEL,
+} from "./analysis";
 
 describe("deltaPct", () => {
   it("цена ниже середины — отрицательный процент", () => {
@@ -58,5 +64,30 @@ describe("VERDICT_LABEL", () => {
   it("все три вердикта подписаны", () => {
     expect(Object.keys(VERDICT_LABEL).sort()).toEqual(["deal", "fair", "overpriced"]);
     expect(VERDICT_LABEL.deal.emoji).toBe("🟢");
+  });
+});
+
+describe("fairPosition", () => {
+  it("позиция цены внутри диапазона, 0..100", () => {
+    expect(fairPosition({ price: 8000, fair_min: 8000, fair_max: 10000 })).toBe(0);
+    expect(fairPosition({ price: 9000, fair_min: 8000, fair_max: 10000 })).toBe(50);
+    expect(fairPosition({ price: 12000, fair_min: 8000, fair_max: 10000 })).toBe(100);
+  });
+
+  it("вырожденный диапазон — null", () => {
+    expect(fairPosition({ price: 9000, fair_min: 9000, fair_max: 9000 })).toBeNull();
+    expect(fairPosition({ price: 9000, fair_min: null, fair_max: null })).toBeNull();
+  });
+});
+
+describe("formatCompact", () => {
+  it("миллионы с запятой", () => {
+    expect(formatCompact(18_400_000)).toBe("18,4 млн");
+    expect(formatCompact(20_000_000)).toBe("20 млн");
+  });
+
+  it("тысячи и мелочь", () => {
+    expect(formatCompact(950_000)).toBe("950 тыс");
+    expect(formatCompact(850)).toBe("850");
   });
 });

@@ -801,35 +801,48 @@ _VERDICT_RU = {
 
 
 def _format_analysis(a: dict, listing: dict | None = None) -> str:
-    """AI-разбор цены для чата: вердикт, диапазон, факторы, квота."""
+    """AI-разбор цены для чата: цена → рынок → вердикт → факторы → квота."""
     verdict, hint = _VERDICT_RU.get(a.get("verdict", "fair"), _VERDICT_RU["fair"])
+    currency = a.get("currency") or ""
     title = ""
     if listing:
-        title = f"{listing.get('make', '')} {listing.get('model', '')}".strip() + "\n"
+        name = " ".join(
+            str(listing.get(k)) for k in ("make", "model") if listing.get(k)
+        )
+        if listing.get("year"):
+            name += f", {listing['year']}"
+        title = f"{name}\n" if name else ""
     lines = [f"🤖 <b>AI-анализ стоимости</b>\n{title}"]
+    price = a.get("price")
+    if price:
+        lines.append(f"💵 Цена: {price:,.0f} {currency}".replace(",", " "))
+    comps = a.get("comps")
+    if comps and comps.get("median"):
+        lines.append(
+            f"📊 Рынок: {comps.get('count', 0)} сопоставимых · медиана "
+            + f"{comps['median']:,.0f} {currency}".replace(",", " ")
+        )
+    lines.append(f"\nВердикт: {verdict}")
     fair_min, fair_max = a.get("fair_min"), a.get("fair_max")
     if fair_min and fair_max:
         lines.append(
-            f"Справедливый диапазон: <b>{fair_min:,.0f}–{fair_max:,.0f} {a.get('currency', '')}</b>".replace(",", " ")
+            f"Справедливый диапазон: <b>{fair_min:,.0f}–{fair_max:,.0f} {currency}</b>".replace(",", " ")
         )
-    price = a.get("price")
     if price and fair_min and fair_max:
         mid = (fair_min + fair_max) / 2
         delta = (price - mid) / mid * 100
+        arrow = "📉" if delta < 0 else "📈"
         sign = "+" if delta >= 0 else "−"
-        lines.append(f"Цена {hint}: {sign}{abs(delta):.0f}% от середины рынка\n")
-    lines.append(f"Вердикт: {verdict}")
+        lines.append(f"{arrow} Цена {hint}: {sign}{abs(delta):.0f}% от середины")
     if a.get("summary"):
         lines.append(f"\n💬 {a['summary']}")
     factors = a.get("factors") or []
     if factors:
         lines.append("\n" + "\n".join(f"• {f}" for f in factors[:4]))
-    if a.get("comps"):
-        c = a["comps"]
-        lines.append(
-            f"\n<i>Рынок: {c.get('count', 0)} сопоставимых, медиана {c.get('median', '—')}</i>"
-        )
-    lines.append("\n<i>🎁 1 разбор машины в неделю — бесплатно.\nБезлимит и история — в Pro: /subscribe</i>")
+    lines.append(
+        "\n<i>🎁 1 разбор машины в неделю — бесплатно.\n"
+        "⚡ Безлимит и история цен — в Pro: /subscribe</i>"
+    )
     return "\n".join(lines)
 
 

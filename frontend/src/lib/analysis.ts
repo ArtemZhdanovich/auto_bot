@@ -11,6 +11,7 @@ export interface AnalysisData {
   comps: { count: number; min: number; max: number; median: number } | null;
   history: { price: number; recorded_at: string }[];
   source: string;
+  created_at?: string | null;
 }
 
 export const VERDICT_LABEL: Record<AnalysisData["verdict"], { text: string; emoji: string }> = {
@@ -26,6 +27,27 @@ export function deltaPct(a: Pick<AnalysisData, "price" | "fair_min" | "fair_max"
   if (!mid) return null;
   return Math.round(((a.price - mid) / mid) * 100);
 }
+
+/** Где цена внутри справедливого диапазона, 0..100 % (для маркера на шкале). */
+export function fairPosition(
+  a: Pick<AnalysisData, "price" | "fair_min" | "fair_max">,
+): number | null {
+  if (!a.fair_min || !a.fair_max || a.fair_max <= a.fair_min) return null;
+  const t = (a.price - a.fair_min) / (a.fair_max - a.fair_min);
+  return Math.round(Math.min(1, Math.max(0, t)) * 100);
+}
+
+/** Компактный формат для осей/подписей: 18_400_000 → «18,4 млн», 950_000 → «950 тыс». */
+export function formatCompact(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) {
+    const m = (v / 1_000_000).toFixed(1).replace(".", ",").replace(",0", "");
+    return `${m} млн`;
+  }
+  if (abs >= 1_000) return `${Math.round(v / 1_000)} тыс`;
+  return String(Math.round(v));
+}
+
 
 export interface ChartSpec {
   /** Полилиния истории: [{x,y}] в координатах 0..width / 0..height. */

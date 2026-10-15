@@ -65,6 +65,16 @@ def test_format_analysis_verdict_range_delta():
     assert "1 разбор машины в неделю" in text  # напоминание про монетизацию
 
 
+def test_format_analysis_title_with_year_and_money_lines():
+    text = _format_analysis(
+        _analysis(), {"make": "Kia", "model": "Carnival", "year": 2021}
+    )
+    assert "Kia Carnival, 2021" in text
+    assert "💵 Цена: 30 000 USD" in text
+    assert "📊 Рынок: 12 сопоставимых · медиана 31 000 USD" in text
+    assert "📉" in text  # цена ниже середины
+
+
 def test_format_analysis_overpriced_and_without_comps():
     a = _analysis()
     a.update(verdict="overpriced", comps=None, fair_min=None, fair_max=None, summary=None)

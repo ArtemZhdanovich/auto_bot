@@ -209,6 +209,7 @@ async def run_analysis(
         "comps": ctx.get("comps"),
         "history": ctx.get("history", []),
         "source": "ai" if llm_data else "stats",
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     row = PriceAnalysis(

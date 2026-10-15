@@ -12,7 +12,7 @@ import { SkeletonCard } from "../ui/Skeleton";
 import { ErrorState } from "../ui/States";
 import type { Listing } from "../api/types";
 import { toUsd } from "../lib/fx";
-import { VERDICT_LABEL, deltaPct, type AnalysisData } from "../lib/analysis";
+import { VERDICT_LABEL, deltaPct, fairPosition, type AnalysisData } from "../lib/analysis";
 import { PriceChart } from "../ui/PriceChart";
 
 export function ListingScreen() {
@@ -132,33 +132,68 @@ export function ListingScreen() {
 
       {/* AI-анализ стоимости (монетизация: 1/нед бесплатно, далее Pro) */}
       <Section header="🤖 AI-анализ цены">
-        {analysis ? (
+        {analyzing ? (
           <div className="analysis">
-            <div
-              className={`analysis__verdict analysis__verdict--${analysis.verdict}`}
-            >
-              {VERDICT_LABEL[analysis.verdict].emoji}{" "}
-              {VERDICT_LABEL[analysis.verdict].text}
+            <div className="analysis__loading">
+              <span className="analysis__spinner" />
+              Сравниваю с рынком…
+              <div className="analysis__loading-sub">
+                сопоставимые объявления, история цены, вердикт — до минуты
+              </div>
+            </div>
+            <div className="skeleton" style={{ height: 64, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 96, borderRadius: 12 }} />
+          </div>
+        ) : analysis ? (
+          <div className="analysis">
+            <div className="analysis__head">
+              <div
+                className={`analysis__verdict analysis__verdict--${analysis.verdict}`}
+              >
+                {VERDICT_LABEL[analysis.verdict].emoji}{" "}
+                {VERDICT_LABEL[analysis.verdict].text}
+              </div>
+              {deltaPct(analysis) != null && (
+                <span
+                  className={`analysis__pill analysis__pill--${
+                    deltaPct(analysis)! <= 0 ? "good" : "bad"
+                  }`}
+                >
+                  {deltaPct(analysis)! > 0 ? "▲" : "▼"} {deltaPct(analysis)}%
+                </span>
+              )}
             </div>
             {analysis.fair_min != null && analysis.fair_max != null && (
               <div className="analysis__range">
-                Справедливый диапазон:{" "}
-                <b>
-                  {Math.round(analysis.fair_min).toLocaleString("ru-RU")}–
-                  {Math.round(analysis.fair_max).toLocaleString("ru-RU")}{" "}
-                  {analysis.currency}
-                </b>
-                {deltaPct(analysis) != null && (
-                  <span className="analysis__delta">
-                    {" "}
-                    ({deltaPct(analysis)! > 0 ? "+" : ""}
-                    {deltaPct(analysis)}% от середины)
-                  </span>
+                <div className="analysis__range-label">
+                  Справедливый диапазон:{" "}
+                  <b>
+                    {Math.round(analysis.fair_min).toLocaleString("ru-RU")}–
+                    {Math.round(analysis.fair_max).toLocaleString("ru-RU")}{" "}
+                    {analysis.currency}
+                  </b>
+                </div>
+                {fairPosition(analysis) != null && (
+                  <div className="analysis__bar">
+                    <div
+                      className="analysis__bar-marker"
+                      style={{ left: `${fairPosition(analysis)}%` }}
+                    />
+                  </div>
                 )}
               </div>
             )}
-            <PriceChart history={analysis.history} comps={analysis.comps} />
-            {analysis.summary && <div className="analysis__summary">💬 {analysis.summary}</div>}
+            {analysis.history.length > 1 ? (
+              <PriceChart history={analysis.history} comps={analysis.comps} />
+            ) : (
+              <div className="analysis__hint">
+                📈 Истории цены пока мало — график появится, когда начнём
+                отслеживать объявление.
+              </div>
+            )}
+            {analysis.summary && (
+              <div className="analysis__summary">💬 {analysis.summary}</div>
+            )}
             {analysis.factors.length > 0 && (
               <ul className="analysis__factors">
                 {analysis.factors.map((f, i) => (
@@ -172,10 +207,20 @@ export function ListingScreen() {
                 {analysis.comps.median.toLocaleString("ru-RU")} {analysis.currency}
               </div>
             )}
+            <div className="analysis__meta">
+              {analysis.created_at &&
+                `разбор от ${new Date(analysis.created_at).toLocaleDateString("ru")}`}
+              {" · "}
+              {analysis.source === "ai" ? "нейросеть" : "статистика рынка"}
+              <button className="analysis__retry" onClick={() => void runAnalysis()}>
+                🔄 Пересчитать
+              </button>
+            </div>
           </div>
         ) : quotaHit ? (
           <div className="analysis analysis--locked">
-            🔒 Бесплатный разбор этой машины на этой неделе уже использован.
+            🔒 Бесплатный разбор этой машины на этой неделе уже использован —
+            он доступен снова через несколько дней.
             <Button
               size="s"
               mode="filled"
@@ -199,7 +244,6 @@ export function ListingScreen() {
               size="s"
               mode="filled"
               stretched
-              loading={analyzing}
               onClick={() => void runAnalysis()}
             >
               🤖 Анализировать (1 бесплатно в неделю)

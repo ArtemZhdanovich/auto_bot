@@ -794,15 +794,31 @@ main {
 .analysis {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   font-size: 14px;
+  animation: analysis-in 0.35s ease both;
+}
+@keyframes analysis-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.analysis__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .analysis__verdict {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
-  padding: 8px 12px;
+  padding: 7px 12px;
   border-radius: 12px;
-  width: fit-content;
 }
 .analysis__verdict--deal {
   color: #1b7a4b;
@@ -810,46 +826,165 @@ main {
 }
 .analysis__verdict--fair {
   color: #8a6100;
-  background: rgba(240, 178, 12, 0.15);
+  background: rgba(240, 178, 12, 0.16);
 }
 .analysis__verdict--overpriced {
   color: #c62a2f;
   background: rgba(229, 72, 77, 0.12);
 }
-.analysis__range {
-  color: var(--tg-theme-text-color, #222);
+.analysis__pill {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
-.analysis__delta {
-  opacity: 0.7;
+.analysis__pill--good {
+  color: #1b7a4b;
+  background: rgba(48, 164, 108, 0.14);
+}
+.analysis__pill--bad {
+  color: #c62a2f;
+  background: rgba(229, 72, 77, 0.13);
+}
+.analysis__range-label {
+  line-height: 1.4;
+}
+.analysis__bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(48,164,108,0.35), rgba(48,164,108,0.12), rgba(229,72,77,0.3));
+}
+.analysis__bar-marker {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid #4d7cfe;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  transform: translate(-50%, -50%);
+  transition: left 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .analysis__summary {
-  line-height: 1.45;
+  line-height: 1.5;
 }
 .analysis__factors {
   margin: 0;
   padding-left: 18px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 .analysis__market {
   font-size: 12px;
   opacity: 0.65;
 }
+.analysis__meta {
+  font-size: 12px;
+  opacity: 0.55;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.analysis__retry {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: #4d7cfe;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.analysis__retry:active {
+  background: rgba(77, 124, 254, 0.12);
+}
 .analysis__hint {
   opacity: 0.75;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 .analysis--locked {
   color: #8a6100;
   line-height: 1.5;
 }
+.analysis__loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+.analysis__loading-sub {
+  width: 100%;
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.6;
+}
+.analysis__spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(77, 124, 254, 0.25);
+  border-top-color: #4d7cfe;
+  animation: analysis-spin 0.8s linear infinite;
+}
+@keyframes analysis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgba(128,128,128,0.1) 25%, rgba(128,128,128,0.18) 50%, rgba(128,128,128,0.1) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-wave 1.4s ease infinite;
+}
+@keyframes skeleton-wave {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
 .price-chart {
+  position: relative;
   margin-top: 2px;
+}
+.price-chart__dot {
+  animation: dot-pulse 2s ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@keyframes dot-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+.price-chart__price {
+  position: absolute;
+  top: -4px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: #4d7cfe;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 1px 6px;
+  border-radius: 8px;
+  pointer-events: none;
 }
 .price-chart__scale {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
   opacity: 0.6;
+}
+.price-chart__dates {
+  opacity: 0.8;
 }
 .price-chart__legend {
   font-size: 11px;

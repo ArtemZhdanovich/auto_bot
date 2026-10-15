@@ -39,6 +39,7 @@ class AnalysisOut(BaseModel):
     comps: dict | None = None
     history: list[dict] = []
     source: str = "ai"
+    created_at: str | None = None  # ISO — «разбор от …» в UI
 
 
 async def _get_listing(session: AsyncSession, listing_id: int) -> Listing:
