@@ -12,12 +12,17 @@ import { SkeletonCard } from "../ui/Skeleton";
 import { ErrorState } from "../ui/States";
 import type { Listing } from "../api/types";
 import { toUsd } from "../lib/fx";
+import { VERDICT_LABEL, deltaPct, type AnalysisData } from "../lib/analysis";
+import { PriceChart } from "../ui/PriceChart";
 
 export function ListingScreen() {
   const { id } = useParams<{ id: string }>();
   const [listing, setListing] = useState<Listing | null>(null);
   const [favorited, setFavorited] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [quotaHit, setQuotaHit] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -28,7 +33,32 @@ export function ListingScreen() {
     api<{ favorited: boolean }>(`/favorites/${id}`)
       .then((r) => setFavorited(r.favorited))
       .catch(() => undefined); // вне Telegram — без избранного
+    // Кэш последнего разбора (без LLM): если есть — сразу график
+    api<AnalysisData | null>(`/listings/${id}/analysis`)
+      .then((a) => a && setAnalysis(a))
+      .catch(() => undefined);
   }, [id]);
+
+  const runAnalysis = async () => {
+    if (analyzing) return;
+    setAnalyzing(true);
+    haptic("medium");
+    try {
+      const a = await api<AnalysisData>(`/listings/${id}/analysis`, {
+        method: "POST",
+      });
+      setAnalysis(a);
+      haptic("heavy");
+    } catch (e) {
+      if ((e as { status?: number }).status === 403) {
+        setQuotaHit(true);
+      } else {
+        toast.show("Анализ недоступен, попробуйте позже", { error: true });
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const toggleFavorite = async () => {
     haptic("medium");
@@ -99,6 +129,84 @@ export function ListingScreen() {
           </Cell>
         </Section>
       )}
+
+      {/* AI-анализ стоимости (монетизация: 1/нед бесплатно, далее Pro) */}
+      <Section header="🤖 AI-анализ цены">
+        {analysis ? (
+          <div className="analysis">
+            <div
+              className={`analysis__verdict analysis__verdict--${analysis.verdict}`}
+            >
+              {VERDICT_LABEL[analysis.verdict].emoji}{" "}
+              {VERDICT_LABEL[analysis.verdict].text}
+            </div>
+            {analysis.fair_min != null && analysis.fair_max != null && (
+              <div className="analysis__range">
+                Справедливый диапазон:{" "}
+                <b>
+                  {Math.round(analysis.fair_min).toLocaleString("ru-RU")}–
+                  {Math.round(analysis.fair_max).toLocaleString("ru-RU")}{" "}
+                  {analysis.currency}
+                </b>
+                {deltaPct(analysis) != null && (
+                  <span className="analysis__delta">
+                    {" "}
+                    ({deltaPct(analysis)! > 0 ? "+" : ""}
+                    {deltaPct(analysis)}% от середины)
+                  </span>
+                )}
+              </div>
+            )}
+            <PriceChart history={analysis.history} comps={analysis.comps} />
+            {analysis.summary && <div className="analysis__summary">💬 {analysis.summary}</div>}
+            {analysis.factors.length > 0 && (
+              <ul className="analysis__factors">
+                {analysis.factors.map((f, i) => (
+                  <li key={i}>{f}</li>
+                ))}
+              </ul>
+            )}
+            {analysis.comps && (
+              <div className="analysis__market">
+                Рынок: {analysis.comps.count} сопоставимых · медиана{" "}
+                {analysis.comps.median.toLocaleString("ru-RU")} {analysis.currency}
+              </div>
+            )}
+          </div>
+        ) : quotaHit ? (
+          <div className="analysis analysis--locked">
+            🔒 Бесплатный разбор этой машины на этой неделе уже использован.
+            <Button
+              size="s"
+              mode="filled"
+              stretched
+              style={{ marginTop: 10 }}
+              onClick={() => {
+                haptic();
+                navigate("/profile");
+              }}
+            >
+              ⚡ Безлимит в Pro
+            </Button>
+          </div>
+        ) : (
+          <div className="analysis">
+            <div className="analysis__hint">
+              Нейросеть сравнит цену с рынком: сопоставимые объявления, история
+              цены, вердикт и факторы.
+            </div>
+            <Button
+              size="s"
+              mode="filled"
+              stretched
+              loading={analyzing}
+              onClick={() => void runAnalysis()}
+            >
+              🤖 Анализировать (1 бесплатно в неделю)
+            </Button>
+          </div>
+        )}
+      </Section>
 
       {/* История цен (PLAN.md, фаза 4): точки listing_price_history, новые сверху */}
       {listing.price_history && listing.price_history.length > 1 && (

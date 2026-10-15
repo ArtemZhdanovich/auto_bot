@@ -136,6 +136,9 @@ class FakeSession:
             def scalar_one_or_none(self) -> Any:
                 return rows[0] if rows else None
 
+            def first(self) -> Any:
+                return rows[0] if rows else None
+
             def scalar_one(self) -> Any:
                 # для count-запросов: число строк-результатов
                 return len(rows)

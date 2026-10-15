@@ -33,6 +33,8 @@ HELP_TEXT = (
     "/resume — включить уведомления\n"
     "/subscribe — подписка Pro/Business (Stars)\n\n"
     "🔗 Скиньте ссылку с encar/kcar — покажу карточку с расчётом доставки.\n"
+    "🤖 На карточке — «Анализ цены»: нейросеть сравнит с рынком\n"
+    "       (1 разбор машины в неделю бесплатно, безлимит в Pro).\n"
     "Просто напишите текстом, какую машину ищете — я помогу с подбором."
 )
 
@@ -347,15 +349,18 @@ def _format_calc_out(out: dict) -> str:
 
 
 def _car_card_kb(listing: dict) -> InlineKeyboardMarkup:
-    """Кнопки фото-карточки: объявление, доставка, приложение."""
+    """Кнопки фото-карточки: объявление, AI-анализ, доставка, приложение."""
     rows: list[list[InlineKeyboardButton]] = []
     if listing.get("url"):
         rows.append([InlineKeyboardButton(text="🔗 Открыть объявление", url=listing["url"])])
     rows.append(
         [
             InlineKeyboardButton(
+                text="🤖 Анализ цены", callback_data=f"analyze:{listing['id']}"
+            ),
+            InlineKeyboardButton(
                 text="🚚 Доставка и растаможка", callback_data=f"calc:{listing['id']}"
-            )
+            ),
         ]
     )
     mini = _miniapp_button("📱 Смотреть в приложении")
@@ -786,6 +791,78 @@ def _miniapp_kb(path: str = "") -> InlineKeyboardMarkup | None:
     if mini:
         rows.append([mini])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+
+_VERDICT_RU = {
+    "deal": ("🟢 Выгодная цена", "ниже рынка"),
+    "fair": ("🟡 Справедливая цена", "в рынке"),
+    "overpriced": ("🔴 Дорого", "выше рынка"),
+}
+
+
+def _format_analysis(a: dict, listing: dict | None = None) -> str:
+    """AI-разбор цены для чата: вердикт, диапазон, факторы, квота."""
+    verdict, hint = _VERDICT_RU.get(a.get("verdict", "fair"), _VERDICT_RU["fair"])
+    title = ""
+    if listing:
+        title = f"{listing.get('make', '')} {listing.get('model', '')}".strip() + "\n"
+    lines = [f"🤖 <b>AI-анализ стоимости</b>\n{title}"]
+    fair_min, fair_max = a.get("fair_min"), a.get("fair_max")
+    if fair_min and fair_max:
+        lines.append(
+            f"Справедливый диапазон: <b>{fair_min:,.0f}–{fair_max:,.0f} {a.get('currency', '')}</b>".replace(",", " ")
+        )
+    price = a.get("price")
+    if price and fair_min and fair_max:
+        mid = (fair_min + fair_max) / 2
+        delta = (price - mid) / mid * 100
+        sign = "+" if delta >= 0 else "−"
+        lines.append(f"Цена {hint}: {sign}{abs(delta):.0f}% от середины рынка\n")
+    lines.append(f"Вердикт: {verdict}")
+    if a.get("summary"):
+        lines.append(f"\n💬 {a['summary']}")
+    factors = a.get("factors") or []
+    if factors:
+        lines.append("\n" + "\n".join(f"• {f}" for f in factors[:4]))
+    if a.get("comps"):
+        c = a["comps"]
+        lines.append(
+            f"\n<i>Рынок: {c.get('count', 0)} сопоставимых, медиана {c.get('median', '—')}</i>"
+        )
+    lines.append("\n<i>🎁 1 разбор машины в неделю — бесплатно.\nБезлимит и история — в Pro: /subscribe</i>")
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data.startswith("analyze:"))
+async def analyze_from_card(cb) -> None:
+    """🤖 Анализ цены с фото-карточки: LLM-разбор + график в приложении."""
+    await cb.answer("Запускаю AI-разбор…")
+    try:
+        listing_id = int((cb.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        return
+    user_id = cb.from_user.id if cb.from_user else 0
+    notice = await cb.message.answer("🤖 Анализирую стоимость — это займёт до минуты…")
+    out = await backend.analyze_price(listing_id, user_id)
+    if out is None:
+        await notice.edit_text(
+            "😔 AI-анализ недоступен — уже разбираюсь. Попробуйте чуть позже."
+        )
+        return
+    if out.get("quota_exceeded"):
+        await notice.edit_text(
+            "🔒 Бесплатный разбор этой машины на этой неделе уже использован.\n\n"
+            "🎁 1 разбор машины в неделю — на тарифе Free.\n"
+            "⚡ Безлимитные разборы, история цен и приоритет — в Pro.\n\n"
+            "Оформить: /subscribe — или откройте график в приложении:",
+            reply_markup=_miniapp_kb(f"/listing/{listing_id}"),
+        )
+        return
+    listing = await backend.get_listing(listing_id)
+    await notice.edit_text(
+        _format_analysis(out, listing),
+        reply_markup=_miniapp_kb(f"/listing/{listing_id}"),
+    )
 
 
 @router.callback_query(F.data.startswith("calc:"))

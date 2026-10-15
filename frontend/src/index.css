@@ -789,3 +789,69 @@ main {
   color: #e5484d;
   font-weight: 600;
 }
+
+/* === AI-анализ цены (Listing) === */
+.analysis {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+.analysis__verdict {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-radius: 12px;
+  width: fit-content;
+}
+.analysis__verdict--deal {
+  color: #1b7a4b;
+  background: rgba(48, 164, 108, 0.12);
+}
+.analysis__verdict--fair {
+  color: #8a6100;
+  background: rgba(240, 178, 12, 0.15);
+}
+.analysis__verdict--overpriced {
+  color: #c62a2f;
+  background: rgba(229, 72, 77, 0.12);
+}
+.analysis__range {
+  color: var(--tg-theme-text-color, #222);
+}
+.analysis__delta {
+  opacity: 0.7;
+}
+.analysis__summary {
+  line-height: 1.45;
+}
+.analysis__factors {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+.analysis__market {
+  font-size: 12px;
+  opacity: 0.65;
+}
+.analysis__hint {
+  opacity: 0.75;
+  line-height: 1.45;
+}
+.analysis--locked {
+  color: #8a6100;
+  line-height: 1.5;
+}
+.price-chart {
+  margin-top: 2px;
+}
+.price-chart__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.price-chart__legend {
+  font-size: 11px;
+  opacity: 0.55;
+}

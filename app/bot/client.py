@@ -139,6 +139,28 @@ class BackendClient:
 
         return await self._get(f"/api/listings/by-url?url={quote_plus(url)}")
 
+    async def analyze_price(self, listing_id: int, user_id: int) -> dict | None:
+        """POST /api/bot/listings/{id}/analysis — AI-разбор цены (LLM, до 120 с).
+
+        Отдельная реализация: 403 (квота free) — не ошибка, а сигнал апселла.
+        """
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=self.DIALOG_TIMEOUT) as client:
+                resp = await client.post(
+                    f"{self._base_url}/api/bot/listings/{listing_id}/analysis",
+                    json={"user_id": user_id},
+                    headers={"X-Internal-Token": self._internal_token},
+                )
+                if resp.status_code == 403:
+                    return {"quota_exceeded": True}
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError as exc:
+            logger.error("backend_analyze_failed: %s", exc)
+            return None
+
     async def search_listings(
         self, params: dict | None = None, limit: int = 5
     ) -> list[dict] | None:

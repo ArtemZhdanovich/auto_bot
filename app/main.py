@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.api import (
     admin,
     ai_search,
+    analysis,
     auth,
     calc,
     dialog,
@@ -113,6 +114,8 @@ app.include_router(me.router)
 app.include_router(metrics.router)  # GET /metrics (этап 8) — общий роутер с admin
 app.include_router(filters.router)
 app.include_router(listings.router)
+app.include_router(analysis.router)
+app.include_router(analysis.bot_router)
 app.include_router(calc.router)
 app.include_router(favorites.router)
 app.include_router(payments.router)

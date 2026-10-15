@@ -286,6 +286,34 @@ class AnalyticsEvent(Base):
     )
 
 
+class PriceAnalysis(Base):
+    """AI-разбор цены объявления (монетизация: 1/нед бесплатно, далее подписка).
+
+    Кэш общий на листинг (LLM дорогой — не дублируем на каждого юзера),
+    квота считается по (user_id, listing_id, окно 7 дней).
+    """
+
+    __tablename__ = "price_analyses"
+    __table_args__ = (
+        Index("idx_price_analyses_listing_created", "listing_id", "created_at"),
+        Index("idx_price_analyses_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    listing_id: Mapped[int] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)  # deal/fair/overpriced
+    fair_min: Mapped[float | None] = mapped_column(Numeric)
+    fair_max: Mapped[float | None] = mapped_column(Numeric)
+    summary: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class PartnerAccount(Base):
     """Партнёр (ИП/перекуп/салон), покупающий лиды (P2-10, CPL-монетизация).
 

@@ -954,3 +954,12 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 - **`@dp.errors`**: лог + «😔 Что-то пошло не так…» вместо тишины; polling не падает
 - Тесты +16: throttle (8: лимит, окно, независимость юзеров, миддлварь), by-url (4), fallback-ссылки (4); test-найденный баг: первый `should_warn` блокировался дефолтом 0.0
 - Живая проверка: `by-url?url=https://encar.com/e2e-1` → 200 BMW 520i; 404 для отсутствующих
+
+## 38. AI-анализ стоимости: LLM-разбор + график, монетизация 1/нед (+33 теста → 553)
+
+- **Сервис** `app/services/price_analysis.py`: comps (та же make+model, год ±2, до 30 шт, медиана/min/max), история цен, промпт на строгий JSON; `parse_llm_json` терпит ```-заборы; LLM упал/мусор → статфолбэк (вердикт по медиане ±7%, диапазон 0.93–1.07 median). Кэш разбора общий на листинг (LLM дорогой)
+- **Модель + миграция 0015**: `price_analyses` (listing_id, user_id, verdict, fair_min/max, summary, payload JSONB, created_at; 2 индекса). Монетизация: free = 1 разбор (user, listing) в 7 дней, pro/business = безлимит (`quota_left`, `QuotaExceeded` → 403 `quota_exceeded`)
+- **API** `app/api/analysis.py`: `POST /api/listings/{id}/analysis` (JWT, LLM+сохранение), `GET` (кэш, без LLM), `POST /api/bot/listings/{id}/analysis` (X-Internal-Token, body user_id) — оба роутера в main.py
+- **Бот**: кнопка «🤖 Анализ цены» на фото-карточке (`analyze:{id}`, рядом с 🚚), хендлер: «Анализирую…» → вердикт (🟢/🟡/🔴), диапазон, отклонение %, факторы, медиана рынка + кнопка миниапп `/listing/{id}` (график). 403 → апселл Pro + миниапп; backend down → вежливое. `client.analyze_price` — своя реализация (120 с, 403 ≠ ошибка). `/help` дополнен
+- **WebApp/сайт**: секция «🤖 AI-анализ цены» в Listing.tsx: GET кэша при открытии → сразу график; иначе кнопка «Анализировать (1 бесплатно в неделю)» → POST; 403 → замок + «⚡ Безлимит в Pro» → /profile. `lib/analysis.ts` (типы, `deltaPct`, `buildChartData` — чистые), `ui/PriceChart.tsx` — SVG-график: линия истории, точка текущей цены, зелёная зона рыночного диапазона (без chart-библиотек). CSS-блок `.analysis*`, `.price-chart*`
+- **Тесты**: `tests/test_price_analysis.py` (10: парсинг JSON, пороги вердикта, квоты, LLM/статфолбэк), `tests/test_analysis_api.py` (6: POST 200/403/404, pro безлимит, GET кэш/None; FakeSession.get + `.first()` в conftest), `tests/test_bot_analysis.py` (7: формат, кнопка карточки, хендлер ок/квота/down/мусор), `frontend/src/lib/analysis.test.ts` (9: deltaPct, buildChartData, VERDICT_LABEL). **Итог: 543 pytest, 18 vitest; ruff чисто; mypy не хуже базы; фронт собирается**
