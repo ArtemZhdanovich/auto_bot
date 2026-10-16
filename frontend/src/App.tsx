@@ -18,6 +18,7 @@ import { FavoritesScreen } from "./screens/Favorites";
 import { ProfileScreen } from "./screens/Profile";
 import { OnboardingScreen } from "./screens/Onboarding";
 import { ToastProvider } from "./ui/Toast";
+import { LoginPromptProvider } from "./ui/LoginPrompt";
 import { PartnerApp } from "./partner/PartnerApp";
 import { AdminApp } from "./admin/AdminApp";
 import type { User as UserT } from "./api/types";
@@ -221,6 +222,7 @@ function MiniApp() {
               </div>
             )}
             <div className="app-content">
+              <LoginPromptProvider>
               <Routes>
                 <Route path="/" element={<FeedScreen />} />
                 <Route path="/listing/:id" element={<ListingScreen />} />
@@ -246,6 +248,7 @@ function MiniApp() {
                 <Route path="/profile" element={<ProfileScreen />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </LoginPromptProvider>
             </div>
             <NavBar desktop={false} />
           </BrowserRouter>

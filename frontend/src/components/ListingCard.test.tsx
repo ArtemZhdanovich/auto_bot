@@ -1,14 +1,18 @@
 /** Компонентные тесты карточки объявления (jsdom + testing-library). */
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ListingCard } from "./ListingCard";
+import { isGuest } from "../api/auth";
 import type { Listing } from "../api/types";
 
+const { promptShow } = vi.hoisted(() => ({ promptShow: vi.fn() }));
+
 vi.mock("../api/client", () => ({ api: vi.fn() }));
-vi.mock("../api/auth", () => ({ haptic: vi.fn() }));
+vi.mock("../api/auth", () => ({ haptic: vi.fn(), isGuest: vi.fn(() => false) }));
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ show: vi.fn() }) }));
+vi.mock("../ui/LoginPrompt", () => ({ useLoginPrompt: () => ({ show: promptShow }) }));
 
 const base: Listing = {
   id: 1,
@@ -87,5 +91,33 @@ describe("ListingCard", () => {
         "aria-pressed",
       ),
     ).toBe("true");
+  });
+
+  it("гость: клик по ❤ показывает модалку входа и не дёргает API", async () => {
+    vi.mocked(isGuest).mockReturnValue(true);
+    const { api } = await import("../api/client");
+    renderCard(base);
+    fireEvent.click(document.querySelector(".listing-card__fav") as HTMLButtonElement);
+    expect(promptShow).toHaveBeenCalledWith("Войдите, чтобы сохранять машины в избранное.");
+    expect(api).not.toHaveBeenCalled();
+    vi.mocked(isGuest).mockReturnValue(false);
+  });
+
+  it("не гость: клик по ❤ вызывает API и переключает сердечко", async () => {
+    vi.mocked(isGuest).mockReturnValue(false);
+    const { api } = await import("../api/client");
+    vi.mocked(api).mockResolvedValue({ favorited: true });
+    renderCard(base);
+    promptShow.mockClear();
+    fireEvent.click(document.querySelector(".listing-card__fav") as HTMLButtonElement);
+    await vi.waitFor(() => {
+      expect(
+        (document.querySelector(".listing-card__fav") as HTMLButtonElement).getAttribute(
+          "aria-pressed",
+        ),
+      ).toBe("true");
+    });
+    expect(api).toHaveBeenCalledWith("/listings/1/favorite", { method: "POST" });
+    expect(promptShow).not.toHaveBeenCalled();
   });
 });

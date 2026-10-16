@@ -5,9 +5,10 @@ import { useNavigate } from "react-router-dom";
 import { Heart, ImageOff } from "lucide-react";
 
 import { api } from "../api/client";
-import { haptic } from "../api/auth";
+import { haptic, isGuest } from "../api/auth";
 import { getRegion, priceChain } from "../lib/fx";
 import { useToast } from "../ui/Toast";
+import { useLoginPrompt } from "../ui/LoginPrompt";
 import type { Listing } from "../api/types";
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
 export const ListingCard = memo(function ListingCard({ listing, favorited = false }: Props) {
   const navigate = useNavigate();
   const toast = useToast();
+  const loginPrompt = useLoginPrompt();
   const [fav, setFav] = useState(favorited);
   const [photoFailed, setPhotoFailed] = useState(false);
   const photo = listing.images[0];
@@ -44,6 +46,11 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
     async (e: React.MouseEvent) => {
       e.stopPropagation();
       haptic("medium");
+      // Гостю избранное недоступно: модалка с просьбой войти (ТЗ п. 9.1)
+      if (isGuest()) {
+        loginPrompt.show("Войдите, чтобы сохранять машины в избранное.");
+        return;
+      }
       try {
         const r = await api<{ favorited: boolean }>(`/listings/${listing.id}/favorite`, {
           method: "POST",
@@ -54,7 +61,7 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
         toast.show("Не удалось изменить избранное", { error: true });
       }
     },
-    [listing.id, toast],
+    [listing.id, toast, loginPrompt],
   );
 
   return (

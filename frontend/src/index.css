@@ -293,6 +293,15 @@ main {
   font-weight: 600;
   color: var(--text);
 }
+.state__emoji {
+  font-size: 36px;
+  line-height: 1;
+}
+.state__text {
+  max-width: 320px;
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
 
 /* ============================================================
    Лента: пагинация (бесконечный скролл + кнопка «Показать ещё»)
@@ -324,6 +333,67 @@ main {
 .feed-more--error span {
   font-size: var(--font-sm);
   color: #d64545;
+}
+
+/* ============================================================
+   Модалка «Нужен вход» (гостевой гейт персональных разделов)
+   ============================================================ */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(8, 10, 14, 0.6);
+  backdrop-filter: blur(2px);
+  animation: fadeIn 0.16s ease;
+}
+.modal__card {
+  width: 100%;
+  max-width: 340px;
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--tgui--bg_color, #fff);
+  color: var(--tgui--text_color, #222);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+.modal__emoji {
+  font-size: 34px;
+  margin-bottom: var(--space-2);
+}
+.modal__title {
+  font-size: var(--font-md);
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+.modal__text {
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--tgui--secondary_hint_color, #8a9099);
+  margin-bottom: var(--space-5);
+}
+.modal__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.modal__btn {
+  padding: 12px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--tgui--secondary_hint_color, #d5d9de);
+  background: transparent;
+  color: var(--tgui--text_color, #222);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.modal__btn--primary {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
 /* --- Лента: подбар чипсы + кнопка «Фильтры» --- */

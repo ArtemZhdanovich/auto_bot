@@ -5,12 +5,24 @@ import { useNavigate } from "react-router-dom";
 import { Button, Cell, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
+import { isGuest } from "../api/auth";
+import { useLoginPrompt } from "../ui/LoginPrompt";
 import type { Listing } from "../api/types";
 
 export function FavoritesScreen() {
   const [items, setItems] = useState<Listing[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [guest] = useState(() => isGuest());
+  const loginPrompt = useLoginPrompt();
   const navigate = useNavigate();
+
+  // Гость: раздел персональный — сразу просим войти (модалка + гейт экрана)
+  useEffect(() => {
+    if (guest) {
+      loginPrompt.show("Избранное доступно после входа — так машины сохраняются за вашим аккаунтом.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guest]);
 
   const load = useCallback(() => {
     api<Listing[]>("/favorites")
@@ -19,14 +31,29 @@ export function FavoritesScreen() {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!guest) load();
+  }, [guest, load]);
 
   const unfavorite = async (id: number) => {
     await api(`/listings/${id}/favorite`, { method: "DELETE" });
     setItems((prev) => prev?.filter((x) => x.id !== id) ?? null);
   };
 
+  if (guest) {
+    return (
+      <div className="state">
+        <div className="state__emoji">🔒</div>
+        <div className="state__title">Нужен вход</div>
+        <div className="state__text">
+          Избранное доступно после входа через Telegram или по email — так машины
+          сохраняются за вашим аккаунтом.
+        </div>
+        <Button size="l" onClick={() => navigate("/login")}>
+          Войти
+        </Button>
+      </div>
+    );
+  }
   if (error) {
     return (
       <Placeholder
