@@ -158,9 +158,10 @@ async def _execute_tool(
         price = float(args.get("price_usd") or 0)
         year = int(args.get("year") or 0)
         cc = int(args.get("engine_cc") or 2000)
+        hp = int(args["power_hp"]) if args.get("power_hp") else None
         if price <= 0 or year < 1980:
             return ToolOutcome(text="Нужны цена в $ и год выпуска — уточните, пожалуйста.")
-        breakdown = calc_delivery(price, cc, year)
+        breakdown = calc_delivery(price, cc, year, power_hp=hp)
         return ToolOutcome(text=format_breakdown(breakdown))
 
     if tc.name == "finalize_search":

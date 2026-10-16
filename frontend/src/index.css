@@ -727,6 +727,27 @@ main {
   padding: 0 var(--space-2);
 }
 
+/* Чип-кнопка «Сравнить» под формой: отступ + понятный disabled-стейт */
+.calc-compare-btn {
+  margin-top: 8px;
+}
+.chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Предупреждение о неприменённой льготе утильсбора (>160 л.с.) */
+.calc-warn {
+  margin: 12px var(--space-2) 0;
+  padding: 10px 12px;
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  color: #8a5b00;
+  background: rgba(240, 178, 12, 0.14);
+  border: 1px solid rgba(240, 178, 12, 0.45);
+  border-radius: var(--radius-lg);
+}
+
 /* Правовые основания расчёта (НПА) — отдельная карточка */
 .calc-legal {
   background: var(--bg);
@@ -1125,5 +1146,9 @@ main {
   .guest-banner {
     background: var(--bg-secondary);
     color: var(--text);
+  }
+  .calc-warn {
+    color: #ffd166;
+    background: rgba(240, 178, 12, 0.12);
   }
 }

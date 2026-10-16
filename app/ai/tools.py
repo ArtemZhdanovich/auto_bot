@@ -110,6 +110,7 @@ TOOLS: list[dict[str, Any]] = [
                 "price_usd": {"type": "number", "description": "Цена авто в USD"},
                 "engine_cc": {"type": "integer", "description": "Объём двигателя в см³"},
                 "year": {"type": "integer", "description": "Год выпуска"},
+                "power_hp": {"type": "integer", "description": "Мощность в л.с. (влияет на утильсбор: льгота только до 160 л.с.)"},
             },
             "required": ["price_usd", "year"],
         },

@@ -199,6 +199,6 @@ def test_calc_delivery_tool_in_tools_schema():
 
     tool = next(t for t in TOOLS if t["name"] == "calc_delivery")
     props = tool["parameters"]["properties"]
-    assert set(props) == {"price_usd", "engine_cc", "year"}
+    assert set(props) == {"price_usd", "engine_cc", "year", "power_hp"}
     assert tool["parameters"]["required"] == ["price_usd", "year"]
 

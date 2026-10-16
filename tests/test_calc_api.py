@@ -31,9 +31,30 @@ async def test_delivery_200_full_breakdown(http):
     # пошлина 3–5 лет, 1800–2300 см³: 2.7 €/см³ × 2000 × 1.08 = 5832 $
     duty = next(c for c in body["components"] if "пошлина" in c["label"].lower())
     assert duty["usd"] == 5832
+    # утильсбор льготный (мощность не указана → ≤160 л.с. в предположении)
+    assert body["util_category"] == "льготный"
+    assert body["util_note"]
+    util = next(c for c in body["components"] if "утиль" in c["label"].lower())
+    assert util["rub"] == 5_200
     # итог дороже авто и согласован ₽/$
     assert body["total_usd"] > 18000
     assert body["total_rub"] == pytest.approx(body["total_usd"] * 92.0, rel=0.01)
+
+
+@pytest.mark.asyncio
+async def test_delivery_power_over_160_full_util(http):
+    """Мощность >160 л.с. → льгота утильсбора не применяется (ПП № 1291)."""
+    resp = await http.post(
+        "/api/calc/delivery",
+        json={"price_usd": 30000, "engine_cc": 2500, "year": 2024, "power_hp": 235},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["power_hp"] == 235
+    assert body["util_category"] == "полный"
+    assert body["util_note"] == ""
+    util = next(c for c in body["components"] if "утиль" in c["label"].lower())
+    assert util["rub"] == 20_000 * 120.12  # коэф. 220–250 л.с. (2,0–3,0 л), до 3 лет
 
 
 @pytest.mark.asyncio
@@ -114,4 +135,13 @@ async def test_delivery_response_includes_legal_refs(http):
     refs = resp.json()["legal_refs"]
     assert len(refs) >= 3
     joined = " ".join(r["ref"] for r in refs)
-    assert "ЕТТ ЕАЭС" in joined and "1291" in joined and "342" in joined
+    assert "ЕТТ ЕАЭС" in joined and "1291" in joined and "1637" in joined
+
+
+@pytest.mark.asyncio
+async def test_delivery_power_validation_422(http):
+    resp = await http.post(
+        "/api/calc/delivery",
+        json={"price_usd": 18000, "year": 2022, "power_hp": 5},
+    )
+    assert resp.status_code == 422

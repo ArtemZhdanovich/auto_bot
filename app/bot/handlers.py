@@ -344,7 +344,12 @@ def _format_calc_out(out: dict) -> str:
     lines.append(
         f"\n<b>Итого: ~{out['total_rub']:,.0f} ₽ (~{out['total_usd']:,.0f} $)</b>".replace(",", " ")
     )
-    lines.append("\n<i>Оценка для физлица (личное пользование). Точную смету даст менеджер.</i>")
+    if out.get("util_note"):
+        lines.append(f"\n⚠️ {out['util_note']}")
+    lines.append(
+        "\n<i>Оценка для физлица (личное пользование). Льготный утильсбор — "
+        "до 160 л.с. и 3000 см³. Точную смету даст менеджер.</i>"
+    )
     return "\n".join(lines)
 
 

@@ -90,3 +90,20 @@ describe("правовые основания расчёта в UI", () => {
     expect(rule(".calc-legal__ref")).toContain("color: var(--text-secondary)");
   });
 });
+
+describe("предупреждение и disabled-состояния", () => {
+  it("предупреждение о льготе утильсбора — заметная плашка со скруглением", () => {
+    const body = rule(".calc-warn");
+    expect(body).toContain("border-radius: var(--radius-lg)");
+    expect(body).toContain("border: 1px solid rgba(240, 178, 12");
+  });
+
+  it("тёмная тема: предупреждение читаемо (перекрашено, не тёмно-жёлтое на тёмном)", () => {
+    const dark = css.slice(css.indexOf("prefers-color-scheme: dark"));
+    expect(dark).toContain(".calc-warn");
+  });
+
+  it("у чипов есть disabled-стейт (без инлайн-opacity в компонентах)", () => {
+    expect(rule(".chip:disabled")).toContain("cursor: not-allowed");
+  });
+});

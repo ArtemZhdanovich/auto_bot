@@ -18,18 +18,17 @@ interface CalcComponent {
 }
 
 /** Кнопка перехода к сравнению (bot → webapp идея: продолжай в удобном UI). */
-function CompareBtn({ price, cc, year }: { price: string; cc: string; year: string }) {
+function CompareBtn({ price, cc, hp, year }: { price: string; cc: string; hp: string; year: string }) {
   const navigate = useNavigate();
   const ready = Boolean(price && year);
   return (
     <button
       type="button"
-      className="chip chip--ghost"
+      className="chip chip--ghost calc-compare-btn"
       disabled={!ready}
-      style={{ opacity: ready ? 1 : 0.5, marginTop: 8 }}
       onClick={() => {
         haptic("light");
-        navigate("/compare", { state: { seed: { price, cc, year } } });
+        navigate("/compare", { state: { seed: { price, cc, hp, year } } });
       }}
     >
       ⚖️ Сравнить с другим вариантом
@@ -48,6 +47,9 @@ interface CalcOut {
   year: number;
   age_years: number;
   age_group: string;
+  power_hp?: number | null;
+  util_category?: string;
+  util_note?: string;
   components: CalcComponent[];
   legal_refs?: LegalRef[];
   total_rub: number;
@@ -58,14 +60,16 @@ export function CalcScreen() {
   const [params] = useSearchParams();
   const [price, setPrice] = useState(params.get("price") ?? "");
   const [cc, setCc] = useState(params.get("cc") ?? "2000");
+  const [hp, setHp] = useState(params.get("hp") ?? "");
   const [year, setYear] = useState(params.get("year") ?? String(new Date().getFullYear() - 3));
   const [result, setResult] = useState<CalcOut | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const calc = useCallback(async (p: string, c: string, y: string) => {
+  const calc = useCallback(async (p: string, c: string, h: string, y: string) => {
     const priceNum = parseFloat(p.replace(/\s/g, ""));
     const ccNum = parseInt(c, 10);
+    const hpNum = parseInt(h, 10);
     const yearNum = parseInt(y, 10);
     if (!priceNum || priceNum <= 0 || !yearNum || yearNum < 1980 || yearNum > new Date().getFullYear() + 1) {
       setError("Проверьте цену и год (1980 – след. год)");
@@ -80,6 +84,7 @@ export function CalcScreen() {
         body: JSON.stringify({
           price_usd: priceNum,
           engine_cc: ccNum || 2000,
+          power_hp: hpNum || undefined,
           year: yearNum,
         }),
       });
@@ -94,7 +99,14 @@ export function CalcScreen() {
 
   // Префилл из deep-link (кнопка «Рассчитать доставку» в карточке)
   useEffect(() => {
-    if (params.get("price")) void calc(params.get("price") ?? "", params.get("cc") ?? "2000", params.get("year") ?? "");
+    if (params.get("price")) {
+      void calc(
+        params.get("price") ?? "",
+        params.get("cc") ?? "2000",
+        params.get("hp") ?? "",
+        params.get("year") ?? "",
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -148,6 +160,15 @@ export function CalcScreen() {
           ))}
         </div>
         <label className="calc-field">
+          <span>Мощность, л.с. (опционально)</span>
+          <input
+            inputMode="numeric"
+            value={hp}
+            onChange={(e) => setHp(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            placeholder="150"
+          />
+        </label>
+        <label className="calc-field">
           <span>Год выпуска</span>
           <input
             inputMode="numeric"
@@ -156,10 +177,10 @@ export function CalcScreen() {
             placeholder="2022"
           />
         </label>
-        <Button size="l" stretched loading={loading} onClick={() => void calc(price, cc, year)}>
+        <Button size="l" stretched loading={loading} onClick={() => void calc(price, cc, hp, year)}>
           Рассчитать
         </Button>
-        <CompareBtn price={price} cc={cc} year={year} />
+        <CompareBtn price={price} cc={cc} hp={hp} year={year} />
       </div>
 
       {error && (
@@ -181,6 +202,7 @@ export function CalcScreen() {
             <div className="calc-total__value">{fmt(Math.round(result.total_rub))} ₽</div>
             <div className="calc-total__sub">≈ {fmt(Math.round(result.total_usd))} $</div>
             <div className="calc-total__badge">
+              {result.power_hp ? `${result.power_hp} л.с. · ` : ""}
               {result.year} г. · {result.engine_cc} см³ · {result.age_group}
             </div>
           </div>
@@ -197,10 +219,13 @@ export function CalcScreen() {
             ))}
           </div>
 
+          {result.util_note && <div className="calc-warn">⚠️ {result.util_note}</div>}
+
           <div className="calc-note">
             Оценка для физлица (личное пользование, не более 1 авто в год), курс
-            фиксированный. Логистика, брокер и СБКТС — средние по рынку. Точную
-            смету даст менеджер.
+            фиксированный. Льготный утильсбор действует при мощности до 160 л.с.
+            и объёме до 3000 см³ (ставки сверены 16.10.2026). Точную смету даст
+            менеджер.
           </div>
 
           {result.legal_refs && result.legal_refs.length > 0 && (

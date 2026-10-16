@@ -172,13 +172,17 @@ class BackendClient:
         return (data or {}).get("items")
 
     async def calc_delivery(
-        self, price_usd: float, engine_cc: int, year: int
+        self,
+        price_usd: float,
+        engine_cc: int,
+        year: int,
+        power_hp: int | None = None,
     ) -> dict | None:
         """POST /api/calc/delivery — расчёт «под ключ» Корея → РФ."""
-        return await self._post(
-            "/api/calc/delivery",
-            {"price_usd": price_usd, "engine_cc": engine_cc, "year": year},
-        )
+        payload: dict = {"price_usd": price_usd, "engine_cc": engine_cc, "year": year}
+        if power_hp:
+            payload["power_hp"] = power_hp
+        return await self._post("/api/calc/delivery", payload)
 
     async def compare_delivery(self, items: list[dict]) -> dict | None:
         """POST /api/calc/compare — сравнение вариантов «под ключ»."""

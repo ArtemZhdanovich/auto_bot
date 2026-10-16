@@ -12,6 +12,7 @@ class DeliveryIn(BaseModel):
     price_usd: float = Field(gt=0, le=1_000_000)
     engine_cc: int = Field(default=2000, ge=50, le=10_000)
     year: int = Field(ge=1980, le=2100)
+    power_hp: int | None = Field(default=None, ge=10, le=2000)
 
 
 class DeliveryOut(BaseModel):
@@ -20,6 +21,9 @@ class DeliveryOut(BaseModel):
     year: int
     age_years: int
     age_group: str
+    power_hp: int | None = None
+    util_category: str = "льготный"
+    util_note: str = ""
     components: list[dict]
     legal_refs: list[dict] = []
     total_rub: float
@@ -31,7 +35,7 @@ class DeliveryOut(BaseModel):
 async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
     """Расчёт «авто + море + брокер + СБКТС/ЭПТС + пошлина + сборы + утиль»."""
     b: DeliveryBreakdown = calc_delivery(
-        payload.price_usd, payload.engine_cc, payload.year
+        payload.price_usd, payload.engine_cc, payload.year, power_hp=payload.power_hp
     )
     return DeliveryOut(
         price_usd=b.price_usd,
@@ -39,6 +43,9 @@ async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
         year=b.year,
         age_years=b.age_years,
         age_group=b.age_group,
+        power_hp=b.power_hp,
+        util_category=b.util_category,
+        util_note=b.util_note,
         components=b.components,
         legal_refs=b.legal_refs,
         total_rub=b.total_rub,
@@ -59,7 +66,10 @@ async def calc_compare(payload: CompareIn) -> dict:
     for it in payload.items:
         try:
             b = calc_delivery(
-                float(it["price_usd"]), int(it.get("engine_cc", 2000)), int(it["year"])
+                float(it["price_usd"]),
+                int(it.get("engine_cc", 2000)),
+                int(it["year"]),
+                power_hp=int(it["power_hp"]) if it.get("power_hp") else None,
             )
         except (KeyError, TypeError, ValueError):
             continue
