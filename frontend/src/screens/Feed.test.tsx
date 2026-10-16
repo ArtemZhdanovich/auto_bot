@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FeedScreen } from "./Feed";
+import { FeedScreen, resetFeedCache } from "./Feed";
 import { api } from "../api/client";
 import type { Listing } from "../api/types";
 
@@ -54,6 +54,7 @@ const page = (offset: number, total: number, size: number) => ({
 const TOTAL = 45;
 
 beforeEach(() => {
+  resetFeedCache(); // кэш ленты не должен перетекать между тестами
   apiMock.mockReset();
   apiMock.mockImplementation(async (path: string) => {
     if (path.startsWith("/filters")) return [];
@@ -175,5 +176,17 @@ describe("Feed pagination", () => {
     });
     // счётчик отражает выбранную сортировку
     expect(screen.getByText(/дешёвые сверху/)).toBeTruthy();
+  });
+
+  it("возврат по «Назад» восстанавливает ленту без повторного запроса", async () => {
+    const { unmount } = renderFeed();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+    unmount(); // лента сохранена в кэш
+    renderFeed(); // POP-навигация → гидратация из кэша
+    expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20);
+    expect(screen.getByText("20 из 45")).toBeTruthy();
+    // повторного запроса ленты не было (1 вызов — от первого рендера)
+    const listingCalls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
+    expect(listingCalls.length).toBe(1);
   });
 });

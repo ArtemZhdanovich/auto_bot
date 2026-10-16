@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { api } from "../api/client";
+import { useNavigationType } from "react-router-dom";
 import { ListingCard } from "../components/ListingCard";
 import { SkeletonList } from "../ui/Skeleton";
 import { EmptyState, ErrorState } from "../ui/States";
@@ -101,23 +102,50 @@ const activeFields = (q: FeedQuery): number =>
 /** $ → воны (цены в БД хранятся в валюте источника — encar/kcar, KRW). */
 const usdToKrw = (usd: string): string => String(Math.round(Number(usd) * KRW_PER_USD));
 
+/**
+ * Кэш ленты: возврат из карточки по «Назад» восстанавливает фильтры,
+ * сортировку, список и позицию скролла (стандарт e-commerce каталога).
+ */
+interface FeedCache {
+  query: FeedQuery;
+  sort: SortKey;
+  items: Listing[];
+  total: number;
+  offset: number;
+  scrollY: number;
+}
+let feedCache: FeedCache | null = null;
+
+/** Сброс кэша (для тестов и принудительного обновления). */
+export function resetFeedCache(): void {
+  feedCache = null;
+}
+
 export function FeedScreen() {
-  const [items, setItems] = useState<Listing[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const navType = useNavigationType(); // POP = назад/вперёд по истории
+  const restore = useRef(navType === "POP" ? feedCache : null);
+  const [items, setItems] = useState<Listing[]>(() => restore.current?.items ?? []);
+  const [total, setTotal] = useState(() => restore.current?.total ?? 0);
+  const [loading, setLoading] = useState(() => !restore.current);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chips, setChips] = useState<Chip[]>([]);
-  const [query, setQuery] = useState<FeedQuery>({});
-  const [sort, setSort] = useState<SortKey>("new");
+  const [query, setQuery] = useState<FeedQuery>(() => restore.current?.query ?? {});
+  const [sort, setSort] = useState<SortKey>(() => restore.current?.sort ?? "new");
   const [panelOpen, setPanelOpen] = useState(false);
   const [draft, setDraft] = useState<FeedQuery>({});
-  const offsetRef = useRef(0);
+  const [showTop, setShowTop] = useState(false);
+  const offsetRef = useRef(restore.current?.offset ?? 0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const queryRef = useRef(query);
   queryRef.current = query;
   const sortRef = useRef(sort);
   sortRef.current = sort;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const totalRef = useRef(total);
+  totalRef.current = total;
+  const scrollYRef = useRef(restore.current?.scrollY ?? 0);
 
   // Динамические чипсы: пресеты + сохранённые фильтры (ТЗ §2.2)
   useEffect(() => {
@@ -157,8 +185,39 @@ export function FeedScreen() {
   }, [sort]);
 
   useEffect(() => {
+    if (restore.current) return; // возврат по «Назад» — лента уже восстановлена
     void load(query, true);
   }, [query, load]);
+
+  // Возврат из карточки: восстановить позицию скролла после отрисовки карточек
+  useEffect(() => {
+    if (!restore.current) return;
+    const y = restore.current.scrollY;
+    restore.current = null; // дальше — обычная логика
+    const t = window.setTimeout(() => window.scrollTo(0, y), 50);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  // Скролл: позиция для кэша + кнопка «Наверх» после пары экранов
+  useEffect(() => {
+    const onScroll = () => {
+      scrollYRef.current = window.scrollY;
+      setShowTop(window.scrollY > 1600);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      // Сохраняем ленту на выходе — «Назад» из карточки вернёт как было
+      feedCache = {
+        query: queryRef.current,
+        sort: sortRef.current,
+        items: itemsRef.current,
+        total: totalRef.current,
+        offset: offsetRef.current,
+        scrollY: scrollYRef.current,
+      };
+    };
+  }, []);
 
   // Бесконечный скролл (ТЗ §2.2) вместо кнопки «Ещё»
   useEffect(() => {
@@ -396,6 +455,17 @@ export function FeedScreen() {
         <div className="state" style={{ padding: 16 }}>
           Показаны все найденные варианты
         </div>
+      )}
+
+      {/* Кнопка «Наверх» — после пары экранов прокрутки */}
+      {showTop && (
+        <button
+          className="to-top"
+          aria-label="Наверх"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        >
+          ↑
+        </button>
       )}
     </div>
   );

@@ -92,6 +92,10 @@ export function ListingScreen() {
 
   return (
     <div className="listing-page">
+      {/* Назад — всегда под рукой, поверх галереи (не только внизу страницы) */}
+      <button className="listing-back" aria-label="Назад" onClick={() => navigate(-1)}>
+        ‹
+      </button>
       <div className="listing-page__main">
         {/* Галерея: свайп + счётчик + фуллскрин по клику (ТЗ §2.3) */}
         {listing.images.length > 0 ? (
@@ -330,8 +334,20 @@ export function ListingScreen() {
       </Button>
       </div>
 
-      {/* Sticky-CTA на мобиле: цена + главное действие всегда в зоне пальца */}
+      {/* Sticky-CTA на мобиле: цена + избранное + главное действие под пальцем */}
       <div className="listing-cta-bar">
+        <button
+          className="listing-cta-bar__fav"
+          aria-label={favorited ? "Убрать из избранного" : "В избранное"}
+          aria-pressed={favorited}
+          onClick={() => void toggleFavorite()}
+        >
+          <Heart
+            size={22}
+            fill={favorited ? "var(--accent)" : "none"}
+            color={favorited ? "var(--accent)" : "currentColor"}
+          />
+        </button>
         <div className="listing-cta-bar__price">
           {chain.usd ?? chain.original ?? "—"}
         </div>

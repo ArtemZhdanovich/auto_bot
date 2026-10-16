@@ -362,6 +362,19 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.listing-cta-bar__fav {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--tgui--secondary_hint_color, #e5e7eb);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--tgui--text_color, #222);
+  cursor: pointer;
+}
 .listing-cta-bar__btn {
   flex: none;
   padding: 12px 18px;
@@ -372,6 +385,61 @@ main {
   font-size: var(--font-sm);
   font-weight: 700;
   cursor: pointer;
+}
+
+/* Кнопка «Назад» поверх галереи карточки объявления */
+.listing-back {
+  position: absolute;
+  top: calc(var(--space-3) + 8px);
+  left: var(--space-4);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(4px);
+  color: #111;
+  font-size: 26px;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+
+/* Кнопка «Наверх» в ленте */
+.to-top {
+  position: fixed;
+  right: 16px;
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 20px;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  animation: fadeIn 0.2s ease;
+}
+@media (min-width: 768px) {
+  .to-top {
+    bottom: 32px;
+    right: 32px;
+  }
+}
+
+/* Видимый фокус с клавиатуры (доступность) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 @media (min-width: 768px) {
   .listing-cta-bar {
@@ -1664,6 +1732,7 @@ main {
 
 /* --- Карточка объявления: ПК = 2 колонки (галерея+инфо | действия) --- */
 .listing-page {
+  position: relative; /* якорь для кнопки «Назад» поверх галереи */
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
