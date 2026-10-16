@@ -3,7 +3,7 @@
 import re
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.core.deps import SessionDep
 from app.db.models import Listing, ListingPriceHistory
@@ -25,10 +25,11 @@ async def list_listings(
     currency: str | None = None,
     mileage_max: int | None = Query(default=None, ge=0),
     source: str | None = None,
+    sort: str = Query(default="new", pattern="^(new|price_asc|price_desc|mileage_asc|year_desc)$"),
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
 ) -> ListingListOut:
-    """Лента с фильтрами, новые сверху (пагинация limit/offset).
+    """Лента с фильтрами и сортировкой (пагинация limit/offset).
 
     MVP: только Корея — если source не указан явно, отдаём encar+kcar.
     """
@@ -60,11 +61,20 @@ async def list_listings(
         count_query = count_query.where(*conditions)
 
     total = (await session.execute(count_query)).scalar_one()
-    result = await session.execute(
-        query.order_by(Listing.parsed_at.desc(), Listing.id.desc())
-        .limit(limit)
-        .offset(offset)
+    # Сортировка (e-commerce стандарт PLP): объявления без цены всегда внизу.
+    # В БД есть USD- и KRW-объявления — сортируем по цене, нормализованной в $.
+    usd_price = case(
+        (func.upper(Listing.currency) == "KRW", Listing.price / 1350.0),
+        else_=Listing.price,
     )
+    order = {
+        "new": (Listing.parsed_at.desc(), Listing.id.desc()),
+        "price_asc": (usd_price.asc().nulls_last(), Listing.id.desc()),
+        "price_desc": (usd_price.desc().nulls_last(), Listing.id.desc()),
+        "mileage_asc": (Listing.mileage_km.asc().nulls_last(), Listing.id.desc()),
+        "year_desc": (Listing.year.desc().nulls_last(), Listing.id.desc()),
+    }[sort]
+    result = await session.execute(query.order_by(*order).limit(limit).offset(offset))
     items = [ListingOut.model_validate(x) for x in result.scalars().all()]
     if conditions:  # это именно поиск с фильтрами, а не просмотр ленты
         await track(

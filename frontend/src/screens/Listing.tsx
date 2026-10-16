@@ -124,6 +124,7 @@ export function ListingScreen() {
           )}
           <Cell after={listing.vin ?? "не указан"}>VIN</Cell>
           <Cell after={listing.source}>Источник</Cell>
+          <Cell after={new Date(listing.parsed_at).toLocaleDateString("ru")}>Обновлено</Cell>
         </Section>
 
       </div>
@@ -285,16 +286,21 @@ export function ListingScreen() {
         />
       )}
 
+      {/* CTA-блок: primary один — «Открыть у источника» (e-commerce стандарт) */}
       <Button
         size="l"
-        mode={favorited ? "filled" : "outline"}
-        before={<Heart size={18} fill={favorited ? "currentColor" : "none"} />}
-        onClick={() => void toggleFavorite()}
+        mode="filled"
+        before={<ExternalLink size={18} />}
+        onClick={() => {
+          haptic();
+          window.open(listing.url, "_blank");
+        }}
       >
-        {favorited ? "В избранном" : "В избранное"}
+        Открыть у источника
       </Button>
       <Button
         size="l"
+        mode="outline"
         before={<Truck size={18} />}
         onClick={() => {
           haptic();
@@ -307,17 +313,37 @@ export function ListingScreen() {
       </Button>
       <Button
         size="l"
-        before={<ExternalLink size={18} />}
-        onClick={() => {
-          haptic();
-          window.open(listing.url, "_blank");
-        }}
+        mode="outline"
+        before={
+          <Heart
+            size={18}
+            fill={favorited ? "var(--accent)" : "none"}
+            color={favorited ? "var(--accent)" : undefined}
+          />
+        }
+        onClick={() => void toggleFavorite()}
       >
-        Открыть у источника
+        {favorited ? "В избранном" : "В избранное"}
       </Button>
       <Button mode="plain" size="l" onClick={() => navigate(-1)}>
         Назад
       </Button>
+      </div>
+
+      {/* Sticky-CTA на мобиле: цена + главное действие всегда в зоне пальца */}
+      <div className="listing-cta-bar">
+        <div className="listing-cta-bar__price">
+          {chain.usd ?? chain.original ?? "—"}
+        </div>
+        <button
+          className="listing-cta-bar__btn"
+          onClick={() => {
+            haptic();
+            window.open(listing.url, "_blank");
+          }}
+        >
+          Открыть у источника
+        </button>
       </div>
     </div>
   );

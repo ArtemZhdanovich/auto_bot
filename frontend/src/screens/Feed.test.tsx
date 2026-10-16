@@ -160,4 +160,20 @@ describe("Feed pagination", () => {
       expect(last.includes("make=")).toBe(false);
     });
   });
+
+  it("сортировка «Цена ↑» перезагружает ленту с sort=price_asc и сбросом offset", async () => {
+    renderFeed();
+    await waitFor(() => expect(screen.getByText("Показать ещё")).toBeTruthy());
+    fireEvent.click(screen.getByText("Показать ещё")); // offset=20
+    await waitFor(() => expect(screen.getByText("40 из 45")).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("Сортировка"), { target: { value: "price_asc" } });
+    await waitFor(() => {
+      const calls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
+      const last = calls[calls.length - 1] ?? "";
+      expect(last.includes("sort=price_asc")).toBe(true);
+      expect(last.includes("offset=0")).toBe(true);
+    });
+    // счётчик отражает выбранную сортировку
+    expect(screen.getByText(/дешёвые сверху/)).toBeTruthy();
+  });
 });

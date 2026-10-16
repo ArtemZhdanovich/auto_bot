@@ -216,6 +216,17 @@ async def test_list_listings_validates_params(client):
 
 
 @pytest.mark.asyncio
+async def test_list_listings_sort_param(client):
+    """sort=price_asc принимается; неизвестный ключ — 422 (PLP-сортировка)."""
+    http, session = client
+    session.set_result([_listing(1)])
+    resp = await http.get("/api/listings?sort=price_asc")
+    assert resp.status_code == 200
+    resp = await http.get("/api/listings?sort=hacker")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_listing_404(client):
     http, _ = client
     resp = await http.get("/api/listings/999")

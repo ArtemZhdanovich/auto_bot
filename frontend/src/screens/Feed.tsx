@@ -15,6 +15,17 @@ import { EmptyState, ErrorState } from "../ui/States";
 import { KRW_PER_USD, digits } from "../lib/fx";
 import type { Listing, ListingList, UserFilter } from "../api/types";
 
+/** Ключи сортировки ленты (PLP-стандарт e-commerce). */
+type SortKey = "new" | "price_asc" | "price_desc" | "mileage_asc" | "year_desc";
+
+const SORTS: { key: SortKey; label: string; counter: string }[] = [
+  { key: "new", label: "Новые", counter: "новые сверху" },
+  { key: "price_asc", label: "Цена ↑", counter: "дешёвые сверху" },
+  { key: "price_desc", label: "Цена ↓", counter: "дорогие сверху" },
+  { key: "mileage_asc", label: "Пробег ↑", counter: "малый пробег" },
+  { key: "year_desc", label: "Год ↓", counter: "свежие годы" },
+];
+
 const PAGE_SIZE = 20;
 
 /**
@@ -98,12 +109,15 @@ export function FeedScreen() {
   const [error, setError] = useState<string | null>(null);
   const [chips, setChips] = useState<Chip[]>([]);
   const [query, setQuery] = useState<FeedQuery>({});
+  const [sort, setSort] = useState<SortKey>("new");
   const [panelOpen, setPanelOpen] = useState(false);
   const [draft, setDraft] = useState<FeedQuery>({});
   const offsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const queryRef = useRef(query);
   queryRef.current = query;
+  const sortRef = useRef(sort);
+  sortRef.current = sort;
 
   // Динамические чипсы: пресеты + сохранённые фильтры (ТЗ §2.2)
   useEffect(() => {
@@ -126,6 +140,7 @@ export function FeedScreen() {
       if (q.priceMax) params.set("price_max", usdToKrw(q.priceMax));
       if (q.mileageMax) params.set("mileage_max", q.mileageMax);
       if (q.source) params.set("source", q.source);
+      params.set("sort", sortRef.current);
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(reset ? 0 : offsetRef.current));
       const data = await api<ListingList>(`/listings?${params.toString()}`);
@@ -138,7 +153,8 @@ export function FeedScreen() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, []);
+    // sort в deps: смена сортировки перезагружает ленту с первой страницы
+  }, [sort]);
 
   useEffect(() => {
     void load(query, true);
@@ -199,7 +215,8 @@ export function FeedScreen() {
         <div className="feed-header__title">Лента</div>
         {!loading && !error && (
           <div className="feed-header__counter">
-            {total.toLocaleString("ru")} авто · новые сверху
+            {total.toLocaleString("ru")} авто ·{" "}
+            {SORTS.find((s) => s.key === sort)?.counter ?? "новые сверху"}
           </div>
         )}
         <div className="feed-subbar">
@@ -214,13 +231,27 @@ export function FeedScreen() {
               </button>
             ))}
           </div>
-          <button
-            className={panelOpen || activeCount > 0 ? "feed-toggle feed-toggle--on" : "feed-toggle"}
-            onClick={togglePanel}
-            aria-expanded={panelOpen}
-          >
-            Фильтры{activeCount > 0 ? ` · ${activeCount}` : ""}
-          </button>
+          <div className="feed-subbar__controls">
+            <select
+              className="feed-sort"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              aria-label="Сортировка"
+            >
+              {SORTS.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <button
+              className={panelOpen || activeCount > 0 ? "feed-toggle feed-toggle--on" : "feed-toggle"}
+              onClick={togglePanel}
+              aria-expanded={panelOpen}
+            >
+              Фильтры{activeCount > 0 ? ` · ${activeCount}` : ""}
+            </button>
+          </div>
         </div>
 
         {panelOpen && (
