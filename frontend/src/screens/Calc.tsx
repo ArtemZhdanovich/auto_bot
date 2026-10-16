@@ -37,6 +37,11 @@ function CompareBtn({ price, cc, year }: { price: string; cc: string; year: stri
   );
 }
 
+interface LegalRef {
+  label: string;
+  ref: string;
+}
+
 interface CalcOut {
   price_usd: number;
   engine_cc: number;
@@ -44,6 +49,7 @@ interface CalcOut {
   age_years: number;
   age_group: string;
   components: CalcComponent[];
+  legal_refs?: LegalRef[];
   total_rub: number;
   total_usd: number;
 }
@@ -192,9 +198,22 @@ export function CalcScreen() {
           </div>
 
           <div className="calc-note">
-            Оценка для физлица (личное пользование), курс фиксированный.
-            Логистика, брокер и СБКТС — средние по рынку. Точную смету даст менеджер.
+            Оценка для физлица (личное пользование, не более 1 авто в год), курс
+            фиксированный. Логистика, брокер и СБКТС — средние по рынку. Точную
+            смету даст менеджер.
           </div>
+
+          {result.legal_refs && result.legal_refs.length > 0 && (
+            <div className="calc-legal">
+              <div className="calc-legal__title">Основание расчёта</div>
+              {result.legal_refs.map((r) => (
+                <div key={r.label} className="calc-legal__row">
+                  <span className="calc-legal__label">{r.label}</span>
+                  <span className="calc-legal__ref">{r.ref}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="calc-note">
             🚢 Море Бусан → Владивосток, далее по РФ — менеджер подберёт

@@ -21,6 +21,7 @@ class DeliveryOut(BaseModel):
     age_years: int
     age_group: str
     components: list[dict]
+    legal_refs: list[dict] = []
     total_rub: float
     total_usd: float
     rates_note: str = "Курс фиксированный (MVP). Логистика/брокер/СБКТС — средние по рынку."
@@ -39,6 +40,7 @@ async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
         age_years=b.age_years,
         age_group=b.age_group,
         components=b.components,
+        legal_refs=b.legal_refs,
         total_rub=b.total_rub,
         total_usd=b.total_usd,
     )

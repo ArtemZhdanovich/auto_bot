@@ -102,3 +102,16 @@ async def test_compare_skips_bad_items_and_falls_back_title(http):
 async def test_compare_empty_items_422(http):
     resp = await http.post("/api/calc/compare", json={"items": []})
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_delivery_response_includes_legal_refs(http):
+    """UI показывает правовые основания расчёта (НПА), а не голые цифры."""
+    resp = await http.post(
+        "/api/calc/delivery", json={"price_usd": 18000, "engine_cc": 2000, "year": 2022}
+    )
+    assert resp.status_code == 200
+    refs = resp.json()["legal_refs"]
+    assert len(refs) >= 3
+    joined = " ".join(r["ref"] for r in refs)
+    assert "ЕТТ ЕАЭС" in joined and "1291" in joined and "342" in joined

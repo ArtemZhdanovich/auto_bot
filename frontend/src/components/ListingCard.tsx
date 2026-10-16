@@ -20,6 +20,8 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
   const [fav, setFav] = useState(favorited);
   const [photoFailed, setPhotoFailed] = useState(false);
   const photo = listing.images[0];
+  // Единый тайтл: без «null undefined», если у источника нет марки/модели
+  const title = `${listing.make ?? ""} ${listing.model ?? ""}`.trim() || "Без названия";
   // Бейджи отслеживания (PLAN.md, фаза 4): снижение цены и исчезновение
   const dropped =
     listing.first_price != null &&
@@ -66,7 +68,7 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
           <img
             className="listing-card__photo"
             src={photo}
-            alt={`${listing.make ?? ""} ${listing.model ?? ""}`.trim()}
+            alt={title}
             loading="lazy"
             onError={() => setPhotoFailed(true)}
           />
@@ -83,7 +85,12 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
             <ImageOff size={32} />
           </div>
         )}
-        <button className="listing-card__fav" onClick={(e) => void onToggleFav(e)} aria-label="В избранное">
+        <button
+          className="listing-card__fav"
+          onClick={(e) => void onToggleFav(e)}
+          aria-label={fav ? "Убрать из избранного" : "В избранное"}
+          aria-pressed={fav}
+        >
           <Heart size={18} fill={fav ? "currentColor" : "none"} />
         </button>
         {gone ? (
@@ -97,7 +104,7 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
       </div>
       <div className="listing-card__body">
         <div className="listing-card__title">
-          {listing.make} {listing.model}
+          {title}
           {listing.year ? `, ${listing.year}` : ""}
         </div>
         {/* Переведённый тайтл источника (фаза 5): есть — показываем строкой ниже */}

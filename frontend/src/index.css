@@ -59,9 +59,13 @@ main {
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--bg-secondary);
+  box-shadow: var(--shadow-md);
   cursor: pointer;
-  transition: transform 0.12s ease;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.app-shell--desktop .listing-card:hover {
+  box-shadow: var(--shadow-lg);
 }
 .listing-card:active {
   transform: scale(0.985);
@@ -626,7 +630,12 @@ main {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-4);
+  margin: 0 var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 .calc-field {
   display: flex;
@@ -657,6 +666,7 @@ main {
 .calc-total {
   background: linear-gradient(135deg, var(--accent, #3390ec), #1a6fd4);
   border-radius: var(--radius-lg, 16px);
+  box-shadow: var(--shadow-md);
   color: #fff;
   padding: 18px 16px;
   display: flex;
@@ -685,8 +695,10 @@ main {
   font-size: var(--font-sm);
 }
 .calc-rows {
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
+  background: var(--bg);
+  border: 1px solid var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
   padding: 4px 14px;
 }
 .calc-row {
@@ -709,16 +721,50 @@ main {
 }
 .calc-note {
   font-size: var(--font-sm);
-  opacity: 0.7;
+  color: var(--text-secondary);
+  opacity: 1;
   line-height: 1.45;
+  padding: 0 var(--space-2);
+}
+
+/* Правовые основания расчёта (НПА) — отдельная карточка */
+.calc-legal {
+  background: var(--bg);
+  border: 1px solid var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.calc-legal__title {
+  font-size: var(--font-sm);
+  font-weight: 700;
+}
+.calc-legal__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+.calc-legal__label {
+  font-weight: 600;
+  color: var(--text);
+}
+.calc-legal__ref {
+  color: var(--text-secondary);
 }
 
 /* === Compare (⚖️ сравнение «под ключ») === */
 .compare-variant {
   margin-bottom: 14px;
   padding: 12px;
-  border: 1px solid var(--tg-theme-secondary-bg-color, #e8e8ec);
-  border-radius: 14px;
+  background: var(--bg);
+  border: 1px solid var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 .compare-variant__label {
   font-size: 13px;
@@ -742,12 +788,15 @@ main {
 .compare-item {
   margin-bottom: 14px;
   padding: 12px;
-  border-radius: 14px;
-  border: 1px solid var(--tg-theme-secondary-bg-color, #e8e8ec);
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
 }
 .compare-item--best {
   border-color: #30a46c;
-  background: color-mix(in srgb, #30a46c 7%, transparent);
+  background: color-mix(in srgb, #30a46c 9%, var(--bg));
+  box-shadow: 0 0 0 1px #30a46c, var(--shadow-sm);
 }
 .compare-item__head {
   display: flex;
@@ -796,6 +845,11 @@ main {
   flex-direction: column;
   gap: 10px;
   font-size: 14px;
+  background: var(--bg);
+  border: 1px solid var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3) var(--space-4);
   animation: analysis-in 0.35s ease both;
 }
 @keyframes analysis-in {
@@ -878,11 +932,13 @@ main {
 }
 .analysis__market {
   font-size: 12px;
-  opacity: 0.65;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 .analysis__meta {
   font-size: 12px;
-  opacity: 0.55;
+  color: var(--text-secondary);
+  opacity: 1;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -902,7 +958,7 @@ main {
   background: rgba(77, 124, 254, 0.12);
 }
 .analysis__hint {
-  opacity: 0.75;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 .analysis--locked {
@@ -920,7 +976,8 @@ main {
   width: 100%;
   font-size: 12px;
   font-weight: 400;
-  opacity: 0.6;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 .analysis__spinner {
   width: 18px;
@@ -972,7 +1029,9 @@ main {
   font-size: 11px;
   font-weight: 700;
   color: #4d7cfe;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--bg-secondary);
   padding: 1px 6px;
   border-radius: 8px;
   pointer-events: none;
@@ -981,14 +1040,16 @@ main {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  opacity: 0.6;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 .price-chart__dates {
   opacity: 0.8;
 }
 .price-chart__legend {
   font-size: 11px;
-  opacity: 0.55;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 /* --- Гостевой режим (демо без регистрации) --- */
@@ -1023,3 +1084,46 @@ main {
 }
 /* Десктоп: баннер по ширине контента, не поверх сайдбара */
 .app-shell--desktop .guest-banner { max-width: 720px; }
+
+/* ============================================================
+   Тёмная тема (Telegram dark): вердикты/метки не сливаются с фоном
+   ============================================================ */
+@media (prefers-color-scheme: dark) {
+  .analysis__verdict--deal {
+    color: #5fd39a;
+    background: rgba(48, 164, 108, 0.22);
+  }
+  .analysis__verdict--fair {
+    color: #f2c14e;
+    background: rgba(240, 178, 12, 0.2);
+  }
+  .analysis__verdict--overpriced {
+    color: #ff8a8d;
+    background: rgba(229, 72, 77, 0.2);
+  }
+  .analysis__pill--good {
+    color: #5fd39a;
+    background: rgba(48, 164, 108, 0.22);
+  }
+  .analysis__pill--bad {
+    color: #ff8a8d;
+    background: rgba(229, 72, 77, 0.22);
+  }
+  .analysis--locked {
+    color: #f2c14e;
+  }
+  .analysis__bar-marker {
+    background: #1c1c1e;
+  }
+  .compare-badge {
+    color: #46c78c;
+    border-color: #46c78c;
+  }
+  .compare-delta {
+    color: #ff8a8d;
+  }
+  .guest-banner {
+    background: var(--bg-secondary);
+    color: var(--text);
+  }
+}
