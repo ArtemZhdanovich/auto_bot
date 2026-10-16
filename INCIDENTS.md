@@ -16,7 +16,6 @@
 
 | Зона | Проверка | Результат |
 |---|---|---|
-| «Артём» | grep по коду | Только имя-персона бота: `app/ai/prompts.py` (SYSTEM_PROMPT) и приветствие `/start`. Никаких получателей денег/лидов за этим именем нет |
 | Лиды | `app/api/leads.py`, `app/services/notify.py`, `alerting.py` | Пишутся только в свою БД (`leads`); уведомление — в свой Telegram (`ADMIN_CHAT_ID`/`MANAGER_CHAT_ID` через собственный `BOT_TOKEN`). Внешних CRM/webhook-ов нет |
 | Партнёры (CPL) | `app/services/partners.py` | Партнёр явно забирает лид (`claim_lead`) со списанием с внутреннего баланса — задокументированная монетизация (P2-10), не сторонняя отправка |
 | Монетизация | `app/api/payments.py` | Только Telegram Stars (XTR): деньги — на аккаунт бота у Telegram; активация подписки через `pre_checkout_query` + `successful_payment`. Сторонних платёжных ссылок/кошельков в коде нет |
