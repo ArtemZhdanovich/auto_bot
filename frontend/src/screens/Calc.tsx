@@ -9,6 +9,7 @@ import { Button } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
+import { getRegion } from "../lib/fx";
 import { SkeletonCard } from "../ui/Skeleton";
 
 interface CalcComponent {
@@ -228,6 +229,8 @@ export function CalcScreen() {
             менеджер.
           </div>
 
+          <RegionNote />
+
           {result.legal_refs && result.legal_refs.length > 0 && (
             <div className="calc-legal">
               <div className="calc-legal__title">Основание расчёта</div>
@@ -246,6 +249,19 @@ export function CalcScreen() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Заметка по региону: платежи ЕАЭС одинаковы, регистрация — разная. */
+function RegionNote() {
+  const region = getRegion();
+  if (region !== "by") return null;
+  return (
+    <div className="calc-note">
+      🇧🇾 Беларусь: таможенные платежи ЕАЭС одинаковы с РФ, но при постановке на
+      учёт в ГАИ действуют свои правила и утильсбор РБ — менеджер подскажет
+      полный маршрут: порт Владивосток → Минск.
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { Heart, ImageOff } from "lucide-react";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
+import { getRegion, priceChain } from "../lib/fx";
 import { useToast } from "../ui/Toast";
 import type { Listing } from "../api/types";
 
@@ -20,6 +21,7 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
   const [fav, setFav] = useState(favorited);
   const [photoFailed, setPhotoFailed] = useState(false);
   const photo = listing.images[0];
+  const chain = priceChain(listing.price, listing.currency, getRegion());
   // Единый тайтл: без «null undefined», если у источника нет марки/модели
   const title = `${listing.make ?? ""} ${listing.model ?? ""}`.trim() || "Без названия";
   // Бейджи отслеживания (PLAN.md, фаза 4): снижение цены и исчезновение
@@ -113,11 +115,22 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
             {listing.title_ru ?? listing.title_raw}
           </div>
         )}
-        <div className="listing-card__price">
-          {listing.price !== null
-            ? `${listing.price.toLocaleString("ru")} ${listing.currency ?? ""}`
-            : "—"}
-        </div>
+        {/* Цепочка цен: $ → локальная валюта региона → цена источника */}
+        {chain.usd ? (
+          <>
+            <div className="listing-card__price">
+              {chain.usd}
+              {chain.local && <span className="listing-card__local"> · {chain.local}</span>}
+            </div>
+            {chain.original && (
+              <div className="listing-card__orig">{chain.original}</div>
+            )}
+          </>
+        ) : (
+          <div className="listing-card__price">
+            {chain.original ?? "—"}
+          </div>
+        )}
         <div className="listing-card__meta">
           {listing.mileage_km
             ? `${listing.mileage_km.toLocaleString("ru")} км · `

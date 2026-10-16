@@ -6,6 +6,13 @@ import { Button, Cell, Placeholder, Section } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
 import { haptic, isGuest, logout, tgUser } from "../api/auth";
+import {
+  getRegion,
+  setRegion,
+  REGION_CURRENCY,
+  REGION_LABEL,
+  type Region,
+} from "../lib/fx";
 import type { StarsInvoice, Subscription, User } from "../api/types";
 
 const TIER_LABEL: Record<string, string> = {
@@ -14,17 +21,25 @@ const TIER_LABEL: Record<string, string> = {
   business: "Business",
 };
 
-type InvoiceStatus = "paid" | "failed" | "pending";
+type InvoiceStatus = "paid" | "failed" | "cancelled" | "pending";
+
+/** Внутри Telegram ли открыт мини-апп (оплата Stars работает только там). */
+export function inTelegram(): boolean {
+  return Boolean(
+    (window as unknown as { Telegram?: { WebApp?: { initDataUnsafe?: unknown } } })
+      .Telegram?.WebApp?.initDataUnsafe,
+  );
+}
 
 /** tg.openInvoice с колбеком статуса (ТЗ п. 9.6). */
-function openInvoice(url: string, onStatus: (s: InvoiceStatus) => void): void {
+function openInvoice(url: string, onStatus: (s: InvoiceStatus) => void): boolean {
   const webApp = (window as unknown as { Telegram?: { WebApp?: { openInvoice?: (u: string, cb: (s: string) => void) => void } } }).Telegram?.WebApp;
   if (webApp?.openInvoice) {
     webApp.openInvoice(url, (status) => onStatus(status as InvoiceStatus));
-  } else {
-    window.open(url, "_blank"); // вне Telegram — просто открываем ссылку
-    onStatus("pending");
+    return true;
   }
+  window.open(url, "_blank"); // вне Telegram — просто открываем ссылку
+  return false;
 }
 
 export function ProfileScreen() {
@@ -33,6 +48,7 @@ export function ProfileScreen() {
   const [buying, setBuying] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [region, setRegionState] = useState<Region>(() => getRegion());
 
   const load = useCallback(() => {
     api<User>("/me")
@@ -51,24 +67,47 @@ export function ProfileScreen() {
     const key = `${tier}_${period}`;
     setBuying(key);
     setMessage(null);
+    let invoiceUrl: string | null = null;
     try {
       const invoice = await api<StarsInvoice>("/payments/stars", {
         method: "POST",
         body: JSON.stringify({ tier, period }),
       });
+      invoiceUrl = invoice.invoice_url;
       haptic();
-      openInvoice(invoice.invoice_url, (status) => {
-        setBuying(null);
-        if (status === "paid") {
-          setMessage("✅ Оплата прошла — подписка активирована");
-          load();
-        } else if (status === "failed") {
-          setMessage("❌ Оплата не прошла");
-        }
-      });
     } catch (e) {
-      setMessage(`Ошибка: ${(e as Error).message}`);
       setBuying(null);
+      const status = (e as { status?: number }).status;
+      if (status === 503) {
+        setMessage("🛠 Платежи временно недоступны — попробуйте через пару минут.");
+      } else if (status === 401 || status === 403) {
+        setMessage("🔒 Сессия истекла. Закройте мини-апп и откройте заново из Telegram-бота.");
+      } else {
+        setMessage(`Не удалось создать счёт: ${(e as Error).message}`);
+      }
+      return;
+    }
+
+    const inTg = openInvoice(invoiceUrl, (status) => {
+      setBuying(null);
+      if (status === "paid") {
+        setMessage("✅ Оплата прошла — подписка активирована");
+        load();
+      } else if (status === "failed") {
+        setMessage(
+          "❌ Оплата не прошла. Проверьте баланс ★ Stars (Settings → Stars) и попробуйте ещё раз.",
+        );
+      } else if (status === "cancelled") {
+        setMessage("Оплата отменена — инвойс можно открыть снова в любой момент.");
+      } else {
+        setMessage("⏳ Платёж в обработке — подписка активируется в течение пары минут.");
+      }
+    });
+    if (!inTg) {
+      setBuying(null);
+      setMessage(
+        "💳 Счёт открыт в новой вкладке, но оплата ★ Stars работает только в Telegram. Откройте мини-апп из бота и повторите оформление.",
+      );
     }
   };
 
@@ -88,7 +127,7 @@ export function ProfileScreen() {
   const guest = isGuest();
 
   return (
-    <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div className="screen">
       {guest && (
         <Section header="Гостевой режим">
           <div style={{ padding: "0 12px 8px", fontSize: 13, lineHeight: 1.5, opacity: 0.75 }}>
@@ -103,6 +142,27 @@ export function ProfileScreen() {
           </div>
         </Section>
       )}
+      <Section header="Регион доставки">
+        <div className="region-row">
+          {(["ru", "by"] as const).map((r) => (
+            <button
+              key={r}
+              className={region === r ? "chip chip--active" : "chip"}
+              onClick={() => {
+                haptic("light");
+                setRegion(r);
+                setRegionState(r);
+              }}
+            >
+              {REGION_LABEL[r]} · {REGION_CURRENCY[r]}
+            </button>
+          ))}
+        </div>
+        <div className="region-hint">
+          Цены показываем в $ и в валюте региона. Таможенные платежи ЕАЭС
+          одинаковы для РФ и РБ; нюансы постановки на учёт уточнит менеджер.
+        </div>
+      </Section>
       <Section header="Профиль">
         <Cell
           subtitle={user.username ? `@${user.username}` : undefined}
@@ -149,7 +209,15 @@ export function ProfileScreen() {
             ⭐ Business — 2500★/мес
           </Button>
         )}
-        {message && <Cell subtitle={message}>{""}</Cell>}
+        {message && (
+          <div className={
+            message.startsWith("✅") || message.startsWith("⏳")
+              ? "profile-msg profile-msg--ok"
+              : "profile-msg profile-msg--err"
+          }>
+            {message}
+          </div>
+        )}
       </Section>
       <Button mode="outline" onClick={logout}>
         Выйти (сбросить сессию)

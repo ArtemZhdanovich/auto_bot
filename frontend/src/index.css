@@ -167,6 +167,10 @@ main {
   );
   animation: skeleton-shimmer 1.4s infinite;
 }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 @keyframes skeleton-shimmer {
   100% {
     transform: translateX(100%);
@@ -256,25 +260,9 @@ main {
 /* ============================================================
    Галерея (Listing, ТЗ §2.3)
    ============================================================ */
-.gallery {
-  position: relative;
-}
-.gallery__track {
-  display: flex;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  border-radius: var(--radius-lg);
-  scrollbar-width: none;
-}
+/* Галерея: базовые стили перенесены в блок «Редизайн 2026-10» ниже */
 .gallery__track::-webkit-scrollbar {
   display: none;
-}
-.gallery__slide {
-  flex: 0 0 100%;
-  scroll-snap-align: center;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  background: var(--bg-secondary);
 }
 .gallery__counter {
   position: absolute;
@@ -285,6 +273,7 @@ main {
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
   font-size: var(--font-xs);
+  backdrop-filter: blur(4px);
 }
 
 /* ============================================================
@@ -362,6 +351,11 @@ main {
   }
   .app-shell--desktop .app-tabbar {
     display: none !important;
+  }
+}
+@media (min-width: 1280px) {
+  .app-shell--desktop .feed-grid {
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 .feed-grid {
@@ -1151,4 +1145,424 @@ main {
     color: #ffd166;
     background: rgba(240, 178, 12, 0.12);
   }
+}
+
+/* ============================================================
+   Редизайн 2026-10: единые экраны, тени, радиусы, ПК/мобайл
+   ============================================================ */
+
+/* Универсальный контейнер экрана вместо инлайн-стилей */
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  max-width: 760px;
+  margin: 0 auto;
+}
+@media (min-width: 768px) {
+  .screen {
+    padding: var(--space-5);
+  }
+}
+
+/* Скруглённые секции с явной мягкой тенью (Telegram UI Section) */
+.Section,
+.section {
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.app-shell--desktop .Section,
+.app-shell--desktop .section {
+  box-shadow: var(--shadow-md);
+}
+
+/* --- Фильтры: пары инпутов, селекты, ошибка формы --- */
+.filter-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+}
+.filter-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-sm);
+}
+.filter-select span {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+.filter-select select {
+  appearance: none;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--bg-secondary);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: var(--font-sm);
+  outline: none;
+  cursor: pointer;
+}
+.filter-select select:focus {
+  border-color: var(--accent);
+}
+.form-error {
+  margin: 8px 16px 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--destructive);
+  font-size: var(--font-sm);
+}
+
+/* --- Карточка: локальная валюта и цена источника --- */
+.listing-card__local {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.listing-card__orig {
+  margin-top: 2px;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+
+/* --- Галерея карточки: компактные фото, миниатюры, фуллскрин --- */
+.gallery {
+  position: relative;
+  max-width: 100%;
+}
+.gallery__track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  border-radius: var(--radius-lg);
+  scrollbar-width: none;
+  box-shadow: var(--shadow-md);
+}
+.gallery__slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: var(--bg-secondary);
+  cursor: zoom-in;
+}
+.gallery__expand {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.gallery__thumbs {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.gallery__thumb {
+  width: 56px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+  opacity: 0.65;
+  cursor: pointer;
+  flex: none;
+  background: var(--bg-secondary);
+}
+.gallery__thumb--active {
+  border-color: var(--accent);
+  opacity: 1;
+}
+.gallery__thumb--more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+/* Лайтбокс: тёмный фон + фото целиком (контраст и без обрезки) */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(8, 10, 14, 0.94);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.18s ease;
+}
+.lightbox__img {
+  max-width: min(94vw, 1400px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.lightbox__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  transition: background 0.15s ease;
+}
+.lightbox__nav:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.lightbox__nav--prev {
+  left: 12px;
+}
+.lightbox__nav--next {
+  right: 12px;
+}
+.lightbox__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 17px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.lightbox__close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.lightbox__counter {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #fff;
+  font-size: var(--font-sm);
+  opacity: 0.85;
+}
+@media (max-width: 767px) {
+  .lightbox__nav {
+    top: auto;
+    bottom: 18px;
+    transform: none;
+  }
+  .lightbox__nav--prev { left: calc(50% - 60px); }
+  .lightbox__nav--next { right: calc(50% - 60px); }
+}
+
+/* --- Карточка объявления: ПК = 2 колонки (галерея+инфо | действия) --- */
+.listing-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  max-width: 760px;
+  margin: 0 auto;
+}
+.listing-page__main,
+.listing-page__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+@media (min-width: 1024px) {
+  .listing-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+    align-items: start;
+    max-width: 1200px;
+    padding: var(--space-5);
+  }
+  .listing-page__side {
+    position: sticky;
+    top: var(--space-4);
+  }
+}
+
+/* --- AI-чат --- */
+.ai-chat {
+  display: flex;
+  flex-direction: column;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-4);
+  gap: var(--space-3);
+  min-height: 60vh;
+}
+.ai-chat__intro {
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--bg-secondary);
+}
+.ai-chat__intro-icon {
+  font-size: 40px;
+  margin-bottom: var(--space-2);
+}
+.ai-chat__intro-title {
+  font-size: var(--font-lg);
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+.ai-chat__intro-text {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: 1.55;
+  max-width: 460px;
+  margin: 0 auto;
+}
+.ai-chat__history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ai-msg {
+  max-width: 86%;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  box-shadow: var(--shadow-sm);
+}
+.ai-msg--bot {
+  align-self: flex-start;
+  background: var(--bg);
+  border: 1px solid var(--bg-secondary);
+  border-bottom-left-radius: 6px;
+}
+.ai-msg--user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-bottom-right-radius: 6px;
+}
+.ai-msg__text--typing {
+  display: flex;
+  gap: 5px;
+  padding: 4px 2px;
+}
+.ai-msg__text--typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  animation: typing-bounce 1.1s ease-in-out infinite;
+}
+.ai-msg__text--typing span:nth-child(2) { animation-delay: 0.15s; }
+.ai-msg__text--typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+.ai-chat__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ai-chat__finalize {
+  display: flex;
+}
+.ai-chat__composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--space-3);
+  margin-top: auto;
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--bg-secondary);
+}
+.ai-chat__input {
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: var(--font-sm);
+  font-family: inherit;
+  color: var(--text);
+  box-sizing: border-box;
+}
+.ai-chat__composer-actions {
+  display: flex;
+  gap: 8px;
+}
+@media (min-width: 768px) {
+  .ai-msg {
+    max-width: 70%;
+    font-size: var(--font-md);
+  }
+}
+
+/* --- Профиль: регион, сообщения об оплате --- */
+.region-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 16px 8px;
+}
+.region-hint {
+  padding: 0 16px 12px;
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.profile-msg {
+  margin: 8px 16px 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  animation: fadeIn 0.2s ease;
+}
+.profile-msg--ok {
+  background: rgba(48, 164, 108, 0.14);
+  color: #2e9e6b;
+}
+.profile-msg--err {
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--destructive);
+}
+@media (prefers-color-scheme: dark) {
+  .profile-msg--ok { color: #5fd39a; }
 }

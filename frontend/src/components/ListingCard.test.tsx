@@ -47,9 +47,12 @@ describe("ListingCard", () => {
     const card = document.querySelector(".listing-card");
     expect(card).not.toBeNull();
     expect(screen.getByText("Kia Carnival, 2022")).toBeTruthy();
-    // toLocaleString("ru") даёт неразрывные пробелы — нормализуем
+    // Цепочка цен: сначала $ (KRW ÷1350), потом локальная, источник ниже
     expect(
       document.querySelector(".listing-card__price")?.textContent?.replace(/ /g, " "),
+    ).toContain("3 630");
+    expect(
+      document.querySelector(".listing-card__orig")?.textContent?.replace(/ /g, " "),
     ).toContain("18 400 000");
     expect(document.querySelector(".listing-card__photos-count")?.textContent).toBe("2");
   });

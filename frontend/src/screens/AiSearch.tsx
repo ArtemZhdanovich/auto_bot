@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, List, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { Button } from "@telegram-apps/telegram-ui";
 
 import { aiFinalize, aiMessage, aiReset, type AiReply } from "../api/ai";
 
@@ -75,61 +75,83 @@ export function AiSearchScreen() {
   const last = bubbles[bubbles.length - 1];
 
   return (
-    <List>
+    <div className="ai-chat">
       {bubbles.length === 0 && (
-        <Placeholder
-          header="AI-подбор автомобиля"
-          description="Опишите словами, что ищете: «Hyundai Palisade 2022–2024, дизель, до 45к $» — агент задаст уточняющие вопросы и запустит поиск."
-        />
+        <div className="ai-chat__intro">
+          <div className="ai-chat__intro-icon">🤖</div>
+          <div className="ai-chat__intro-title">AI-подбор автомобиля</div>
+          <div className="ai-chat__intro-text">
+            Опишите словами, что ищете: «Hyundai Palisade 2022–2024, дизель,
+            до 45к $» — агент задаст уточняющие вопросы и запустит поиск по
+            всем источникам.
+          </div>
+        </div>
       )}
 
-      {bubbles.map((b, i) => (
-        <Section key={i} style={{ marginBottom: 8 }}>
-          <div style={{ padding: "12px 16px", whiteSpace: "pre-wrap" }}>
-            <b>{b.role === "user" ? "Вы" : "Агент"}:</b> {b.text}
+      <div className="ai-chat__history">
+        {bubbles.map((b, i) => (
+          <div
+            key={i}
+            className={b.role === "user" ? "ai-msg ai-msg--user" : "ai-msg ai-msg--bot"}
+          >
+            <div className="ai-msg__text">{b.text}</div>
           </div>
-        </Section>
-      ))}
-
-      {busy && <Spinner size="m" />}
+        ))}
+        {busy && (
+          <div className="ai-msg ai-msg--bot">
+            <div className="ai-msg__text ai-msg__text--typing">
+              <span /><span /><span />
+            </div>
+          </div>
+        )}
+      </div>
 
       {last?.options && last.options.length > 0 && (
-        <Section header="Варианты ответа">
+        <div className="ai-chat__options">
           {last.options.map((o) => (
-            <Button key={o} mode="plain" size="s" stretched before={undefined} onClick={() => send(o)}>
+            <button key={o} className="chip" onClick={() => send(o)}>
               {o}
-            </Button>
+            </button>
           ))}
-        </Section>
+        </div>
       )}
 
       {last?.finalize && (
-        <Section>
-          <Button size="l" stretched onClick={finalize}>
+        <div className="ai-chat__finalize">
+          <Button size="l" stretched loading={busy} onClick={finalize}>
             🔎 Запустить поиск
           </Button>
-        </Section>
+        </div>
       )}
 
       <div ref={bottomRef} />
 
-      <Section header="Сообщение агенту">
-        <Textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Например: Kia Carnival, дизель, до 50к $" />
-        <div style={{ display: "flex", gap: 8, padding: 12 }}>
-          <Button size="l" stretched disabled={busy || !input.trim()} onClick={() => send(input)}>
+      <div className="ai-chat__composer">
+        <textarea
+          className="ai-chat__input"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send(input);
+            }
+          }}
+          placeholder="Например: Kia Carnival, дизель, до 50к $"
+          rows={2}
+        />
+        <div className="ai-chat__composer-actions">
+          <Button size="s" stretched loading={busy} disabled={!input.trim()} onClick={() => void send(input)}>
             Отправить
           </Button>
-          <Button mode="outline" size="l" onClick={reset}>
+          <Button mode="outline" size="s" onClick={() => void reset()}>
             Сброс
           </Button>
         </div>
-      </Section>
-
-      <Section>
-        <Button mode="plain" stretched onClick={() => navigate("/filters")}>
+        <Button mode="plain" size="s" onClick={() => navigate("/filters")}>
           Настроить фильтры вручную →
         </Button>
-      </Section>
-    </List>
+      </div>
+    </div>
   );
 }

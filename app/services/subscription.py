@@ -1,7 +1,7 @@
 """Тарифы и подписки (этап 6, ТЗ п. 8.7, 10.2).
 
 Тарифы:
-- Free: 3 фильтра, 20 AI-сообщений/день, только digest.
+- Free: 3 фильтра, 3 AI-сообщения/день, только digest.
 - Pro (500 Stars/мес, год 4800★ = −20%): 20 фильтров, 200 AI/день, instant, price drop.
 - Business (2500 Stars/мес, год 24000★): без лимитов.
 """
@@ -37,7 +37,7 @@ class TierConfig:
 
 
 TIERS: dict[str, TierConfig] = {
-    "free": TierConfig("free", max_filters=3, ai_daily_limit=20, instant=False, price_stars_month=0),
+    "free": TierConfig("free", max_filters=3, ai_daily_limit=3, instant=False, price_stars_month=0),
     "pro": TierConfig("pro", max_filters=20, ai_daily_limit=200, instant=True, price_stars_month=500),
     "business": TierConfig(
         "business", max_filters=None, ai_daily_limit=None, instant=True, price_stars_month=2500
