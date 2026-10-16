@@ -25,6 +25,10 @@ services:
     ports: !override
       - "8081:80"
       - "8444:443"
+    # Гейт micro-профиля имеет сетевой алиас backend: DNS отдаёт 2 IP и ~50%
+    # запросов падают 502. На стенде всегда mono → оставляем только backend.
+    depends_on: !override
+      backend: { condition: service_healthy, required: false }
     restart: unless-stopped
 
   postgres:
