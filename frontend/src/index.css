@@ -328,6 +328,7 @@ main {
 @media (min-width: 768px) {
   .app-shell--desktop {
     display: flex;
+    flex-wrap: wrap; /* баннер — отдельной строкой, ленту не сжимает */
   }
   .app-shell--desktop .app-sidebar {
     width: 220px;
@@ -338,6 +339,7 @@ main {
   }
   .app-shell--desktop .app-content {
     flex: 1;
+    min-width: 0; /* иначе grid-лента расталкивает flex-элемент */
     padding: 0 var(--space-5);
   }
   .app-shell--desktop main,
@@ -1097,8 +1099,13 @@ main {
   padding: 0 2px;
   flex: none;
 }
-/* Десктоп: баннер по ширине контента, не поверх сайдбара */
-.app-shell--desktop .guest-banner { max-width: 720px; }
+/* Десктоп: баннер во всю ширину строки (flex-wrap переносит его
+   поверх контента), с боковыми отступами как у .app-content */
+.app-shell--desktop .guest-banner {
+  flex: 1 1 100%;
+  max-width: none;
+  margin: 8px var(--space-5) 0;
+}
 
 /* ============================================================
    Тёмная тема (Telegram dark): вердикты/метки не сливаются с фоном
@@ -1245,6 +1252,9 @@ main {
 }
 .gallery__slide {
   flex: 0 0 100%;
+  /* flex-элемент <img>: без min-width:0 не сжимается ниже натуральной
+     ширины картинки (1080px+) и вылезает за трек — «гигантские фото» */
+  min-width: 0;
   scroll-snap-align: center;
   aspect-ratio: 16 / 10;
   object-fit: cover;
@@ -1311,6 +1321,8 @@ main {
   animation: fadeIn 0.18s ease;
 }
 .lightbox__img {
+  min-width: 0;
+  min-height: 0;
   max-width: min(94vw, 1400px);
   max-height: 88vh;
   object-fit: contain;
