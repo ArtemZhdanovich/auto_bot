@@ -998,3 +998,26 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   не ломает их). **548 pytest (+4), ruff чисто, mypy = база**
 - **Live**: стек на новой машине поднят с нуля после рестарта Docker — backend healthy,
   бот поллит, miniapp 200. Для выхода в прод: VPS + домен + `bootstrap.sh` (DEPLOY.md).
+
+## 41. Скрипты запуска + гостевой режим сайта (+2 pytest → 550, +18 vitest → 40)
+
+- **Скрипты запуска**: `start.bat` (Windows) / `start.sh` (Linux) — инфраструктура →
+  `--profile mono up -d --build` → миграции → ожидание /health → подсказка URL.
+  Для VPS остаётся `deploy/bootstrap.sh`.
+- **Гостевой режим (незалогиненный посетитель может всё потрогать)**:
+  - Бэк: `POST /api/auth/guest` — временный юзер («Гость», синтетический id < 0,
+    без email/пароля, явно role=buyer/tier=free/is_active) → обычная JWT-пара.
+    Гость = free-юзер: лента, фильтры, карточка, **AI-разбор цены 1/нед**,
+    калькулятор, избранное. Нет только Telegram-уведомлений и Pro.
+  - Фронт: вне Telegram `authorize()` → null → тихий `guestLogin()` → полный UI
+    без формы входа; скип онбординга; дисмиссабельный баннер «Демо без регистрации»
+    со ссылкой /login; роут `/login` (только для гостя) — LoginScreen, после входа
+    гостевые токены заменяются (`clearGuest`); в Профиле — гостевой блок
+    «Войти / Регистрация».
+  - Публичные GET и так открыты: лента/карточка/кэш разбора/калькулятор.
+- **Тесты сайта (vitest)**: `vitest.config.ts` (jsdom + react-плагин);
+  dev-deps jsdom + @testing-library/react. Новое: `api/client.test.ts` (токены,
+  Bearer, 204, ApiError/detail/statusText), `api/auth.test.ts` (Telegram-контекст,
+  гостевой вход/выход, webLogin/webRegister, 409), `App.guest.test.tsx`
+  (компонентные: гость→лента+баннер, крестик баннера, гостевой /login,
+  у TG-юзера гостя нет). Стабы matchMedia/IntersectionObserver. **40 vitest / 550 pytest**

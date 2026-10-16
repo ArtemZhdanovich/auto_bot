@@ -71,6 +71,26 @@ export async function webLogin(email: string, password: string): Promise<AuthRes
   return resp;
 }
 
+/** Гостевой режим: сайт открыт без регистрации — JWT «Гостя» сразу.
+ *  Лента, карточка, AI-разбор (1/нед), калькулятор, избранное — доступны;
+ *  Telegram-уведомления и Pro — после входа/регистрации. */
+export async function guestLogin(): Promise<AuthResponse> {
+  const resp = await api<AuthResponse>("/auth/guest", { method: "POST" });
+  setTokens(resp.access_token, resp.refresh_token);
+  sessionStorage.setItem("autobot.guest", "1");
+  return resp;
+}
+
+/** Текущая сессия — гостевая? */
+export function isGuest(): boolean {
+  return sessionStorage.getItem("autobot.guest") === "1";
+}
+
+/** Выход из гостевого режима (перед входом/регистрацией). */
+export function clearGuest(): void {
+  sessionStorage.removeItem("autobot.guest");
+}
+
 export function logout(): void {
   clearTokens();
 }

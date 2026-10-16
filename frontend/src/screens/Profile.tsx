@@ -1,10 +1,11 @@
 /** Профиль (ТЗ п. 9.2.7): пользователь, тариф, оплата подписки Stars (этап 6). */
 
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button, Cell, Placeholder, Section } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
-import { haptic, logout, tgUser } from "../api/auth";
+import { haptic, isGuest, logout, tgUser } from "../api/auth";
 import type { StarsInvoice, Subscription, User } from "../api/types";
 
 const TIER_LABEL: Record<string, string> = {
@@ -84,8 +85,24 @@ export function ProfileScreen() {
     ? new Date(sub.subscription_until).toLocaleDateString("ru")
     : null;
 
+  const guest = isGuest();
+
   return (
     <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      {guest && (
+        <Section header="Гостевой режим">
+          <div style={{ padding: "0 12px 8px", fontSize: 13, lineHeight: 1.5, opacity: 0.75 }}>
+            Вы смотрите как гость: лента, AI-разбор цены (1 бесплатный), калькулятор и
+            избранное доступны. Сохранённые машины и уведомления в Telegram появятся
+            после входа.
+          </div>
+          <div style={{ display: "flex", gap: 8, padding: 12 }}>
+            <Link to="/login" style={{ flex: 1, textDecoration: "none" }}>
+              <Button stretched mode="filled">Войти / Регистрация</Button>
+            </Link>
+          </div>
+        </Section>
+      )}
       <Section header="Профиль">
         <Cell
           subtitle={user.username ? `@${user.username}` : undefined}

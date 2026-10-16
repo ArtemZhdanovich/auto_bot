@@ -990,3 +990,36 @@ main {
   font-size: 11px;
   opacity: 0.55;
 }
+
+/* --- Гостевой режим (демо без регистрации) --- */
+.guest-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--tgui--secondary_bg_color, #f0f2f5);
+  border: 1px solid var(--tgui--secondary_hint_color, #d5d9de);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--tgui--text_color, #222);
+  animation: fadeIn 0.25s ease;
+}
+.guest-banner a {
+  color: var(--tgui--link_color, #2e7de9);
+  font-weight: 600;
+  text-decoration: none;
+}
+.guest-banner__close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--tgui--secondary_hint_color, #8a9099);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex: none;
+}
+/* Десктоп: баннер по ширине контента, не поверх сайдбара */
+.app-shell--desktop .guest-banner { max-width: 720px; }

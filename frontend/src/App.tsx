@@ -1,11 +1,11 @@
 /** Корневой компонент: авторизация, онбординг, навигация (UI/UX ТЗ §2.1). */
 
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AppRoot, Tabbar } from "@telegram-apps/telegram-ui";
 import { Home, Heart, SlidersHorizontal, Sparkles, User } from "lucide-react";
 
-import { authorize } from "./api/auth";
+import { authorize, guestLogin, isGuest, clearGuest } from "./api/auth";
 import { api, getAccessToken } from "./api/client";
 import { LoginScreen } from "./screens/Login";
 import { FeedScreen } from "./screens/Feed";
@@ -117,20 +117,40 @@ function MiniApp() {
   const [auth, setAuth] = useState<AuthState>("loading");
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   const [authed, setAuthed] = useState(() => Boolean(getAccessToken()));
+  const [guest, setGuest] = useState(() => isGuest());
+  const [bannerHidden, setBannerHidden] = useState(
+    () => sessionStorage.getItem("autobot.guestBanner") === "1",
+  );
   const isDesktop = useIsDesktop();
 
   useEffect(() => {
     authorize()
-      .then((r) => {
-        if (r) setAuthed(true);
+      .then(async (r) => {
+        if (r) {
+          setAuthed(true);
+          return;
+        }
+        // Вне Telegram — гостевой вход: даём потрогать демо без регистрации
+        // (лента, карточка, AI-разбор 1/нед, калькулятор, избранное).
+        try {
+          await guestLogin();
+          setAuthed(true);
+          setGuest(true);
+        } catch {
+          // backend недоступен — покажем форму входа как раньше
+        }
       })
-      .catch(() => undefined) // вне Telegram — покажем форму входа
+      .catch(() => undefined)
       .finally(() => setAuth("ready"));
   }, []);
 
   // Онбординг-флаг из БД (users.onboarded_at, ТЗ §2.8); без БД — раз в сессию.
   useEffect(() => {
     if (!authed || onboarded !== null) return;
+    if (guest) {
+      setOnboarded(true); // гостю онбординг не нужен — сразу демо ленты
+      return;
+    }
     if (sessionStorage.getItem("autobot.onboarded") === "1") {
       setOnboarded(true);
       return;
@@ -138,7 +158,7 @@ function MiniApp() {
     api<UserT>("/me")
       .then((u) => setOnboarded(u.onboarded_at !== null))
       .catch(() => setOnboarded(true)); // /me недоступен — не блокируем UI
-  }, [authed, onboarded]);
+  }, [authed, guest, onboarded]);
 
   const finishOnboarding = (_data: { role: string; countries: string[] }) => {
     // role/countries будут применены к фильтрам на следующих шагах (P4);
@@ -180,6 +200,26 @@ function MiniApp() {
         <div className={isDesktop ? "app-shell app-shell--desktop" : "app-shell"}>
           <BrowserRouter>
             {isDesktop && <NavBar desktop />}
+            {guest && !bannerHidden && (
+              <div className="guest-banner">
+                <span>
+                  👀 Демо без регистрации: смотрите, фильтруйте, пробуйте
+                  AI-разбор цены (1 бесплатный).{" "}
+                  <Link to="/login">Войти</Link>{" "}
+                  — для сохранённых машин и уведомлений в Telegram.
+                </span>
+                <button
+                  className="guest-banner__close"
+                  aria-label="Скрыть"
+                  onClick={() => {
+                    sessionStorage.setItem("autobot.guestBanner", "1");
+                    setBannerHidden(true);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             <div className="app-content">
               <Routes>
                 <Route path="/" element={<FeedScreen />} />
@@ -189,6 +229,20 @@ function MiniApp() {
                 <Route path="/ai" element={<AiSearchScreen />} />
                 <Route path="/filters" element={<FiltersScreen />} />
                 <Route path="/favorites" element={<FavoritesScreen />} />
+                {guest ? (
+                  <Route
+                    path="/login"
+                    element={
+                      <LoginScreen
+                        onAuthed={() => {
+                          clearGuest();
+                          setGuest(false);
+                          setAuthed(true);
+                        }}
+                      />
+                    }
+                  />
+                ) : null}
                 <Route path="/profile" element={<ProfileScreen />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

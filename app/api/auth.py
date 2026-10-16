@@ -210,6 +210,47 @@ async def auth_register(body: WebRegisterRequest, session: SessionDep) -> AuthRe
     )
 
 
+@router.post("/guest", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+async def auth_guest(session: SessionDep) -> AuthResponse:
+    """Гостевой режим: сайт открыт без регистрации (демо функционала).
+
+    Создаёт временного пользователя («Гость», синтетический telegram_id < 0,
+    без email/пароля) и сразу выдаёт JWT. Гость может всё, что free-юзер:
+    лента, фильтры, карточка, AI-разбор цены (1/нед), калькулятор, избранное.
+    Не получает Telegram-уведомлений и не может купить Pro — это осмысленно
+    только после входа. Апгрейд до аккаунта: «Войти/Зарегистрироваться»
+    на экране профиля (гостевые токены заменяются полноценными).
+    """
+    settings = get_settings()
+    for _ in range(5):
+        user = User(
+            telegram_id=_synthetic_telegram_id(),
+            first_name="Гость",
+            username=None,
+            email=None,
+            role="buyer",
+            subscription_tier="free",
+            is_active=True,
+        )
+        session.add(user)
+        try:
+            await session.commit()
+            break
+        except IntegrityError:
+            await session.rollback()  # коллизия синтетического id — пробуем снова
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not allocate user id",
+        )
+    await session.refresh(user)
+    return AuthResponse(
+        access_token=create_access_token(user.telegram_id, settings),
+        refresh_token=create_refresh_token(user.telegram_id, settings),
+        user=UserOut.model_validate(user),
+    )
+
+
 @router.post("/login", response_model=AuthResponse)
 async def auth_login(body: WebLoginRequest, session: SessionDep) -> AuthResponse:
     """Вход на сайте: email + пароль → JWT + профиль."""
