@@ -3,6 +3,7 @@
 import pytest
 
 from app.db.models import AnalyticsEvent, Payment, User
+from app.core.deps_internal import internal_token
 from app.services import analytics
 from app.services.analytics import track
 from app.services.users import upsert_user
@@ -62,7 +63,6 @@ async def test_payment_success_tracks_activation(fake_session):
     """Оплата → subscription_activated с tier/days/stars (идемпотентно)."""
     from app.main import app
     from httpx import ASGITransport, AsyncClient
-    from app.core.config import get_settings
     from app.db.session import get_session
 
     payment = Payment(
@@ -78,7 +78,7 @@ async def test_payment_success_tracks_activation(fake_session):
     fake_session.add(payment)
     fake_session.add(user)
 
-    headers = {"X-Internal-Token": get_settings().app_secret_key}
+    headers = {"X-Internal-Token": internal_token()}
     app.dependency_overrides[get_session] = lambda: fake_session
     try:
         async with AsyncClient(

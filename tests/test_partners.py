@@ -4,7 +4,7 @@ import pytest
 from datetime import UTC, datetime
 
 from app.core.config import get_settings
-from app.core.deps_internal import get_redis
+from app.core.deps_internal import get_redis, internal_token
 from app.core.deps_partner import check_rate_limit
 from app.db.models import AnalyticsEvent, Lead, PartnerAccount, PartnerApiKey
 from app.db.session import get_session
@@ -12,7 +12,7 @@ from app.main import app
 from app.services import partners
 from conftest import FakeRedis, FakeSession
 
-INTERNAL = {"X-Internal-Token": get_settings().app_secret_key}
+INTERNAL = {"X-Internal-Token": internal_token()}
 RAW_KEY = "pi_" + "a" * 40
 
 

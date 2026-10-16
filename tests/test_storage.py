@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 import app.workers.fetch as fetch_mod
 from app.api import admin as admin_mod
-from app.core.config import get_settings
+from app.core.deps_internal import internal_token
 from app.services.fetch import compute_content_hash, save_listings
 from app.services.storage import S3Storage, build_raw_key
 from tests.conftest import FakeSession
@@ -238,7 +238,7 @@ async def test_admin_raw_returns_presigned_url(monkeypatch):
             return f"http://minio.test/{key}?sig=1"
 
     monkeypatch.setattr(admin_mod, "storage_from_settings", lambda: _S())
-    r = await admin_mod.admin_listing_raw(7, session, get_settings().app_secret_key)
+    r = await admin_mod.admin_listing_raw(7, session, internal_token())
     assert r["key"] == "raw/encar/2026/10/7_abc.json"
     assert r["url"].endswith("?sig=1")
     assert r["expires_in"] > 0
@@ -249,5 +249,5 @@ async def test_admin_raw_404_without_raw_key(monkeypatch):
     session.set_result([SimpleNamespace(raw_key=None)])
 
     with pytest.raises(HTTPException) as exc:
-        await admin_mod.admin_listing_raw(7, session, get_settings().app_secret_key)
+        await admin_mod.admin_listing_raw(7, session, internal_token())
     assert exc.value.status_code == 404

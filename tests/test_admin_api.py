@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from app.core.config import get_settings
+from app.core.deps_internal import internal_token
 from app.main import app
 
 client = TestClient(app)
@@ -16,7 +16,7 @@ def test_list_adapters_requires_internal_token():
 def test_list_adapters():
     r = client.get(
         "/api/admin/adapters",
-        headers={"X-Internal-Token": get_settings().app_secret_key},
+        headers={"X-Internal-Token": internal_token()},
     )
     assert r.status_code == 200
     assert "EncarApiAdapter" in r.json()["adapters"]
@@ -43,7 +43,7 @@ def test_admin_leads_empty():
             ) as http:
                 return await http.get(
                     "/api/admin/leads",
-                    headers={"X-Internal-Token": get_settings().app_secret_key},
+                    headers={"X-Internal-Token": internal_token()},
                 )
         finally:
             app.dependency_overrides.clear()
@@ -92,7 +92,7 @@ def test_upsert_source_merges_config():
             ) as http:
                 return await http.put(
                     "/api/admin/sources/encar",
-                    headers={"X-Internal-Token": get_settings().app_secret_key},
+                    headers={"X-Internal-Token": internal_token()},
                     json={
                         "name": "encar",
                         "adapter_class": "EncarApiAdapter",
@@ -138,7 +138,7 @@ def test_upsert_source_new_creates_with_body_config():
             ) as http:
                 return await http.put(
                     "/api/admin/sources/kcar",
-                    headers={"X-Internal-Token": get_settings().app_secret_key},
+                    headers={"X-Internal-Token": internal_token()},
                     json={
                         "name": "kcar",
                         "adapter_class": "KCarApiAdapter",

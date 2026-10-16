@@ -2,14 +2,13 @@
 
 import pytest
 
-from app.core.config import get_settings
-from app.core.deps_internal import get_redis
+from app.core.deps_internal import get_redis, internal_token
 from app.db.session import get_session
 from app.main import app
 
 from conftest import FakeRedis, FakeSession
 
-HEADERS = {"X-Internal-Token": get_settings().app_secret_key}
+HEADERS = {"X-Internal-Token": internal_token()}
 
 
 @pytest.fixture

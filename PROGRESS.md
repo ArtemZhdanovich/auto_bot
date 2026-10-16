@@ -970,3 +970,31 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 - **Секция анализа** (Listing.tsx): состояние загрузки — спиннер + скелетоны («Сравниваю с рынком…»), pill-бейдж отклонения (▼/▲ с цветом), шкала справедливого диапазона с анимированным маркером цены (`fairPosition`), строка меты «разбор от {дата} · нейросеть/статистика» (+`created_at` в payload/API) и «🔄 Пересчитать»; при квоте — «доступен снова через несколько дней»; fade-in секции
 - **Бот**: `_format_analysis` реструктурирован — цена (💵), рынок (📊 count+медиана), год в заголовке, стрелка 📉/📈 у отклонения, футер с квотой и Pro
 - **Тесты**: +formatCompact/fairPosition (analysis.test.ts 22 vitest), +test_format_analysis_title_with_year_and_money_lines; пойман баг formatCompact (18,4 млн → «18 млн»). **544 pytest / 22 vitest, ruff+mypy чисто, бандл на 8443 обновлён**
+
+## 40. Боевое развёртывание MVP: секреты, fail-fast, deploy-кит (+4 теста → 548)
+
+Цель — полный prod-контур: VPS + docker compose (mono) + Caddy (авто-Let's Encrypt).
+
+- **Ротация секретов (INC-001, INC-002 ЗАКРЫТЫ)**: `APP_SECRET_KEY` был длиной 9 символов
+  (= подпись JWT + fallback internal-токена). Сгенерированы: 64-hex `APP_SECRET_KEY`,
+  отдельный 64-hex `INTERNAL_TOKEN`, сильный `DB_PASSWORD` (+`ALTER USER` в живой БД —
+  volume уже инициализирован). backend/bot пересобраны и перезапущены; внутренний API:
+  неверный токен → 401, верный → 200. Старые JWT инвалидированы (перелогин через initData).
+- **Fail-fast (INC-004 ЗАКРЫТ)**: `Settings._prod_secrets_required` — при `APP_ENV=prod`
+  падаем на старте, если ключ = дев-дефолт или короче 32 символов (`tests/test_prod_secrets.py`).
+- **INC-005 (прод)**: в боевом оверрае TLS терминирует Caddy (авто-LE по `$DOMAIN`),
+  self-signed 8443 остаётся только в dev.
+- **Deploy-кит `deploy/`**:
+  - `docker-compose.prod.yml` — оверрайд: Caddy на 80/443 → miniapp → /api; порты инфры
+    (postgres/redis/rabbitmq) и backend сняты с публикации (`!reset []`); `restart: always`;
+    ротация логов json-file 10 MB × 3; `APP_ENV=prod`, публичный `MINIAPP_URL=https://$DOMAIN`.
+  - `Caddyfile` — авто-сертификат, gzip, `/health`.
+  - `bootstrap.sh` — VPS одной командой: Docker, генерация `.env` с боевыми секретами,
+    UFW (наружу только 22/80/443), подъём, миграции, cron бэкапа.
+  - `backup.sh` / `restore.sh` — pg_dump daily (14 копий) + восстановление.
+  - `DEPLOY.md` — ранбук: DNS → bootstrap → проверка LE → обновления → бэкапы → мониторинг.
+- **Тесты**: тесты internal-API переведены с `get_settings().app_secret_key` на
+  `deps_internal.internal_token()` (единый источник истины — теперь ротация INTERNAL_TOKEN
+  не ломает их). **548 pytest (+4), ruff чисто, mypy = база**
+- **Live**: стек на новой машине поднят с нуля после рестарта Docker — backend healthy,
+  бот поллит, miniapp 200. Для выхода в прод: VPS + домен + `bootstrap.sh` (DEPLOY.md).

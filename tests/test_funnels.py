@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import admin as admin_mod
-from app.core.config import get_settings
+from app.core.deps_internal import internal_token
 from app.services import funnels
 from tests.conftest import FakeSession
 
@@ -99,7 +99,7 @@ async def test_retention_empty():
 async def test_admin_funnel_endpoint():
     session = FakeSession()
     session.set_result([SimpleNamespace(name="search_completed", users=10)])
-    r = await admin_mod.analytics_funnel(session, get_settings().app_secret_key, days=14)
+    r = await admin_mod.analytics_funnel(session, internal_token(), days=14)
     assert r["days"] == 14
     assert r["stages"][0]["users"] == 10
 

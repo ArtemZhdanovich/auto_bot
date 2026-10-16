@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,24 @@ class Settings(BaseSettings):
     bot_token: str = ""
     admin_chat_id: int | None = None
     manager_chat_id: int | None = None
+
+    @model_validator(mode="after")
+    def _prod_secrets_required(self) -> "Settings":
+        """Fail-fast (INC-004): в проде запрет дев-секрета и коротких ключей.
+
+        Иначе сервис молча стартует с известным всему миру ключом, которым
+        подписаны JWT и (по fallback) закрыт internal API.
+        """
+        if self.app_env == "prod":
+            if self.app_secret_key == self.model_fields["app_secret_key"].default:
+                raise ValueError(
+                    "APP_SECRET_KEY не задан (используется dev-дефолт) — в prod это запрещено"
+                )
+            if len(self.app_secret_key) < 32:
+                raise ValueError(
+                    "APP_SECRET_KEY короче 32 символов — в prod это запрещено (INC-001)"
+                )
+        return self
 
     @field_validator("admin_chat_id", "manager_chat_id", mode="before")
     @classmethod

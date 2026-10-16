@@ -1,0 +1,14 @@
+# Авто-TLS Let's Encrypt: Caddy сам выпустит и продлит сертификат для $DOMAIN.
+# Весь трафик → nginx миниаппа (статика SPA + proxy /api → backend:8000).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+
+	# Health-проба мониторингом — без кэша
+	respond /health "ok" 200
+
+	reverse_proxy miniapp:80
+}

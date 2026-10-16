@@ -5,11 +5,12 @@ from fastapi.testclient import TestClient
 
 from app.ai.llm_client import LLMResult, MockLLMClient, ToolCall
 from app.core.config import get_settings
+from app.core.deps_internal import internal_token
 from app.main import app
 from app.services import admin_assistant
 from conftest import FakeSession
 
-INTERNAL = {"X-Internal-Token": get_settings().app_secret_key}
+INTERNAL = {"X-Internal-Token": internal_token()}
 
 
 # --- Сервис: assistant_reply --------------------------------------------------

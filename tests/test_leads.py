@@ -2,14 +2,14 @@
 
 import pytest
 
-from app.core.config import get_settings
+from app.core.deps_internal import internal_token
 from app.db.models import AnalyticsEvent
 from app.db.session import get_session
 from app.main import app
 from app.services import analytics
 from conftest import FakeSession
 
-HEADERS = {"X-Internal-Token": get_settings().app_secret_key}
+HEADERS = {"X-Internal-Token": internal_token()}
 
 
 @pytest.fixture

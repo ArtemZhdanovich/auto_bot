@@ -6,6 +6,7 @@ import pytest
 
 from app.ai.rag_client import RAGClient
 from app.core.config import get_settings
+from app.core.deps_internal import internal_token
 from app.db.models import SourceHealth
 from app.db.session import get_session
 from app.main import app
@@ -162,7 +163,7 @@ async def test_metrics_requires_internal_token(fake_session):
 async def test_metrics_smoke(fake_session):
     from httpx import ASGITransport, AsyncClient
 
-    HEADERS = {"X-Internal-Token": get_settings().app_secret_key}
+    HEADERS = {"X-Internal-Token": internal_token()}
     app.dependency_overrides[get_session] = lambda: fake_session
     try:
         async with AsyncClient(

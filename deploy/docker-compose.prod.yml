@@ -1,0 +1,74 @@
+# ============================================================
+# Боевой оверрайд поверх docker-compose.yml (профиль mono).
+#
+#   DOMAIN=auto.example.com docker compose -f docker-compose.yml
+#     -f deploy/docker-compose.prod.yml --profile mono up -d
+#
+# Что делает:
+#   • Caddy на 80/443 — автоматический Let's Encrypt (HTTPS для Mini App
+#     и web_app-кнопки Telegram; self-signed больше не нужен);
+#   • инфраструктура (postgres/redis/rabbitmq/minio/qdrant) больше НЕ
+#     торчит наружу — порты только на 127.0.0.1;
+#   • backend:8000 наружу не публикуется (только через Caddy → miniapp nginx);
+#   • restart: always + ротация логов (json-file, 10 MB × 3) на всё.
+# ============================================================
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN обязателен, напр. auto.example.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      miniapp: { condition: service_started }
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  postgres:
+    ports: !reset []          # наружу не светим
+    restart: always
+    logging: *logging
+  redis:
+    ports: !reset []
+    restart: always
+    logging: *logging
+  rabbitmq:
+    ports: !reset []
+    restart: always
+    logging: *logging
+
+  backend:
+    ports: !reset []          # только через caddy → miniapp → /api
+    restart: always
+    environment:
+      APP_ENV: prod
+      APP_BASE_URL: http://backend:8000
+      MINIAPP_URL: https://${DOMAIN}
+    logging: *logging
+
+  bot:
+    restart: always
+    environment:
+      APP_BASE_URL: http://backend:8000
+      MINIAPP_URL: https://${DOMAIN}
+    logging: *logging
+
+  miniapp:
+    ports: !reset []          # HTTPS терминирует Caddy
+    restart: always
+    logging: *logging
+
+  worker_fetch:
+    restart: always
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:
