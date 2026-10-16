@@ -899,12 +899,16 @@ main {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0; /* grid-колонки сжимаются, инпут не распирает контейнер */
 }
 .calc-field span {
   font-size: var(--font-sm);
   color: var(--text-secondary, var(--text));
 }
 .calc-field input {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   padding: 10px var(--space-3);
   border-radius: var(--radius-md);
   border: 1px solid var(--bg-secondary);
@@ -1053,7 +1057,8 @@ main {
 }
 .compare-variant__fields {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 0.8fr;
+  /* minmax(0,…) — колонки не шире контейнера даже с широким контентом */
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.8fr);
   gap: 8px;
 }
 .compare-remove {
