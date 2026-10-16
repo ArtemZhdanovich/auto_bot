@@ -160,10 +160,39 @@ export function FeedScreen() {
       {/* Сентинел бесконечного скролла */}
       <div ref={sentinelRef} style={{ height: 1 }} />
       {loadingMore && (
-        <div style={{ padding: 16 }}>
+        <div className="feed-more">
           <SkeletonList count={1} />
         </div>
       )}
+
+      {/* Ошибка подгрузки: лента не должна молча останавливаться */}
+      {!loading && !loadingMore && error && items.length > 0 && (
+        <div className="feed-more feed-more--error">
+          <span>Не удалось загрузить следующие объявления</span>
+          <button
+            className="feed-more__btn"
+            onClick={() => void load(query, false)}
+          >
+            Повторить
+          </button>
+        </div>
+      )}
+
+      {/* Ручная подгрузка — фолбэк, если IntersectionObserver не сработал */}
+      {!loading && !loadingMore && !error && items.length < total && (
+        <div className="feed-more">
+          <button
+            className="feed-more__btn"
+            onClick={() => void load(query, false)}
+          >
+            Показать ещё
+          </button>
+          <span className="feed-more__hint">
+            {items.length} из {total.toLocaleString("ru")}
+          </span>
+        </div>
+      )}
+
       {!loading && !error && items.length >= total && items.length > 0 && (
         <div className="state" style={{ padding: 16 }}>
           Показаны все найденные варианты
