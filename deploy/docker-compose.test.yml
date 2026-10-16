@@ -1,0 +1,43 @@
+# ============================================================
+# Тестовый стенд сайта: изолированный параллельный стек.
+#
+#   docker compose -p auto_bot_test -f docker-compose.yml \
+#     -f deploy/docker-compose.test.yml --profile mono up -d \
+#     postgres redis backend miniapp
+#
+# • своя БД (новый volume проекта auto_bot_test) — боевым данным не страшно;
+# • порты: backend 8001, миниапп 8081 (HTTP) / 8444 (HTTPS);
+# • bot и worker_fetch НЕ запускаются (поллинг того же токена конфликтует
+#   с боевым ботом); демо-данные заливаются скриптом deploy/teststand.sh.
+# Снести стенд с данными:
+#   docker compose -p auto_bot_test down -v
+# ============================================================
+services:
+  backend:
+    ports: !override
+      - "8001:8000"
+    environment:
+      # стенд открыт людям — LLM не жжём: разбор цены вернёт mock-вердикт
+      LLM_PROVIDER: mock
+    restart: unless-stopped
+
+  miniapp:
+    ports: !override
+      - "8081:80"
+      - "8444:443"
+    restart: unless-stopped
+
+  postgres:
+    ports: !override
+      - "8002:5432"   # хост-порт 5432 занят боевым
+    restart: unless-stopped
+
+  redis:
+    ports: !override
+      - "16379:6379"   # 6379 занят боевым стендом
+    restart: unless-stopped
+  rabbitmq:
+    ports: !override
+      - "16372:5672"
+      - "15673:15672"
+    restart: unless-stopped

@@ -94,3 +94,26 @@ Docker публикует порты на 0.0.0.0, правило брандма
   `netsh advfirewall firewall add rule name="auto_bot miniapp 8443" dir=in action=allow protocol=TCP localport=8443 profile=any`
   (аналогично 8080/8000).
 - Текущий профиль сети — **Public**: держи 8000 закрытым снаружи роутера, в интернет эти порты не пробрасывай (для этого — VPS по §1–3).
+
+## 10. Тестовый стенд сайта (изолированный, параллельный)
+
+Своя БД (fresh volume проекта `auto_bot_test`), порты 8001/8081/8444,
+LLM = **mock** (разбор цены вернёт заглушку — токены GLM не тратятся),
+без бота и воркеров. Демо-данные — копия listings+history из боевой БД.
+
+```bash
+bash deploy/teststand.sh        # поднять/обновить + залить демо-данные
+bash deploy/teststand.sh nuke   # снести с данными
+```
+
+| Что | URL |
+|---|---|
+| Сайт (гостевой режим) | `https://localhost:8444` / из LAN `https://<LAN-IP>:8444` |
+| API | `http://localhost:8001` |
+| Тестовый Postgres | хост-порт `8002` |
+
+Грабли (уже закрыты в `deploy/docker-compose.test.yml`):
+- compose **мёржи** списки `ports` — оверрайд должен использовать `!override`,
+  иначе тестовые redis/rabbitmq сядут на порты боевого (6379/5672/15672);
+- тестовые `redis`/`rabbitmq` нужны backend-у по depends_on — поднимать командой
+  целиком (postgres redis backend miniapp), а не только backend.
