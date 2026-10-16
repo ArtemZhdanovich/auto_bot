@@ -1,19 +1,35 @@
-/** Лента объявлений (UI/UX ТЗ §2.2): динамические чипсы, бесконечный скролл. */
+/** Лента объявлений (UI/UX ТЗ §2.2): чипсы, панель фильтров, бесконечный скролл. */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 
 import { api } from "../api/client";
 import { ListingCard } from "../components/ListingCard";
 import { SkeletonList } from "../ui/Skeleton";
 import { EmptyState, ErrorState } from "../ui/States";
+import { KRW_PER_USD, digits } from "../lib/fx";
 import type { Listing, ListingList, UserFilter } from "../api/types";
 
 const PAGE_SIZE = 20;
 
+/**
+ * Критерии ленты. Цены — в $ (как на экране фильтров); в БД цены хранятся
+ * в валюте источника (воны), поэтому в запросе конвертируются (buildParams).
+ */
 interface FeedQuery {
   make?: string;
-  price_max?: string;
-  year_from?: string;
+  model?: string;
+  yearFrom?: string;
+  yearTo?: string;
+  priceMin?: string;
+  priceMax?: string;
+  mileageMax?: string;
+  source?: string;
 }
 
 /** Быстрые пресеты (ТЗ §2.2) + сохранённые фильтры пользователя. */
@@ -23,27 +39,56 @@ interface Chip {
   query: FeedQuery;
 }
 
+const PRESETS: Chip[] = [
+  { key: "all", label: "Все", query: {} },
+  { key: "p10", label: "до $10 000", query: { priceMax: "10000" } },
+  { key: "p10_20", label: "$10–20 тыс.", query: { priceMin: "10000", priceMax: "20000" } },
+  { key: "p20_30", label: "$20–30 тыс.", query: { priceMin: "20000", priceMax: "30000" } },
+  { key: "p30", label: "от $30 000", query: { priceMin: "30000" } },
+  { key: "y2022", label: "2022+", query: { yearFrom: "2022" } },
+  { key: "y18_21", label: "2018–2021", query: { yearFrom: "2018", yearTo: "2021" } },
+  { key: "m60", label: "до 60 тыс. км", query: { mileageMax: "60000" } },
+  { key: "m100", label: "до 100 тыс. км", query: { mileageMax: "100000" } },
+];
+
 function buildChips(filters: UserFilter[]): Chip[] {
-  const presets: Chip[] = [
-    { key: "all", label: "Все", query: {} },
-    { key: "p20k", label: "до $20 000", query: { price_max: "20000" } },
-    { key: "y2022", label: "2022+", query: { year_from: "2022" } },
-  ];
-  const saved: Chip[] = filters.map((f) => ({
-    key: `f${f.id}`,
-    label: f.name ?? `Фильтр #${f.id}`,
-    query: {
-      make: f.criteria.make,
-      price_max: f.criteria.price_max !== undefined ? String(f.criteria.price_max) : undefined,
-      year_from: f.criteria.year_from !== undefined ? String(f.criteria.year_from) : undefined,
-    },
-  }));
-  return [...presets, ...saved];
+  const saved: Chip[] = filters.map((f) => {
+    const c = f.criteria;
+    return {
+      key: `f${f.id}`,
+      label: f.name ?? `Фильтр #${f.id}`,
+      query: {
+        make: c.make,
+        model: c.model,
+        yearFrom: c.year_from !== undefined ? String(c.year_from) : undefined,
+        yearTo: c.year_to !== undefined ? String(c.year_to) : undefined,
+        priceMin: c.price_min !== undefined ? String(c.price_min) : undefined,
+        priceMax: c.price_max !== undefined ? String(c.price_max) : undefined,
+        mileageMax: c.mileage_max !== undefined ? String(c.mileage_max) : undefined,
+      },
+    };
+  });
+  return [...PRESETS, ...saved];
 }
 
 function sameQuery(a: FeedQuery, b: FeedQuery): boolean {
-  return a.make === b.make && a.price_max === b.price_max && a.year_from === b.year_from;
+  return (
+    a.make === b.make &&
+    a.model === b.model &&
+    a.yearFrom === b.yearFrom &&
+    a.yearTo === b.yearTo &&
+    a.priceMin === b.priceMin &&
+    a.priceMax === b.priceMax &&
+    a.mileageMax === b.mileageMax &&
+    a.source === b.source
+  );
 }
+
+const activeFields = (q: FeedQuery): number =>
+  Object.values(q).filter((v) => v !== undefined && v !== "").length;
+
+/** $ → воны (цены в БД хранятся в валюте источника — encar/kcar, KRW). */
+const usdToKrw = (usd: string): string => String(Math.round(Number(usd) * KRW_PER_USD));
 
 export function FeedScreen() {
   const [items, setItems] = useState<Listing[]>([]);
@@ -53,6 +98,8 @@ export function FeedScreen() {
   const [error, setError] = useState<string | null>(null);
   const [chips, setChips] = useState<Chip[]>([]);
   const [query, setQuery] = useState<FeedQuery>({});
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [draft, setDraft] = useState<FeedQuery>({});
   const offsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const queryRef = useRef(query);
@@ -72,8 +119,13 @@ export function FeedScreen() {
     try {
       const params = new URLSearchParams();
       if (q.make) params.set("make", q.make);
-      if (q.price_max) params.set("price_max", q.price_max);
-      if (q.year_from) params.set("year_from", q.year_from);
+      if (q.model) params.set("model", q.model);
+      if (q.yearFrom) params.set("year_from", q.yearFrom);
+      if (q.yearTo) params.set("year_to", q.yearTo);
+      if (q.priceMin) params.set("price_min", usdToKrw(q.priceMin));
+      if (q.priceMax) params.set("price_max", usdToKrw(q.priceMax));
+      if (q.mileageMax) params.set("mileage_max", q.mileageMax);
+      if (q.source) params.set("source", q.source);
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(reset ? 0 : offsetRef.current));
       const data = await api<ListingList>(`/listings?${params.toString()}`);
@@ -111,10 +163,35 @@ export function FeedScreen() {
   }, [items.length, total, loading, loadingMore, error, load]);
 
   const activeChip = chips.find((c) => sameQuery(c.query, query))?.key ?? "";
+  const activeCount = activeFields(query);
 
   const retry = useCallback(() => {
     void load(queryRef.current, items.length === 0);
   }, [load, items.length]);
+
+  const togglePanel = useCallback(() => {
+    setPanelOpen((v) => {
+      if (!v) setDraft(queryRef.current); // открыть с текущими значениями
+      return !v;
+    });
+  }, []);
+
+  const setField =
+    (key: keyof FeedQuery, numeric = false) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const raw = numeric ? digits(e.target.value) : e.target.value;
+      setDraft((d) => ({ ...d, [key]: raw || undefined }));
+    };
+
+  const applyPanel = useCallback(() => {
+    setQuery(draft);
+    setPanelOpen(false);
+  }, [draft]);
+
+  const resetPanel = useCallback(() => {
+    setDraft({});
+    setQuery({});
+  }, []);
 
   return (
     <div>
@@ -125,17 +202,108 @@ export function FeedScreen() {
             {total.toLocaleString("ru")} авто · новые сверху
           </div>
         )}
-        <div className="chip-row">
-          {chips.map((c) => (
-            <button
-              key={c.key}
-              className={c.key === activeChip ? "chip chip--active" : "chip"}
-              onClick={() => setQuery(c.query)}
-            >
-              {c.label}
-            </button>
-          ))}
+        <div className="feed-subbar">
+          <div className="chip-row">
+            {chips.map((c) => (
+              <button
+                key={c.key}
+                className={c.key === activeChip ? "chip chip--active" : "chip"}
+                onClick={() => setQuery(c.query)}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+          <button
+            className={panelOpen || activeCount > 0 ? "feed-toggle feed-toggle--on" : "feed-toggle"}
+            onClick={togglePanel}
+            aria-expanded={panelOpen}
+          >
+            Фильтры{activeCount > 0 ? ` · ${activeCount}` : ""}
+          </button>
         </div>
+
+        {panelOpen && (
+          <div className="feed-panel">
+            <label className="feed-panel__field">
+              <span>Марка</span>
+              <input
+                value={draft.make ?? ""}
+                onChange={setField("make")}
+                placeholder="Hyundai"
+              />
+            </label>
+            <label className="feed-panel__field">
+              <span>Модель</span>
+              <input
+                value={draft.model ?? ""}
+                onChange={setField("model")}
+                placeholder="Sonata"
+              />
+            </label>
+            <label className="feed-panel__field">
+              <span>Год от</span>
+              <input
+                inputMode="numeric"
+                value={draft.yearFrom ?? ""}
+                onChange={setField("yearFrom", true)}
+                placeholder="2019"
+              />
+            </label>
+            <label className="feed-panel__field">
+              <span>Год до</span>
+              <input
+                inputMode="numeric"
+                value={draft.yearTo ?? ""}
+                onChange={setField("yearTo", true)}
+                placeholder="2024"
+              />
+            </label>
+            <label className="feed-panel__field">
+              <span>Цена $ от</span>
+              <input
+                inputMode="numeric"
+                value={draft.priceMin ?? ""}
+                onChange={setField("priceMin", true)}
+                placeholder="5 000"
+              />
+            </label>
+            <label className="feed-panel__field">
+              <span>Цена $ до</span>
+              <input
+                inputMode="numeric"
+                value={draft.priceMax ?? ""}
+                onChange={setField("priceMax", true)}
+                placeholder="30 000"
+              />
+            </label>
+            <label className="feed-panel__field">
+              <span>Пробег, км — не более</span>
+              <input
+                inputMode="numeric"
+                value={draft.mileageMax ?? ""}
+                onChange={setField("mileageMax", true)}
+                placeholder="100 000"
+              />
+            </label>
+            <label className="feed-panel__field">
+              <span>Источник</span>
+              <select value={draft.source ?? ""} onChange={setField("source")}>
+                <option value="">Любой</option>
+                <option value="encar">Encar</option>
+                <option value="kcar">Kcar</option>
+              </select>
+            </label>
+            <div className="feed-panel__actions">
+              <button className="feed-panel__apply" onClick={applyPanel}>
+                Применить
+              </button>
+              <button className="feed-panel__reset" onClick={resetPanel}>
+                Сбросить
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="feed-grid">

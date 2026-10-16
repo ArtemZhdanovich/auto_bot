@@ -118,4 +118,46 @@ describe("Feed pagination", () => {
     expect(screen.queryByText("Не удалось загрузить следующие объявления")).toBeNull();
     expect(screen.getByText("40 из 45")).toBeTruthy();
   });
+
+  it("чип цены шлёт price_max в вонах ($10 000 × 1350)", async () => {
+    renderFeed();
+    await waitFor(() => expect(screen.getByText("до $10 000")).toBeTruthy());
+    fireEvent.click(screen.getByText("до $10 000"));
+    await waitFor(() => {
+      const listingCalls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
+      expect(listingCalls.some((p) => p.includes("price_max=13500000"))).toBe(true);
+    });
+  });
+
+  it("панель фильтров: цена и год конвертируются/пробрасываются, кнопка показывает счётчик", async () => {
+    renderFeed();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Фильтры/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    fireEvent.change(screen.getByLabelText("Цена $ до"), { target: { value: "5000" } });
+    fireEvent.change(screen.getByLabelText("Год от"), { target: { value: "2020" } });
+    fireEvent.click(screen.getByText("Применить"));
+    await waitFor(() => {
+      const listingCalls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
+      expect(listingCalls.some((p) => p.includes("price_max=6750000"))).toBe(true);
+      expect(listingCalls.some((p) => p.includes("year_from=2020"))).toBe(true);
+    });
+    // панель закрылась, на кнопке счётчик активных критериев
+    expect(screen.queryByText("Применить")).toBeNull();
+    expect(screen.getByText("Фильтры · 2")).toBeTruthy();
+  });
+
+  it("«Сбросить» возвращает полную ленту", async () => {
+    renderFeed();
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    fireEvent.change(screen.getByLabelText("Марка"), { target: { value: "Hyundai" } });
+    fireEvent.click(screen.getByText("Применить"));
+    await waitFor(() => expect(screen.getByText("Фильтры · 1")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    fireEvent.click(screen.getByText("Сбросить"));
+    await waitFor(() => {
+      const calls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
+      const last = calls[calls.length - 1] ?? "";
+      expect(last.includes("make=")).toBe(false);
+    });
+  });
 });

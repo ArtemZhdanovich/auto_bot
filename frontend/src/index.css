@@ -326,6 +326,99 @@ main {
   color: #d64545;
 }
 
+/* --- Лента: подбар чипсы + кнопка «Фильтры» --- */
+.feed-subbar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.feed-subbar .chip-row {
+  flex: 1;
+  min-width: 0; /* чипсы скроллятся, кнопку не выталкивают */
+}
+.feed-toggle {
+  flex: none;
+  padding: 8px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--tgui--secondary_hint_color, #d5d9de);
+  background: var(--tgui--secondary_bg_color, #f0f2f5);
+  color: var(--tgui--text_color, #222);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.feed-toggle--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* --- Лента: панель фильтров --- */
+.feed-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--tgui--secondary_bg_color, #f0f2f5);
+  border: 1px solid var(--tgui--secondary_hint_color, #d5d9de);
+  box-shadow: var(--shadow-sm);
+}
+.feed-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-xs);
+  color: var(--tgui--secondary_hint_color, #8a9099);
+}
+.feed-panel__field input,
+.feed-panel__field select {
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--tgui--secondary_hint_color, #d5d9de);
+  background: var(--tgui--bg_color, #fff);
+  color: var(--tgui--text_color, #222);
+  font-size: var(--font-sm);
+}
+.feed-panel__field input:focus,
+.feed-panel__field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.feed-panel__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+}
+.feed-panel__apply {
+  flex: 1;
+  padding: 10px 0;
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.feed-panel__reset {
+  flex: none;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--tgui--secondary_hint_color, #d5d9de);
+  background: transparent;
+  color: var(--tgui--text_color, #222);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+@media (min-width: 768px) {
+  .feed-panel {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
 /* ============================================================
    Feed-хедер (sticky)
    ============================================================ */
