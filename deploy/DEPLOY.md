@@ -72,3 +72,25 @@ docker compose start bot worker_fetch
 - Ротация `APP_SECRET_KEY` инвалидирует JWT — пользователи переподнимут сессию
   через initData автоматически.
 - Аудит и журнал инцидентов: `INCIDENTS.md` (INC-001…005).
+
+## 9. Доступ из локальной сети (стенд на своей машине)
+
+Docker публикует порты на 0.0.0.0, правило брандмауэра «Docker Desktop Backend»
+(Public, Any TCP) уже разрешает входящие — из LAN всё открывается само:
+
+| Что | URL |
+|---|---|
+| Миниапп (сайт, гостевой режим) | `https://<LAN-IP>:8443` (браузер: «принять риск» — серт self-signed с SAN этого IP) |
+| Миниапп по HTTP | `http://<LAN-IP>:8080` |
+| API | `http://<LAN-IP>:8000/health` |
+
+Проверка с другого устройства: `curl -k https://<LAN-IP>:8443/api/listings?limit=1`.
+
+- IP узнать: `ipconfig` (IPv4 основного адаптера). В стенде сейчас `10.132.137.38`.
+- **IP сменился (DHCP)** → обнови `LAN_IP` и `MINIAPP_URL=https://<новый-IP>:8443`
+  в `.env`, затем `docker compose --profile mono up -d miniapp bot`
+  (SAN self-signed-серта генерится из `NG_HOST_IP=${LAN_IP}`).
+- Если брандмауэр режет (нет правила Docker), от адмира:
+  `netsh advfirewall firewall add rule name="auto_bot miniapp 8443" dir=in action=allow protocol=TCP localport=8443 profile=any`
+  (аналогично 8080/8000).
+- Текущий профиль сети — **Public**: держи 8000 закрытым снаружи роутера, в интернет эти порты не пробрасывай (для этого — VPS по §1–3).
