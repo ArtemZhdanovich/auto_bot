@@ -65,6 +65,11 @@ export interface Listing {
   currency: string | null;
   mileage_km: number | null;
   vin: string | null;
+  /** Спеки (миграция 0016): кузов/топливо/КПП/привод — строка в карточке. */
+  body_type?: string | null;
+  fuel?: string | null;
+  transmission?: string | null;
+  drive?: string | null;
   images: string[];
   parsed_at: string;
   /** Отслеживание (PLAN.md, фаза 4) */

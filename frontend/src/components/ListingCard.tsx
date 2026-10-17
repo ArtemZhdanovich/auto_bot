@@ -7,6 +7,13 @@ import { Heart, ImageOff } from "lucide-react";
 import { api } from "../api/client";
 import { haptic, isGuest } from "../api/auth";
 import { getRegion, priceChain } from "../lib/fx";
+import {
+  bodyLabel,
+  driveLabel,
+  fuelLabel,
+  sourceCountry,
+  transmissionLabel,
+} from "../lib/specs";
 import { useToast } from "../ui/Toast";
 import { useLoginPrompt } from "../ui/LoginPrompt";
 import type { Listing } from "../api/types";
@@ -127,14 +134,45 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
         <div className="listing-card__price">
           {chain.local ?? chain.original ?? "—"}
         </div>
+        {/* Спек-строка (как на avtokorea.by): топливо · КПП · кузов · привод */}
+        {(fuelLabel(listing.fuel) ||
+          transmissionLabel(listing.transmission) ||
+          bodyLabel(listing.body_type) ||
+          driveLabel(listing.drive)) && (
+          <div className="listing-card__specs">
+            {[
+              fuelLabel(listing.fuel) && `⛽ ${fuelLabel(listing.fuel)}`,
+              transmissionLabel(listing.transmission) &&
+                `⚙️ ${transmissionLabel(listing.transmission)}`,
+              bodyLabel(listing.body_type) && `🚙 ${bodyLabel(listing.body_type)}`,
+              driveLabel(listing.drive) && `🔧 ${driveLabel(listing.drive)}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        )}
         <div className="listing-card__meta">
           {listing.mileage_km
             ? `${listing.mileage_km.toLocaleString("ru")} км · `
             : ""}
-          {[listing.source, listing.parsed_at && new Date(listing.parsed_at).toLocaleDateString("ru")]
-            .filter(Boolean)
-            .join(" · ")}
+          {sourceCountry(listing.source)}
+          {" · "}
+          {listing.parsed_at && new Date(listing.parsed_at).toLocaleDateString("ru")}
         </div>
+        {/* Ссылка на исходное объявление — «источник и сайт» на карточке */}
+        <a
+          className="listing-card__source"
+          href={listing.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {listing.source === "encar"
+            ? "encar.com ↗"
+            : listing.source === "kcar"
+              ? "kcar.com ↗"
+              : `${listing.source} ↗`}
+        </a>
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ async def list_listings(
     price_min: float | None = Query(default=None, ge=0),
     price_max: float | None = Query(default=None, ge=0),
     currency: str | None = None,
+    mileage_min: int | None = Query(default=None, ge=0),
     mileage_max: int | None = Query(default=None, ge=0),
     # Спеки (миграция 0016): кузов/топливо/КПП/привод — фильтры ленты.
     body_type: str | None = None,
@@ -57,6 +58,8 @@ async def list_listings(
         conditions.append(Listing.price <= price_max)
     if currency:
         conditions.append(func.lower(Listing.currency) == currency.lower())
+    if mileage_min is not None:
+        conditions.append(Listing.mileage_km >= mileage_min)
     if mileage_max is not None:
         conditions.append(Listing.mileage_km <= mileage_max)
     for param, column in (
@@ -97,6 +100,38 @@ async def list_listings(
             {"results": total, "filters": len(conditions)},
         )
     return ListingListOut(total=total, items=items)
+
+
+@router.get("/facets")
+async def listing_facets(
+    session: SessionDep,
+    make: str | None = None,
+) -> dict[str, list[str]]:
+    """Справочник для зависимых селектов фильтров (как на avtokorea.by).
+
+    Без make — список всех марок; с make — только модели этой марки.
+    Значения — как они есть в БД (encar/kcar отдают англ. названия марок
+    и разные варианты моделей), сортировка по алфавиту.
+    """
+    if make:
+        rows = await session.execute(
+            select(Listing.model)
+            .where(
+                func.lower(Listing.make) == make.lower(),
+                Listing.model.is_not(None),
+                Listing.model != "",
+            )
+            .distinct()
+            .order_by(Listing.model)
+        )
+        return {"models": [r[0] for r in rows.all()]}
+    rows = await session.execute(
+        select(Listing.make)
+        .where(Listing.make.is_not(None), Listing.make != "")
+        .distinct()
+        .order_by(Listing.make)
+    )
+    return {"makes": [r[0] for r in rows.all()]}
 
 
 @router.get("/by-url", response_model=ListingOut)

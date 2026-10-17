@@ -62,6 +62,9 @@ beforeEach(() => {
   apiMock.mockReset();
   apiMock.mockImplementation(async (path: string) => {
     if (path.startsWith("/filters")) return [];
+    if (path.includes("/listings/facets")) {
+      return path.includes("make=") ? { models: ["Carnival", "K5"] } : { makes: ["Kia", "Hyundai"] };
+    }
     const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset") ?? 0);
     return page(offset, TOTAL, Math.min(20, TOTAL - offset));
   });
@@ -148,6 +151,10 @@ describe("Feed pagination", () => {
   it("«Сбросить» возвращает полную ленту", async () => {
     renderFeed();
     fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    // Марка теперь селект из фасетов — ждём загрузки опций
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: "Hyundai" })).toBeTruthy(),
+    );
     fireEvent.change(screen.getByLabelText("Марка"), { target: { value: "Hyundai" } });
     fireEvent.click(screen.getByText("Применить"));
     await waitFor(() => expect(screen.getByText("Фильтры · 1")).toBeTruthy());

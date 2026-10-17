@@ -14,6 +14,12 @@ import { ListingCard } from "../components/ListingCard";
 import { SkeletonList } from "../ui/Skeleton";
 import { EmptyState, ErrorState } from "../ui/States";
 import { KRW_PER_USD, digits } from "../lib/fx";
+import {
+  BODIES,
+  DRIVES,
+  FUELS,
+  TRANSMISSIONS,
+} from "../lib/specs";
 import type { Listing, ListingList, UserFilter } from "../api/types";
 
 /** Ключи сортировки ленты (PLP-стандарт e-commerce). */
@@ -40,7 +46,12 @@ interface FeedQuery {
   yearTo?: string;
   priceMin?: string;
   priceMax?: string;
+  mileageMin?: string;
   mileageMax?: string;
+  bodyType?: string;
+  fuel?: string;
+  transmission?: string;
+  drive?: string;
   source?: string;
 }
 
@@ -84,16 +95,22 @@ function buildChips(filters: UserFilter[]): Chip[] {
 }
 
 function sameQuery(a: FeedQuery, b: FeedQuery): boolean {
-  return (
-    a.make === b.make &&
-    a.model === b.model &&
-    a.yearFrom === b.yearFrom &&
-    a.yearTo === b.yearTo &&
-    a.priceMin === b.priceMin &&
-    a.priceMax === b.priceMax &&
-    a.mileageMax === b.mileageMax &&
-    a.source === b.source
-  );
+  const keys: Array<keyof FeedQuery> = [
+    "make",
+    "model",
+    "yearFrom",
+    "yearTo",
+    "priceMin",
+    "priceMax",
+    "mileageMin",
+    "mileageMax",
+    "bodyType",
+    "fuel",
+    "transmission",
+    "drive",
+    "source",
+  ];
+  return keys.every((k) => a[k] === b[k]);
 }
 
 const activeFields = (q: FeedQuery): number =>
@@ -140,6 +157,11 @@ function deepLinkQuery(): FeedQuery {
     priceMin: pick("price_min"),
     priceMax: pick("price_max"),
     mileageMax: pick("mileage_max"),
+    mileageMin: pick("mileage_min"),
+    bodyType: pick("body_type"),
+    fuel: pick("fuel"),
+    transmission: pick("transmission"),
+    drive: pick("drive"),
     source: pick("source"),
   };
   const clean = Object.fromEntries(
@@ -166,6 +188,9 @@ export function FeedScreen() {
   const [sort, setSort] = useState<SortKey>(() => restore.current?.sort ?? "new");
   const [panelOpen, setPanelOpen] = useState(false);
   const [draft, setDraft] = useState<FeedQuery>({});
+  // Фасеты для зависимых селектов марка→модель (как на avtokorea.by)
+  const [makes, setMakes] = useState<string[]>([]);
+  const [models, setModels] = useState<string[]>([]);
   const [showTop, setShowTop] = useState(false);
   const offsetRef = useRef(restore.current?.offset ?? 0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -204,6 +229,11 @@ export function FeedScreen() {
       if (q.priceMin) params.set("price_min", usdToKrw(q.priceMin));
       if (q.priceMax) params.set("price_max", usdToKrw(q.priceMax));
       if (q.mileageMax) params.set("mileage_max", q.mileageMax);
+      if (q.mileageMin) params.set("mileage_min", q.mileageMin);
+      if (q.bodyType) params.set("body_type", q.bodyType);
+      if (q.fuel) params.set("fuel", q.fuel);
+      if (q.transmission) params.set("transmission", q.transmission);
+      if (q.drive) params.set("drive", q.drive);
       if (q.source) params.set("source", q.source);
       params.set("sort", sortRef.current);
       params.set("limit", String(PAGE_SIZE));
@@ -301,10 +331,29 @@ export function FeedScreen() {
 
   const togglePanel = useCallback(() => {
     setPanelOpen((v) => {
-      if (!v) setDraft(queryRef.current); // открыть с текущими значениями
+      if (!v) {
+        setDraft(queryRef.current); // открыть с текущими значениями
+        // Марки грузим один раз при первом открытии панели
+        if (makes.length === 0) {
+          api<{ makes: string[] }>("/listings/facets")
+            .then((r) => setMakes(r.makes ?? []))
+            .catch(() => setMakes([]));
+        }
+        // Модели — под выбранную марку
+        const mk = queryRef.current.make;
+        if (mk) {
+          api<{ models: string[] }>(
+            `/listings/facets?make=${encodeURIComponent(mk)}`,
+          )
+            .then((r) => setModels(r.models ?? []))
+            .catch(() => setModels([]));
+        } else {
+          setModels([]);
+        }
+      }
       return !v;
     });
-  }, []);
+  }, [makes.length]);
 
   const setField =
     (key: keyof FeedQuery, numeric = false) =>
@@ -372,19 +421,46 @@ export function FeedScreen() {
           <div className="feed-panel">
             <label className="feed-panel__field">
               <span>Марка</span>
-              <input
+              <select
                 value={draft.make ?? ""}
-                onChange={setField("make")}
-                placeholder="Hyundai"
-              />
+                onChange={(e) => {
+                  const mk = e.target.value || undefined;
+                  setDraft((d) => ({ ...d, make: mk, model: undefined }));
+                  if (mk) {
+                    api<{ models: string[] }>(
+                      `/listings/facets?make=${encodeURIComponent(mk)}`,
+                    )
+                      .then((r) => setModels(r.models ?? []))
+                      .catch(() => setModels([]));
+                  } else {
+                    setModels([]);
+                  }
+                }}
+              >
+                <option value="">Любая марка</option>
+                {makes.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="feed-panel__field">
               <span>Модель</span>
-              <input
+              <select
                 value={draft.model ?? ""}
                 onChange={setField("model")}
-                placeholder="Sonata"
-              />
+                disabled={!draft.make}
+              >
+                <option value="">
+                  {draft.make ? "Любая модель" : "Сначала выберите марку"}
+                </option>
+                {models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="feed-panel__field">
               <span>Год от</span>
@@ -423,6 +499,15 @@ export function FeedScreen() {
               />
             </label>
             <label className="feed-panel__field">
+              <span>Пробег, км — не менее</span>
+              <input
+                inputMode="numeric"
+                value={draft.mileageMin ?? ""}
+                onChange={setField("mileageMin", true)}
+                placeholder="10 000"
+              />
+            </label>
+            <label className="feed-panel__field">
               <span>Пробег, км — не более</span>
               <input
                 inputMode="numeric"
@@ -431,6 +516,53 @@ export function FeedScreen() {
                 placeholder="100 000"
               />
             </label>
+            <div className="feed-panel__pair">
+              <label className="feed-panel__field">
+                <span>Топливо</span>
+                <select value={draft.fuel ?? ""} onChange={setField("fuel")}>
+                  {FUELS.map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="feed-panel__field">
+                <span>КПП</span>
+                <select
+                  value={draft.transmission ?? ""}
+                  onChange={setField("transmission")}
+                >
+                  {TRANSMISSIONS.map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="feed-panel__pair">
+              <label className="feed-panel__field">
+                <span>Кузов</span>
+                <select value={draft.bodyType ?? ""} onChange={setField("bodyType")}>
+                  {BODIES.map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="feed-panel__field">
+                <span>Привод</span>
+                <select value={draft.drive ?? ""} onChange={setField("drive")}>
+                  {DRIVES.map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <label className="feed-panel__field">
               <span>Источник</span>
               <select value={draft.source ?? ""} onChange={setField("source")}>

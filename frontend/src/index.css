@@ -145,6 +145,17 @@ main {
   color: var(--text-secondary);
   font-size: var(--font-sm);
 }
+.listing-card__specs {
+  color: var(--text);
+  font-size: var(--font-xs);
+  font-weight: 500;
+}
+.listing-card__source {
+  color: var(--accent, #4f8cff);
+  font-size: var(--font-xs);
+  text-decoration: none;
+  align-self: flex-start;
+}
 .listing-card__sub {
   color: var(--text-secondary);
   font-size: var(--font-xs);
@@ -821,6 +832,11 @@ main {
   background: var(--bg);
   color: var(--text);
   font-size: var(--font-sm);
+}
+.feed-panel__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
 }
 .feed-panel__field input:focus,
 .feed-panel__field select:focus {

@@ -5,38 +5,12 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
 import type { Criteria, UserFilter } from "../api/types";
-
-const FUELS: Array<[string, string]> = [
-  ["", "Любое топливо"],
-  ["petrol", "Бензин"],
-  ["diesel", "Дизель"],
-  ["hybrid", "Гибрид"],
-  ["electric", "Электро"],
-  ["lpg", "Газ / LPG"],
-];
-const TRANSMISSIONS: Array<[string, string]> = [
-  ["", "Любая КПП"],
-  ["auto", "Автомат"],
-  ["manual", "Механика"],
-  ["cvt", "Вариатор"],
-  ["dct", "Робот / DCT"],
-];
-const BODIES: Array<[string, string]> = [
-  ["", "Любой кузов"],
-  ["sedan", "Седан"],
-  ["hatchback", "Хэтчбек"],
-  ["wagon", "Универсал"],
-  ["suv", "Кроссовер / SUV"],
-  ["coupe", "Купе"],
-  ["van", "Минивэн"],
-  ["pickup", "Пикап"],
-];
-const DRIVES: Array<[string, string]> = [
-  ["", "Любой привод"],
-  ["fwd", "Передний"],
-  ["rwd", "Задний"],
-  ["awd", "Полный"],
-];
+import {
+  BODIES,
+  DRIVES,
+  FUELS,
+  TRANSMISSIONS,
+} from "../lib/specs";
 
 interface FormState {
   name: string;

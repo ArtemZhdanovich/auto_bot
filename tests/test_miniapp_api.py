@@ -227,6 +227,36 @@ async def test_list_listings_sort_param(client):
 
 
 @pytest.mark.asyncio
+async def test_list_listings_mileage_min(client):
+    """Пробег «от» (как на avtokorea.by) принимается фильтром ленты."""
+    http, session = client
+    session.set_result([_listing(1)])
+    resp = await http.get("/api/listings?mileage_min=50000&mileage_max=100000")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_listings_facets_makes(client):
+    """GET /api/listings/facets — список марок для селекта фильтра."""
+    http, session = client
+    session.set_result([("BMW",), ("Kia",)])
+    resp = await http.get("/api/listings/facets")
+    assert resp.status_code == 200
+    assert resp.json() == {"makes": ["BMW", "Kia"]}
+
+
+@pytest.mark.asyncio
+async def test_listings_facets_models_for_make(client):
+    """facets?make=X — только модели этой марки (зависимый селект)."""
+    http, session = client
+    session.set_result([("520i",), ("X5",)])
+    resp = await http.get("/api/listings/facets?make=bmw")
+    assert resp.status_code == 200
+    assert resp.json() == {"models": ["520i", "X5"]}
+
+
+@pytest.mark.asyncio
 async def test_get_listing_404(client):
     http, _ = client
     resp = await http.get("/api/listings/999")
