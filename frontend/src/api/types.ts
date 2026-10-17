@@ -70,6 +70,9 @@ export interface Listing {
   fuel?: string | null;
   transmission?: string | null;
   drive?: string | null;
+  /** Объём (литры) и цвет — миграция 0017, enrichment из detail encar. */
+  engine_volume?: number | null;
+  color?: string | null;
   images: string[];
   parsed_at: string;
   /** Отслеживание (PLAN.md, фаза 4) */

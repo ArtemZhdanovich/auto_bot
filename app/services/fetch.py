@@ -23,7 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.common.dedup import is_duplicate, raw_payload
 from app.adapters.common.normalize import (
     normalize_body,
+    normalize_color,
     normalize_drive,
+    normalize_engine_volume,
     normalize_fuel,
     normalize_transmission,
 )
@@ -335,3 +337,50 @@ async def mark_stale(
     if ids:
         logger.info("mark_stale_done: gone=%s", len(ids))
     return ids
+
+
+# --- Обогащение из detail encar (миграция 0017) ------------------------------
+
+# Detail API encar отдаёт спеки, которых нет в list-API: displacement (см³),
+# colorName (корейский), bodyName. Тянем лениво (PDP) — обогащаем только
+# просмотренные лоты, а не весь каталог.
+async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
+    """Догрузка кузова/топлива/КПП/объёма/цвета из detail encar.
+
+    Только для encar и только если чего-то не хватает (1 запрос на лот,
+    повторные открытия PDP бесплатны). Возвращает True, если обновили.
+    """
+    if listing.source != "encar":
+        return False
+    if all(
+        getattr(listing, field) is not None
+        for field in ("body_type", "fuel", "transmission", "engine_volume", "color")
+    ):
+        return False
+
+    from app.adapters.common.http import HttpClient
+
+    detail_url = f"https://api.encar.com/v1/readside/vehicle/{listing.source_id}"
+    try:
+        http = HttpClient(timeout=10, max_retries=1)
+        payload = await http.get_json(detail_url)
+    except Exception as exc:  # noqa: BLE001 — enrichment не должен ломать PDP
+        logger.warning("enrich_fetch_failed: %s: %s", listing.source_id, exc)
+        return False
+
+    spec = payload.get("spec") or {}
+    updates: dict[str, Any] = {}
+    for field, value in (
+        ("body_type", normalize_body(spec.get("bodyName"))),
+        ("fuel", normalize_fuel(spec.get("fuelName"))),
+        ("transmission", normalize_transmission(spec.get("transmissionName"))),
+        ("engine_volume", normalize_engine_volume(spec.get("displacement"))),
+        ("color", normalize_color(spec.get("colorName"))),
+    ):
+        if value is not None and getattr(listing, field) is None:
+            setattr(listing, field, value)
+            updates[field] = value
+    if updates:
+        await session.commit()
+        logger.info("enriched: id=%s %s", listing.id, sorted(updates))
+    return bool(updates)

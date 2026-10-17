@@ -1,5 +1,6 @@
 """Лента объявлений для Mini App (этап 5, ТЗ п. 9.2.4–9.2.5)."""
 
+import logging
 import re
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -9,6 +10,9 @@ from app.core.deps import SessionDep
 from app.db.models import Listing, ListingPriceHistory
 from app.schemas.listing import ListingListOut, ListingOut, PricePointOut
 from app.services.analytics import EVENT_SEARCH_COMPLETED, track
+from app.services.fetch import enrich_listing_specs
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/listings", tags=["listings"])
 
@@ -30,6 +34,10 @@ async def list_listings(
     fuel: str | None = None,
     transmission: str | None = None,
     drive: str | None = None,
+    # Детализация (миграция 0017): объём двигателя от/до (литры), цвет.
+    engine_volume_min: float | None = Query(default=None, ge=0, le=20),
+    engine_volume_max: float | None = Query(default=None, ge=0, le=20),
+    color: str | None = None,
     source: str | None = None,
     sort: str = Query(default="new", pattern="^(new|price_asc|price_desc|mileage_asc|year_desc)$"),
     limit: int = Query(default=20, ge=1, le=50),
@@ -67,9 +75,14 @@ async def list_listings(
         (fuel, Listing.fuel),
         (transmission, Listing.transmission),
         (drive, Listing.drive),
+        (color, Listing.color),
     ):
         if param:
             conditions.append(column.ilike(param))
+    if engine_volume_min is not None:
+        conditions.append(Listing.engine_volume >= engine_volume_min)
+    if engine_volume_max is not None:
+        conditions.append(Listing.engine_volume <= engine_volume_max)
     query = select(Listing)
     count_query = select(func.count()).select_from(Listing)
     if conditions:
@@ -173,6 +186,12 @@ async def get_listing(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found"
         )
+    # Обогащение из detail encar (миграция 0017): объём/цвет/спеки догружаем
+    # лениво при открытии карточки; сбой encar не ломает PDP.
+    try:
+        await enrich_listing_specs(session, listing)
+    except Exception:  # noqa: BLE001
+        logger.warning("enrich_failed", exc_info=True)
     out = ListingOut.model_validate(listing)
     # История цен — только в карточке (в ленте был бы N+1); хронологический порядок
     result = await session.execute(

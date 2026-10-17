@@ -35,6 +35,25 @@ export const DRIVES: Array<[string, string]> = [
   ["awd", "Полный"],
 ];
 
+export const COLORS: Array<[string, string]> = [
+  ["", "Любой цвет"],
+  ["black", "Чёрный"],
+  ["white", "Белый"],
+  ["silver", "Серебристый"],
+  ["gray", "Серый"],
+  ["blue", "Синий"],
+  ["red", "Красный"],
+  ["green", "Зелёный"],
+  ["brown", "Коричневый"],
+  ["beige", "Бежевый"],
+  ["yellow", "Жёлтый"],
+  ["orange", "Оранжевый"],
+  ["gold", "Золотой"],
+  ["purple", "Фиолетовый"],
+  ["pink", "Розовый"],
+  ["cyan", "Бирюзовый"],
+];
+
 /** Подпись значения справочника: канон и сырые значения источников. */
 function labelOf(dict: Array<[string, string]>, value: string | null | undefined): string | null {
   if (!value) return null;
@@ -47,6 +66,7 @@ export const fuelLabel = (v?: string | null) => labelOf(FUELS, v);
 export const transmissionLabel = (v?: string | null) => labelOf(TRANSMISSIONS, v);
 export const bodyLabel = (v?: string | null) => labelOf(BODIES, v);
 export const driveLabel = (v?: string | null) => labelOf(DRIVES, v);
+export const colorLabel = (v?: string | null) => labelOf(COLORS, v);
 
 /** Страна источника: пока все лоты — Корея (encar/kcar). */
 export function sourceCountry(source: string): string {

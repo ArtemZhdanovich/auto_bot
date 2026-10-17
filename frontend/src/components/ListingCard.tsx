@@ -9,6 +9,7 @@ import { haptic, isGuest } from "../api/auth";
 import { getRegion, priceChain } from "../lib/fx";
 import {
   bodyLabel,
+  colorLabel,
   driveLabel,
   fuelLabel,
   sourceCountry,
@@ -142,10 +143,12 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
           <div className="listing-card__specs">
             {[
               fuelLabel(listing.fuel) && `⛽ ${fuelLabel(listing.fuel)}`,
+              listing.engine_volume && `🔋 ${listing.engine_volume.toFixed(1)}`,
               transmissionLabel(listing.transmission) &&
                 `⚙️ ${transmissionLabel(listing.transmission)}`,
               bodyLabel(listing.body_type) && `🚙 ${bodyLabel(listing.body_type)}`,
               driveLabel(listing.drive) && `🔧 ${driveLabel(listing.drive)}`,
+              colorLabel(listing.color) && `🎨 ${colorLabel(listing.color)}`,
             ]
               .filter(Boolean)
               .join(" · ")}

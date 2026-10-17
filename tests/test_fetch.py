@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+
 from app.schemas.listing import UnifiedListing
 from app.services.fetch import compute_content_hash, mark_stale, save_listings
 from tests.conftest import FakeRedis
@@ -309,3 +311,127 @@ async def test_stale_check_job_enqueues_gone(monkeypatch):
     result = await fetch_mod.stale_check_job({})
     assert result == {"gone": 2}
     assert jobs == [("listing_status_scan", "gone", [5, 6])]
+
+
+# --- Обогащение из detail encar (миграция 0017) ------------------------------
+
+
+class _FakeHttp:
+    """Стаб HttpClient: detail payload encar без реальных запросов."""
+
+    last_url: str = ""
+
+    def __init__(self, **kw) -> None:
+        pass
+
+    async def get_json(self, url: str, **kw):
+        _FakeHttp.last_url = url
+        return {
+            "spec": {
+                "bodyName": "준중형차",  # → sedan (BODY_MAP)
+                "fuelName": "디젤",  # → diesel
+                "transmissionName": "오토",  # → automatic
+                "displacement": 1995,  # → 2.0 л
+                "colorName": "청색",  # → blue
+            }
+        }
+
+
+@pytest.mark.asyncio
+async def test_enrich_fills_specs_from_detail(monkeypatch):
+    """enrich_listing_specs: кузов/топливо/КПП/объём/цвет из detail encar."""
+    import app.adapters.common.http as http_mod
+    from types import SimpleNamespace
+
+    from app.services.fetch import enrich_listing_specs
+
+    monkeypatch.setattr(http_mod, "HttpClient", _FakeHttp)
+    listing = SimpleNamespace(
+        id=42,
+        source="encar",
+        source_id="42935199",
+        body_type=None,
+        fuel=None,
+        transmission=None,
+        engine_volume=None,
+        color=None,
+    )
+    committed = []
+
+    class _Session:
+        async def commit(self):
+            committed.append(True)
+
+    changed = await enrich_listing_specs(_Session(), listing)
+    assert changed is True
+    assert listing.body_type == "sedan"
+    assert listing.fuel == "diesel"
+    assert listing.transmission == "automatic"
+    assert listing.engine_volume == 2.0
+    assert listing.color == "blue"
+    assert committed == [True]
+    assert _FakeHttp.last_url.endswith("/42935199")
+
+
+@pytest.mark.asyncio
+async def test_enrich_skips_complete_and_non_encar(monkeypatch):
+    """Не-enrich: kcar-источник и уже заполненный encar-лот — без запросов."""
+    import app.adapters.common.http as http_mod
+    from types import SimpleNamespace
+
+    from app.services.fetch import enrich_listing_specs
+
+    calls: list[str] = []
+
+    class _NoHttp:
+        def __init__(self, **kw) -> None:
+            pass
+
+        async def get_json(self, url: str, **kw):
+            calls.append(url)
+            return {}
+
+    monkeypatch.setattr(http_mod, "HttpClient", _NoHttp)
+
+    class _Session:
+        async def commit(self):
+            pass
+
+    kcar = SimpleNamespace(source="kcar", source_id="1", body_type=None, fuel=None,
+                           transmission=None, engine_volume=None, color=None)
+    assert await enrich_listing_specs(_Session(), kcar) is False
+
+    full = SimpleNamespace(source="encar", source_id="2", body_type="sedan",
+                           fuel="petrol", transmission="automatic",
+                           engine_volume=2.0, color="blue")
+    assert await enrich_listing_specs(_Session(), full) is False
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_enrich_silences_http_errors(monkeypatch):
+    """Недоступный encar не роняет enrichment — просто False."""
+
+    import app.adapters.common.http as http_mod
+    from types import SimpleNamespace
+
+    from app.services.fetch import enrich_listing_specs
+
+    class _BrokenHttp:
+        def __init__(self, **kw) -> None:
+            pass
+
+        async def get_json(self, url: str, **kw):
+            raise RuntimeError("encar down")
+
+    monkeypatch.setattr(http_mod, "HttpClient", _BrokenHttp)
+    listing = SimpleNamespace(source="encar", source_id="3", body_type=None,
+                              fuel=None, transmission=None,
+                              engine_volume=None, color=None)
+
+    class _Session:
+        async def commit(self):
+            pass
+
+    assert await enrich_listing_specs(_Session(), listing) is False
+    assert listing.body_type is None  # ничего не записали

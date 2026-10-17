@@ -230,3 +230,47 @@ def normalize_seller_type(raw: str | None) -> str | None:
     if value in {"auction", "аукцион", "경매"}:
         return "auction"
     return None
+
+
+# Цвета: encar detail (spec.colorName — корейский) + рус/англ (детализация
+# фильтра «цвет», как на avtokorea.by). Канон — англ., в UI русские подписи.
+COLOR_MAP = {
+    "black": "black", "черный": "black", "чёрный": "black", "검은색": "black", "검정": "black", "검정색": "black",
+    "white": "white", "белый": "white", "흰색": "white", "흰색청": "white",
+    "silver": "silver", "серебристый": "silver", "은색": "silver", "실버": "silver",
+    "gray": "gray", "grey": "gray", "серый": "gray", "회색": "gray", "쥐색": "gray",
+    "blue": "blue", "синий": "blue", "청색": "blue", "파랑": "blue", "파란색": "blue",
+    "red": "red", "красный": "red", "빨간색": "red", "빨강": "red",
+    "green": "green", "зеленый": "green", "зелёный": "green", "녹색": "green", "초록": "green",
+    "yellow": "yellow", "желтый": "yellow", "жёлтый": "yellow", "노란색": "yellow",
+    "brown": "brown", "коричневый": "brown", "갈색": "brown",
+    "orange": "orange", "оранжевый": "orange", "주황색": "orange",
+    "purple": "purple", "фиолетовый": "purple", "보라색": "purple",
+    "beige": "beige", "бежевый": "beige", "베이지": "beige",
+    "gold": "gold", "золотой": "gold", "금색": "gold",
+    "pink": "pink", "розовый": "pink", "분홍색": "pink",
+    "cyan": "cyan", "бирюзовый": "cyan", "청록색": "cyan",
+}
+
+
+def normalize_color(raw: str | None) -> str | None:
+    """청색 / синий / blue → 'blue'; нераспознанное — как есть."""
+    value = _clean(raw)
+    if not value:
+        return None
+    return COLOR_MAP.get(value) or value
+
+
+def normalize_engine_volume(displacement_cc: float | str | int | None) -> float | None:
+    """1995 (см³) / '1995' / 2.0 (уже литры) → 2.0 (литры, один знак)."""
+    if displacement_cc is None or displacement_cc == "":
+        return None
+    try:
+        value = float(displacement_cc)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if value > 50:  # см³ → литры
+        value = value / 1000.0
+    return round(value, 1)

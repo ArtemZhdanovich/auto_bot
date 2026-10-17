@@ -257,6 +257,21 @@ async def test_listings_facets_models_for_make(client):
 
 
 @pytest.mark.asyncio
+async def test_list_listings_volume_color_filters(client):
+    """Фильтры «объём от/до» и «цвет» (миграция 0017) принимаются."""
+    http, session = client
+    session.set_result([_listing(1)])
+    resp = await http.get(
+        "/api/listings?engine_volume_min=1.6&engine_volume_max=2.5&color=blue"
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+    # Некорректный объём — 422 (ge=0/le=20)
+    resp = await http.get("/api/listings?engine_volume_max=99")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_listing_404(client):
     http, _ = client
     resp = await http.get("/api/listings/999")

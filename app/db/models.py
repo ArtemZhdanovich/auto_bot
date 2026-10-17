@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Float,
     Index,
     Integer,
     Numeric,
@@ -218,6 +219,10 @@ class Listing(Base):
     fuel: Mapped[str | None] = mapped_column(Text)
     transmission: Mapped[str | None] = mapped_column(Text)
     drive: Mapped[str | None] = mapped_column(Text)
+    # Объём двигателя (литры, 1995 см³ → 2.0) и цвет — только в detail encar
+    # (миграция 0017): заполняет enrichment, фильтры «объём от/до» и «цвет».
+    engine_volume: Mapped[float | None] = mapped_column(Float)
+    color: Mapped[str | None] = mapped_column(Text)
     images: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     # Сырой ответ адаптера живёт в S3/MinIO (PLAN.md, фаза 6, миграция 0012):
     # ключ объекта; NULL = не загружен (MinIO недоступен / флаг выключен).

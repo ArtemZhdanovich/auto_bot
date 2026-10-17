@@ -92,6 +92,9 @@ class ListingOut(BaseModel):
     fuel: Optional[str] = None
     transmission: Optional[str] = None
     drive: Optional[str] = None
+    # Объём (литры) и цвет — миграция 0017, ленивое обогащение из detail encar.
+    engine_volume: Optional[float] = None
+    color: Optional[str] = None
     images: list[Any] = Field(default_factory=list)
     parsed_at: datetime
 

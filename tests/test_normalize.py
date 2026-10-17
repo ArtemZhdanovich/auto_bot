@@ -2,7 +2,9 @@
 
 from app.adapters.common.normalize import (
     normalize_body,
+    normalize_color,
     normalize_drive,
+    normalize_engine_volume,
     normalize_fuel,
     normalize_make,
     normalize_transmission,
@@ -47,3 +49,27 @@ def test_normalize_drive():
     assert normalize_drive("4WD") == "awd"
     assert normalize_drive("полный") == "awd"
     assert normalize_drive("FWD") == "fwd"
+
+
+def test_normalize_color():
+    """Цвет encar detail (корейский) и рус/англ → канон."""
+    assert normalize_color("청색") == "blue"
+    assert normalize_color("검정") == "black"
+    assert normalize_color("Синий") == "blue"
+    assert normalize_color("Silver") == "silver"
+    assert normalize_color("жёлтый") == "yellow"
+    assert normalize_color("неизвестный-цвет") == "неизвестный-цвет"  # как есть
+    assert normalize_color(None) is None
+    assert normalize_color("") is None
+
+
+def test_normalize_engine_volume():
+    """см³ → литры (один знак); уже литры — как есть; мусор — None."""
+    assert normalize_engine_volume(1995) == 2.0
+    assert normalize_engine_volume("1995") == 2.0
+    assert normalize_engine_volume(2.0) == 2.0
+    assert normalize_engine_volume(1598) == 1.6
+    assert normalize_engine_volume(None) is None
+    assert normalize_engine_volume("") is None
+    assert normalize_engine_volume("abc") is None
+    assert normalize_engine_volume(-100) is None

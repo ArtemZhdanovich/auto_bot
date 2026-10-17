@@ -16,10 +16,14 @@ import { EmptyState, ErrorState } from "../ui/States";
 import { KRW_PER_USD, digits } from "../lib/fx";
 import {
   BODIES,
+  COLORS,
   DRIVES,
   FUELS,
   TRANSMISSIONS,
 } from "../lib/specs";
+
+/** Типичные объёмы двигателей, л (селекты «от/до», как на avtokorea.by). */
+const VOLUMES = ["0.8", "1.0", "1.4", "1.6", "2.0", "2.5", "3.0", "3.5", "4.0", "5.0", "6.0"];
 import type { Listing, ListingList, UserFilter } from "../api/types";
 
 /** Ключи сортировки ленты (PLP-стандарт e-commerce). */
@@ -48,6 +52,9 @@ interface FeedQuery {
   priceMax?: string;
   mileageMin?: string;
   mileageMax?: string;
+  volumeMin?: string;
+  volumeMax?: string;
+  color?: string;
   bodyType?: string;
   fuel?: string;
   transmission?: string;
@@ -104,6 +111,9 @@ function sameQuery(a: FeedQuery, b: FeedQuery): boolean {
     "priceMax",
     "mileageMin",
     "mileageMax",
+    "volumeMin",
+    "volumeMax",
+    "color",
     "bodyType",
     "fuel",
     "transmission",
@@ -158,6 +168,9 @@ function deepLinkQuery(): FeedQuery {
     priceMax: pick("price_max"),
     mileageMax: pick("mileage_max"),
     mileageMin: pick("mileage_min"),
+    volumeMin: pick("volume_min"),
+    volumeMax: pick("volume_max"),
+    color: pick("color"),
     bodyType: pick("body_type"),
     fuel: pick("fuel"),
     transmission: pick("transmission"),
@@ -230,6 +243,9 @@ export function FeedScreen() {
       if (q.priceMax) params.set("price_max", usdToKrw(q.priceMax));
       if (q.mileageMax) params.set("mileage_max", q.mileageMax);
       if (q.mileageMin) params.set("mileage_min", q.mileageMin);
+      if (q.volumeMin) params.set("engine_volume_min", q.volumeMin);
+      if (q.volumeMax) params.set("engine_volume_max", q.volumeMax);
+      if (q.color) params.set("color", q.color);
       if (q.bodyType) params.set("body_type", q.bodyType);
       if (q.fuel) params.set("fuel", q.fuel);
       if (q.transmission) params.set("transmission", q.transmission);
@@ -563,6 +579,40 @@ export function FeedScreen() {
                 </select>
               </label>
             </div>
+            <div className="feed-panel__pair">
+              <label className="feed-panel__field">
+                <span>Объём, л — от</span>
+                <select value={draft.volumeMin ?? ""} onChange={setField("volumeMin")}>
+                  <option value="">Любой</option>
+                  {VOLUMES.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="feed-panel__field">
+                <span>Объём, л — до</span>
+                <select value={draft.volumeMax ?? ""} onChange={setField("volumeMax")}>
+                  <option value="">Любой</option>
+                  {VOLUMES.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="feed-panel__field">
+              <span>Цвет</span>
+              <select value={draft.color ?? ""} onChange={setField("color")}>
+                {COLORS.map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="feed-panel__field">
               <span>Источник</span>
               <select value={draft.source ?? ""} onChange={setField("source")}>
