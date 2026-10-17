@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps_internal import RedisDep, check_internal_token
+
+logger = logging.getLogger(__name__)
 from app.core.deps import SessionDep
 from app.core.security import (
     InitDataError,
@@ -64,6 +67,8 @@ async def _authenticate_via_init_data(
             max_age_seconds=settings.init_data_max_age_sec,
         )
     except InitDataError as exc:
+        # диагностика входа: без причины 401 не найти в логах (hash/expired/user)
+        logger.warning("initData login rejected: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
         ) from exc
@@ -100,7 +105,8 @@ async def auth_magic_link(body: MagicLinkRequest) -> dict[str, str]:
 # ---------- Вход через Telegram (веб-режим): код → /start в боте → JWT ----------
 
 _LOGIN_CODE_TTL_SEC = 600  # жизнь одноразового кода входа
-_LOGIN_CONFIRM_TTL_SEC = 120  # сколько времени веб может забрать JWT после /start
+_LOGIN_CONFIRM_TTL_SEC = 600  # сколько времени веб может забрать JWT после /start
+# (окно = TTL кода: юзер в боте может сидеть дольше пары минут)
 
 
 class TelegramLoginLinkResponse(BaseModel):

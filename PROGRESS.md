@@ -1,6 +1,18 @@
 
 # Auto Selection — PROGRESS
 
+## 60. Фикс входа через Telegram (диагностика + окно забора JWT)
+
+- **Симптомы:** (а) в миниаппе «вход через ТГ» → бот отвечает «✅ подтверждён», но аппка снова показывает форму; (б) на сайте после возврата из бота — «⌛ Ссылка входа устарела».
+- **Диагностика:** цепочка код→бот→JWT проверена curl'ом end-to-end на проде (200 на `/telegram/link` → `/link/confirm` → `/link/{code}` — JWT отдаётся). Бот коды подтверждал (логи, 200). Найдено в логах: `POST /api/auth/telegram` (initData-логин миниаппа) — **стабильно 401**; причина 401 в лог не писалась.
+- **Фиксы:**
+  - `app/api/auth.py`: `logger.warning("initData login rejected: %s", exc)` в `_authenticate_via_init_data` — точная причина (hash mismatch / expired / user missing) теперь видна в логах.
+  - `_LOGIN_CONFIRM_TTL_SEC` 120 → **600** (= TTL кода): юзер может сидеть в боте дольше 2 минут.
+  - `frontend/src/screens/Login.tsx`: `TG_POLL_MAX_TRIES` 72 → **240** (~10 мин, синхронно с бэком).
+- **Деплой:** прод `backend`+`miniapp` пересобраны и подняты поимённо (`docker compose -p auto_bot --profile mono build/up --no-deps`; бот/воркер не тронуты), тест-стенд `-p auto_bot_test` с оверрайдом аналогично. Проверено в контейнере: TTL600 + warn-лог на месте; 8443 и `/auth/telegram/link` живые.
+- **Тесты:** `test_auth_api.py` 9 passed в новом образе; vitest `Login.test.tsx` 3 passed.
+- **⏳ Открытый вопрос:** почему initData-логин 401. `BOT_TOKEN` подтверждён через getMe (`@ftadasd_bot`/7048715401 — тот же бот, что подписывает initData), алгоритм `validate_init_data` покрыт тестами. Следующий шаг: повторить вход в аппке и прочитать `docker logs auto_bot-backend-1 | grep 'initData login rejected'`.
+
 ## 32. raw_payload → S3/MinIO (фаза 6)
 
 - **boto3 vs aioboto3 решено: aioboto3** — fetch/send воркеры асинхронные,
