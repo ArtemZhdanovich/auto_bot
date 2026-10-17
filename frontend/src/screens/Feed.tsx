@@ -121,6 +121,36 @@ export function resetFeedCache(): void {
   feedCache = null;
 }
 
+/**
+ * Deep-link из бота («Открыть в ленте с фильтром»):
+ * /feed?make=Kia&model=Sorento&year_from=2020&price_max=25000&mileage_max=80000.
+ * Читается один раз при монтировании; query из URL сразу очищается,
+ * чтобы рефреш/навигация не переактивировали фильтр повторно.
+ * Цены — в $, как в FeedQuery (в запросе конвертируются в воны).
+ */
+function deepLinkQuery(): FeedQuery {
+  const sp = new URLSearchParams(window.location.search);
+  if (![...sp.keys()].length) return {};
+  const pick = (k: string): string | undefined => sp.get(k) || undefined;
+  const entries: Partial<Record<keyof FeedQuery, string>> = {
+    make: pick("make"),
+    model: pick("model"),
+    yearFrom: pick("year_from"),
+    yearTo: pick("year_to"),
+    priceMin: pick("price_min"),
+    priceMax: pick("price_max"),
+    mileageMax: pick("mileage_max"),
+    source: pick("source"),
+  };
+  const clean = Object.fromEntries(
+    Object.entries(entries).filter(([, v]) => v !== undefined && v !== ""),
+  ) as FeedQuery;
+  if (Object.keys(clean).length) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+  return clean;
+}
+
 export function FeedScreen() {
   const navType = useNavigationType(); // POP = назад/вперёд по истории
   const restore = useRef(navType === "POP" ? feedCache : null);
@@ -130,7 +160,9 @@ export function FeedScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chips, setChips] = useState<Chip[]>([]);
-  const [query, setQuery] = useState<FeedQuery>(() => restore.current?.query ?? {});
+  const [query, setQuery] = useState<FeedQuery>(
+    () => restore.current?.query ?? deepLinkQuery(),
+  );
   const [sort, setSort] = useState<SortKey>(() => restore.current?.sort ?? "new");
   const [panelOpen, setPanelOpen] = useState(false);
   const [draft, setDraft] = useState<FeedQuery>({});

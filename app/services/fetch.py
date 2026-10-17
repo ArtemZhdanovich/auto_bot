@@ -21,6 +21,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.common.dedup import is_duplicate, raw_payload
+from app.adapters.common.normalize import (
+    normalize_body,
+    normalize_drive,
+    normalize_fuel,
+    normalize_transmission,
+)
 from app.core.config import get_settings
 from app.db.models import Listing, SourceHealth
 from app.schemas.listing import UnifiedListing
@@ -45,10 +51,12 @@ upserted AS (
     INSERT INTO listings (
         source, source_id, url, make, model, year, price, currency,
         mileage_km, vin, images, schema_version, parsed_at,
+        body_type, fuel, transmission, drive,
         content_hash, is_active, first_seen_at, last_seen_at, title_raw
     ) VALUES (
         :source, :source_id, :url, :make, :model, :year, :price, :currency,
         :mileage_km, :vin, :images, :schema_version, :parsed_at,
+        :body_type, :fuel, :transmission, :drive,
         :content_hash, TRUE, now(), now(), :title_raw
     )
     ON CONFLICT ON CONSTRAINT uq_listings_source_source_id DO UPDATE SET
@@ -63,6 +71,10 @@ upserted AS (
         images = EXCLUDED.images,
         schema_version = EXCLUDED.schema_version,
         parsed_at = EXCLUDED.parsed_at,
+        body_type = COALESCE(EXCLUDED.body_type, listings.body_type),
+        fuel = COALESCE(EXCLUDED.fuel, listings.fuel),
+        transmission = COALESCE(EXCLUDED.transmission, listings.transmission),
+        drive = COALESCE(EXCLUDED.drive, listings.drive),
         content_hash = EXCLUDED.content_hash,
         is_active = TRUE,
         disappeared_at = NULL,
@@ -108,6 +120,8 @@ def _to_row(item: UnifiedListing) -> dict:
 
     Сырой payload в БД не пишется (фаза 6): уходит в S3 (storage),
     в listings — только ключ объекта (raw_key, отдельным UPDATE).
+    Спеки (0016): нормализуем к канону; нераспознанное — как есть,
+    чтобы данные не терялись (фильтры ищут ilike).
     """
     return {
         "source": item.source,
@@ -121,10 +135,20 @@ def _to_row(item: UnifiedListing) -> dict:
         "currency": item.currency,
         "mileage_km": item.mileage_km,
         "vin": item.vin,
+        "body_type": normalize_body(item.body_type) or _clean_value(item.body_type),
+        "fuel": normalize_fuel(item.fuel) or _clean_value(item.fuel),
+        "transmission": normalize_transmission(item.transmission)
+        or _clean_value(item.transmission),
+        "drive": normalize_drive(item.drive) or _clean_value(item.drive),
         "images": [str(i) for i in item.images],
         "schema_version": item.schema_version,
         "parsed_at": item.parsed_at,
     }
+
+
+def _clean_value(raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    return value or None
 
 
 async def _upload_raw(

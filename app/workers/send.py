@@ -20,9 +20,10 @@ from redis.asyncio import Redis
 
 from app.core.config import get_settings
 from app.db.models import Listing, ListingPriceHistory, User, UserFilter
-from app.db.session import session_factory
+from app.db.session import get_session, session_factory
 from app.queue import QUEUE_SEND, CronSpec, TaskPublisher, TaskWorker
 from app.services import rate_limit
+from app.services.dialog import cleanup_expired_dialogs
 from app.services.notify import (
     _fmt_price,
     buffer_for_digest,
@@ -387,6 +388,14 @@ async def subscription_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"reminded": reminded, "downgraded": downgraded}
 
 
+async def dialog_cleanup_job(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron ежедневно: снос архивных диалогов, молчащих сутки с последнего
+    сообщения (п. «диалоги сносить через сутки»)."""
+    async for session in get_session():
+        deleted = await cleanup_expired_dialogs(session)
+    return {"dialog_sessions_deleted": deleted}
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     # Redis (данные: дедуп, rate limit, digest-буферы, ключи подписок)
@@ -421,11 +430,13 @@ HANDLERS = {
     "subscription_check_job": subscription_check_job,
 }
 
-# Дайджест 09:00 и 20:00 UTC, подписки — 12:00 UTC (ТЗ п. 8.6, 8.7)
+# Дайджест 09:00 и 20:00 UTC, подписки — 12:00 UTC (ТЗ п. 8.6, 8.7),
+# чистка диалогов старше суток — 04:00 UTC
 CRON_JOBS = [
     CronSpec(digest_job, hour=9, minute=0),
     CronSpec(digest_job, hour=20, minute=0),
     CronSpec(subscription_check_job, hour=12, minute=0),
+    CronSpec(dialog_cleanup_job, hour=4, minute=0),
 ]
 
 

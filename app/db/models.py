@@ -123,6 +123,9 @@ class DialogSession(Base):
     messages: Mapped[list[Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Последняя активность диалога (миграция 0016): cron сносит сессии,
+    # молчащие сутки (ТЗ: «диалоги живут сутки с последнего сообщения»).
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Payment(Base):
@@ -208,6 +211,13 @@ class Listing(Base):
     currency: Mapped[str | None] = mapped_column(Text)
     mileage_km: Mapped[int | None] = mapped_column(Integer)
     vin: Mapped[str | None] = mapped_column(Text)
+    # Спеки (этап 5, миграция 0016): кузов/топливо/КПП/привод — для фильтров
+    # поиска и карточек. Канон — normalize_* из adapters.common.normalize;
+    # нераспознанное значение сохраняется как есть (данные не теряем).
+    body_type: Mapped[str | None] = mapped_column(Text)
+    fuel: Mapped[str | None] = mapped_column(Text)
+    transmission: Mapped[str | None] = mapped_column(Text)
+    drive: Mapped[str | None] = mapped_column(Text)
     images: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     # Сырой ответ адаптера живёт в S3/MinIO (PLAN.md, фаза 6, миграция 0012):
     # ключ объекта; NULL = не загружен (MinIO недоступен / флаг выключен).

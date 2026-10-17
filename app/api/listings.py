@@ -24,6 +24,11 @@ async def list_listings(
     price_max: float | None = Query(default=None, ge=0),
     currency: str | None = None,
     mileage_max: int | None = Query(default=None, ge=0),
+    # Спеки (миграция 0016): кузов/топливо/КПП/привод — фильтры ленты.
+    body_type: str | None = None,
+    fuel: str | None = None,
+    transmission: str | None = None,
+    drive: str | None = None,
     source: str | None = None,
     sort: str = Query(default="new", pattern="^(new|price_asc|price_desc|mileage_asc|year_desc)$"),
     limit: int = Query(default=20, ge=1, le=50),
@@ -54,6 +59,14 @@ async def list_listings(
         conditions.append(func.lower(Listing.currency) == currency.lower())
     if mileage_max is not None:
         conditions.append(Listing.mileage_km <= mileage_max)
+    for param, column in (
+        (body_type, Listing.body_type),
+        (fuel, Listing.fuel),
+        (transmission, Listing.transmission),
+        (drive, Listing.drive),
+    ):
+        if param:
+            conditions.append(column.ilike(param))
     query = select(Listing)
     count_query = select(func.count()).select_from(Listing)
     if conditions:

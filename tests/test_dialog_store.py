@@ -1,15 +1,21 @@
 """Тесты DialogStore: Redis TTL, load/save/delete, архивация, финализация."""
 
+import uuid
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+
 import pytest
 
 from app.schemas.criteria import SearchCriteria
 from app.services.dialog import (
     DialogStore,
     answer_faq,
+    cleanup_expired_dialogs,
     dialog_key,
     finalize_dialog,
     new_state,
     reset_dialog,
+    restore_dialog,
 )
 from app.schemas.dialog import Message
 
@@ -107,3 +113,61 @@ async def test_finalize_creates_filter_enqueues_and_archives(fake_redis, fake_se
     assert len(archives) == 1
     assert archives[0].status == "searching"
     assert archives[0].finished_at is not None
+
+
+# --- restore (диалог виден спустя время) и чистка через сутки --------------
+
+
+def _archive_row(user_id: int = 5) -> SimpleNamespace:
+    """Строка dialog_sessions из PG (архив завершённого диалога)."""
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        status="done",
+        criteria={"make": "Kia", "model": "Sorento"},
+        turn_count=4,
+        messages=[
+            {"role": "user", "content": "Kia Sorento до 35к"},
+            {"role": "assistant", "content": "Какой год?"},
+        ],
+        created_at=datetime.now(UTC) - timedelta(hours=2),
+        updated_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+
+
+@pytest.mark.asyncio
+async def test_restore_dialog_from_archive(fake_redis: FakeRedis, fake_session):
+    row = _archive_row()
+    fake_session.set_result([row])
+    result = await restore_dialog(5, session=fake_session, store=DialogStore(fake_redis))
+
+    assert result and result["restored"] is True
+    assert result["session_id"] != str(row.id)  # поднятая сессия получила новый id
+    state = await DialogStore(fake_redis).load(5)
+    assert state is not None
+    assert state.criteria.make == "Kia"
+    assert state.messages[-1].content == "Какой год?"
+    assert state.status == "collecting"
+
+
+@pytest.mark.asyncio
+async def test_restore_skips_active_dialog(fake_redis: FakeRedis, fake_session):
+    await DialogStore(fake_redis).save(new_state(5))
+    result = await restore_dialog(5, session=fake_session, store=DialogStore(fake_redis))
+    assert result == {"restored": False, "reason": "active"}
+    assert fake_session.executed == []  # в PG не ходили
+
+
+@pytest.mark.asyncio
+async def test_restore_without_archive(fake_redis: FakeRedis, fake_session):
+    fake_session.set_result([])
+    result = await restore_dialog(5, session=fake_session, store=DialogStore(fake_redis))
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_dialogs(fake_session):
+    deleted = await cleanup_expired_dialogs(fake_session)
+    assert deleted == 0  # FakeSession.rowcount отсутствует → 0
+    assert fake_session.committed
+    assert fake_session.executed  # выполнен DELETE-запрос

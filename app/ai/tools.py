@@ -8,6 +8,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from app.adapters.common.normalize import (
+    normalize_body,
+    normalize_drive,
+    normalize_fuel,
+    normalize_seller_type,
+    normalize_transmission,
+)
 from app.schemas.criteria import SearchCriteria
 from app.schemas.dialog import DialogState
 
@@ -18,6 +25,42 @@ logger = logging.getLogger(__name__)
 
 _CRITERIA_FIELDS = set(SearchCriteria.model_fields)
 
+# Справочники значений для кнопок-опций (пп. «ИИ работает по инструментарию,
+# а не выдумывает варианты»). Кнопки агента для этих полей всегда из этого
+# списка — LLM не предлагает свои. Значения совпадают с ключами normalize_*,
+# поэтому клик по кнопке нормализуется в apply_patch без доп. маппинга.
+FIELD_OPTIONS: dict[str, list[str]] = {
+    "body_type": [
+        "седан", "внедорожник", "хэтчбек", "универсал",
+        "купе", "минивэн", "пикап", "кабриолет",
+    ],
+    "fuel": ["бензин", "дизель", "гибрид", "электро", "газ"],
+    "transmission": ["автомат", "механика", "вариатор", "робот"],
+    "drive": ["передний", "задний", "полный"],
+    "seller_type": ["частник", "дилер", "аукцион"],
+}
+
+# Нормализация значений патча: LLM пишет «бензин»/«седан» — в критерии
+# кладём канон (petrol/sedan), как в listings.
+_PATCH_NORMALIZERS: dict[str, Any] = {
+    "body_type": normalize_body,
+    "fuel": normalize_fuel,
+    "transmission": normalize_transmission,
+    "drive": normalize_drive,
+    "seller_type": normalize_seller_type,
+}
+
+
+def _criteria_schema_with_enums() -> dict[str, Any]:
+    """Схема SearchCriteria с enum из справочников — LLM видит допустимые
+    значения прямо в tool-схеме и не выдумывает свои (MCP-подход)."""
+    schema = SearchCriteria.model_json_schema()
+    props = schema.get("properties", {})
+    for field_name, options in FIELD_OPTIONS.items():
+        if field_name in props:
+            props[field_name]["enum"] = options
+    return schema
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "update_criteria",
@@ -26,14 +69,16 @@ TOOLS: list[dict[str, Any]] = [
             "Передавай только те поля, которые пользователь явно назвал. "
             "Не выдумывай значения."
         ),
-        "parameters": SearchCriteria.model_json_schema(),
+        "parameters": _criteria_schema_with_enums(),
     },
     {
         "name": "ask_clarification",
         "description": (
             "Задать один уточняющий вопрос. Использовать, если критичного "
             "параметра не хватает. Не задавать больше одного вопроса за раз. "
-            "Если можно — предложить варианты кнопками."
+            "Если можно — предложить варианты кнопками. Для полей с фиксированным "
+            "набором значений (body_type, fuel, transmission, drive, seller_type) "
+            "система сама подставит справочные кнопки — свои options не выдумывай."
         ),
         "parameters": {
             "type": "object",
@@ -84,13 +129,14 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "preview_search",
         "description": (
-            "Промежуточный поиск, чтобы показать 'вот что есть по текущим "
-            "критериям'. Не финализирует поиск."
+            "Промежуточный поиск по реальной базе объявлений, чтобы показать "
+            "'вот что есть по текущим критериям'. Не финализирует поиск. "
+            "Результаты — только реальные объявления, ничего не выдумывай."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "criteria": SearchCriteria.model_json_schema(),
+                "criteria": _criteria_schema_with_enums(),
                 "limit": {"type": "integer", "default": 3},
             },
             "required": ["criteria"],
@@ -124,7 +170,7 @@ TOOLS: list[dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "criteria": SearchCriteria.model_json_schema(),
+                "criteria": _criteria_schema_with_enums(),
             },
             "required": ["criteria"],
         },
@@ -149,8 +195,13 @@ def apply_patch(state: DialogState, patch: dict[str, Any]) -> list[str]:
     """Валидация и применение патча к критериям. Возвращает применённые поля.
 
     Неизвестные поля игнорируются, None не затирает значения (ТЗ п. 7.1).
+    Значения из справочников нормализуются («седан» → 'sedan',
+    «бензин» → 'petrol') — в критериях и listings один канон.
     """
     clean = {k: v for k, v in patch.items() if k in _CRITERIA_FIELDS and v is not None}
+    for field_name, normalizer in _PATCH_NORMALIZERS.items():
+        if field_name in clean and isinstance(clean[field_name], str):
+            clean[field_name] = normalizer(clean[field_name]) or clean[field_name]
     validated = SearchCriteria(**clean)  # Pydantic-валидация значений
     dumped = validated.model_dump()
     valid = {k: dumped[k] for k in clean}  # только поля из патча, с коэрцией типов

@@ -1,4 +1,44 @@
 
+
+## 62. Спеки в listings + ИИ без выдумок + карточки/лента + сохранение диалогов (2026-10-17)
+
+- **Фидбек юзера:** «нет данных о типе кузова вообще; непонятно как работает ИИ-подбор
+  и есть ли данные в сессии; должен работать как MCP — брать инструментарий, а не
+  выдумывать; вместо списка — пара карточек, если их мало, если много — переход в
+  ленту с сохранённым фильтром; сессии должны сохраняться (посмотреть диалог спустя
+  время), диалоги сносить через сутки с разговора».
+- **Спеки в listings (этап 5):** миграция `0016_listing_specs_dialog_ttl.py` —
+  listings.body_type/fuel/transmission/drive + dialog_sessions.updated_at. Адаптеры
+  уже отдавали спеки в UnifiedListing, но `_to_row`/UPSERT их выбрасывали — потому
+  «типа кузова нет вообще». Теперь: нормализация в `_to_row` (нераспознанное — как
+  есть), UPSERT с `COALESCE(EXCLUDED.x, listings.x)` (не затирать), фильтры по спекам
+  в `search.py` и `/api/listings` (ilike), спеки в ListingOut. История заполнится
+  при следующих парсингах (raw лежит в MinIO, backfill позже).
+- **ИИ как MCP, без выдумок:** справочники `FIELD_OPTIONS` в `app/ai/tools.py`
+  (body_type/fuel/transmission/drive/seller_type — значения совпадают с ключами
+  normalize_*); enum подставляются прямо в tool-схемы (update_criteria/preview_search/
+  finalize_search) — LLM видит допустимые значения; `apply_patch` нормализует значения
+  («седан»→sedan, «бензин»→petrol); опции `ask_clarification` для справочных полей
+  заменяются справочными (лог `clarification_options_replaced`). preview_search и так
+  показывает только реальные объявления из БД.
+- **Формат выдачи (finalize):** count через новый `search_listings_page` (items+total):
+  0 → «фильтр сохранён, пришлю уведомления»; ≤5 → фото-карточки в чат (с формами
+  «вариант/варианта/вариантов»); >5 → кнопка «📱 Смотреть все (N)» — deep-link
+  `/feed?make=...&year_from=...&price_max=...`. Feed принимает URL-параметры
+  (`deepLinkQuery()`, цены в $, URL чистится replaceState). Параметры прокидываются
+  и по спекам (body_type/fuel/transmission/drive).
+- **Сессии диалогов:** архив в PG на **каждом** ходу (`dialog_message` →
+  archive_session), не только при финализации; `updated_at` — время последнего
+  сообщения. `POST /api/dialog/restore` + `restore_dialog()` — поднять последний
+  диалог из архива в Redis (новый session_id, критерии+история переносятся; активный
+  не трогаем). Бот: кнопка «🕘 Продолжить прошлый диалог» в меню AI + callback
+  `dlg:restore` (показывает историю `_format_history`, дальше обычная панель).
+  Чистка: cron `dialog_cleanup_job` (04:00 UTC, workers/send.py) сносит архивы
+  старше `dialog_ttl_sec` (24ч) от updated_at; Redis-state и так TTL 24ч.
+- **589 pytest (+10: нормализация патчей, enum в схеме, справочные опции
+  ask_clarification, restore×3, cleanup, UPSERT-спеки; CRON_JOBS-тест обновлён),
+  85+ vitest, ruff/tsc чисто.**
+
 # Auto Selection — PROGRESS
 
 ## 60. Фикс входа через Telegram (диагностика + окно забора JWT)

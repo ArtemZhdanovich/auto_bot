@@ -230,6 +230,32 @@ def _miniapp_url() -> str:
     return (get_settings().miniapp_url or "").strip()
 
 
+def _format_history(messages: list[dict], limit: int = 6, max_len: int = 160) -> str:
+    """История диалога для показа в боте (последние limit сообщений)."""
+    recent = [m for m in messages if m.get("role") in ("user", "assistant")][-limit:]
+    lines = []
+    for m in recent:
+        who = "👤 Вы" if m.get("role") == "user" else "🤖 Бот"
+        text = html.escape(str(m.get("content", "")).strip())
+        if len(text) > max_len:
+            text = text[: max_len - 1] + "…"
+        lines.append(f"{who}: {text}")
+    return "\n\n".join(lines)
+
+
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Русские формы: 1 вариант / 2 варианта / 5 вариантов."""
+    n %= 100
+    if 11 <= n <= 14:
+        return many
+    n %= 10
+    if n == 1:
+        return one
+    if 2 <= n <= 4:
+        return few
+    return many
+
+
 def build_listing_caption(listing: dict) -> str:
     """Короткая карточка объявления для бота (UI/UX ТЗ §5.5)."""
     title = " ".join(
@@ -469,7 +495,19 @@ async def main_menu_callback(cb, state: FSMContext) -> None:
 
     if action == "ai":
         await state.clear()
-        await cb.message.answer(MENU_AI_HINT)
+        await cb.message.answer(
+            MENU_AI_HINT,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🕘 Продолжить прошлый диалог",
+                            callback_data="dlg:restore",
+                        )
+                    ],
+                ]
+            ),
+        )
         return
     if action == "compare":
         await cb.message.answer(
@@ -742,6 +780,37 @@ async def dlg_callback(cb, state: FSMContext) -> None:
             )
         return
 
+    if data == "dlg:restore":
+        await cb.answer()
+        result = await backend.dialog_restore(user_id)
+        if result is None:
+            await cb.message.answer("Backend недоступен, попробуйте позже.")
+            return
+        if not result.get("restored"):
+            await cb.message.answer(
+                "Прошлых диалогов не нашлось (диалоги хранятся сутки с "
+                "последнего сообщения). Опишите новый поиск — например: "
+                "<i>«Kia Sorento 2021+, дизель, до 35к $»</i>."
+            )
+            return
+        history = _format_history(result.get("messages") or [])
+        criteria = result.get("criteria") or {}
+        await send_dialog_reply(
+            cb.message,
+            {
+                "text": (
+                    "🕘 <b>Вернул прошлый диалог:</b>\n\n"
+                    + history
+                    + "\n\nПродолжаем — пишите уточнение или запускайте поиск."
+                ),
+                "options": [],
+                "finalize_ready": bool(criteria),
+                "criteria": criteria,
+            },
+            state,
+        )
+        return
+
     if data == "dlg:finalize":
         await cb.answer()
         result = await backend.dialog_finalize(user_id)
@@ -771,7 +840,9 @@ async def dlg_callback(cb, state: FSMContext) -> None:
                 f"{sources}. Пришлю уведомления о новых вариантах.",
                 reply_markup=kb,
             )
-        # Сразу показываем живые варианты фото-карточками (MVP: менеджер-опыт)
+        # Сразу показываем живые варианты (формат выдачи): нашлось немного —
+        # фото-карточки прямо в чат; много — лента миниаппа с активированным
+        # фильтром (deep-link /feed?make=...), чтобы не сыпать простыню карточек.
         fsm = await state.get_data()
         criteria = fsm.get("dlg_criteria") or {}
         params: dict = {}
@@ -779,18 +850,53 @@ async def dlg_callback(cb, state: FSMContext) -> None:
             ("make", "make"),
             ("model", "model"),
             ("year_from", "year_from"),
+            ("year_to", "year_to"),
             ("price_max", "price_max"),
             ("mileage_max", "mileage_max"),
+            ("body_type", "body_type"),
+            ("fuel", "fuel"),
+            ("transmission", "transmission"),
+            ("drive", "drive"),
         ):
             if criteria.get(src_field):
                 params[query_field] = criteria[src_field]
-        items = await backend.search_listings(params, limit=5)
-        if items:
+        found = await backend.search_listings_page(params, limit=6)
+        if found is None:
+            return
+        items, total = found
+        if total == 0:
             await cb.message.answer(
-                "🔥 <b>Вот что уже есть по вашим критериям:</b>"
+                "🔍 По этим критериям пока ничего нет. Фильтр сохранён — "
+                "пришлю уведомление, как только появятся варианты."
+            )
+            return
+        if total <= 5:
+            await cb.message.answer(
+                f"🔥 <b>Нашёл {total} "
+                + _plural(total, "вариант", "варианта", "вариантов")
+                + " по вашим критериям:</b>"
             )
             await _send_car_cards(cb.message, items)
-        return
+            return
+        # Много → лента с фильтром (UserFilter уже создан в finalize_dialog)
+        from urllib.parse import urlencode
+
+        feed_qs = urlencode(params)
+        kb_rows: list[list[InlineKeyboardButton]] = []
+        mini = _miniapp_button(
+            f"📱 Смотреть все ({total})", f"/feed?{feed_qs}"
+        )
+        if mini:
+            kb_rows.append([mini])
+        kb_rows.append(
+            [InlineKeyboardButton(text="🔄 Новый поиск", callback_data="dlg:reset")]
+        )
+        await cb.message.answer(
+            f"🔥 <b>Нашёл {total} "
+            + _plural(total, "вариант", "варианта", "вариантов")
+            + ".</b> Откройте ленту — фильтр уже применён.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None,
+        )
 
     if data.startswith("dlg:opt:"):
         parts = data.split(":")

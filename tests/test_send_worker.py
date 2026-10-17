@@ -231,8 +231,12 @@ def test_worker_registers_jobs_and_cron():
         "subscription_check_job",
     }
     crons = send_mod.CRON_JOBS
-    assert {(c.hour, c.minute) for c in crons} == {(9, 0), (20, 0), (12, 0)}
-    assert {c.name for c in crons} == {"digest_job", "subscription_check_job"}
+    assert {(c.hour, c.minute) for c in crons} == {(9, 0), (20, 0), (12, 0), (4, 0)}
+    assert {c.name for c in crons} == {
+        "digest_job",
+        "subscription_check_job",
+        "dialog_cleanup_job",
+    }
 
 
 # --- статусные уведомления (фаза 3) --------------------------------------------

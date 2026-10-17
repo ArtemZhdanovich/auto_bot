@@ -23,9 +23,18 @@ def build_listing_query(criteria: SearchCriteria) -> Select:
         stmt = stmt.where(Listing.price <= criteria.price_max)
     if criteria.mileage_max:
         stmt = stmt.where(Listing.mileage_km <= criteria.mileage_max)
-    # fuel/transmission/body и пр. спеки в listings не хранятся (этап 5) —
-    # фильтры по ним здесь недоступны; критерий учитывается при финальном
-    # парсинге источников, а не в preview-поиске.
+    # Спеки в listings (этап 5, миграция 0016): кузов/топливо/КПП/привод.
+    # Нераспознанные адаптером значения лежат «как есть» — фильтр ilike
+    # ловит и канон ('suv'), и сырое значение источника.
+    for field, column in (
+        ("body_type", Listing.body_type),
+        ("fuel", Listing.fuel),
+        ("transmission", Listing.transmission),
+        ("drive", Listing.drive),
+    ):
+        value = getattr(criteria, field)
+        if value:
+            stmt = stmt.where(column.ilike(value))
     if criteria.country:
         # источник знает страну через capabilities; в listings страна не хранится —
         # фильтруем по источникам (encar/kcar = KR), уточняется в этапе 5

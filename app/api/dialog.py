@@ -16,7 +16,13 @@ from app.db.session import get_session
 from app.queue import enqueue_task
 from app.schemas.criteria import SearchCriteria
 from app.services.analytics import EVENT_DIALOG_MESSAGE, track
-from app.services.dialog import DialogStore, finalize_dialog, reset_dialog
+from app.services.dialog import (
+    DialogStore,
+    archive_session,
+    finalize_dialog,
+    reset_dialog,
+    restore_dialog,
+)
 from redis.asyncio import Redis
 
 router = APIRouter(
@@ -104,8 +110,27 @@ async def dialog_message(
         )
     finally:
         await llm.aclose()
+    # Архив сессии на каждом ходу (п. «сессии сохраняются»): диалог можно
+    # посмотреть/продолжить позже, даже если финализации не было.
+    state = await DialogStore(redis).load(body.user_id)
+    if state is not None:
+        await archive_session(session, state)
+        await session.commit()
     await track(session, body.user_id, EVENT_DIALOG_MESSAGE)
     return _to_response(reply)
+
+
+@router.post("/restore")
+async def dialog_restore(
+    body: DialogResetRequest,
+    session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
+    """Поднять последний диалог из архива (п. «посмотреть диалог спустя время»)."""
+    result = await restore_dialog(
+        body.user_id, session=session, store=DialogStore(redis)
+    )
+    return result or {"restored": False, "reason": "not_found"}
 
 
 @router.post("/reset")

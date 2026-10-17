@@ -11,6 +11,7 @@ from app.ai.llm_client import BaseLLMClient, LLMError, ToolCall
 from app.ai.prompts import build_messages, state_summary
 from app.ai.rag_client import RAGClient, RAGUnavailable
 from app.ai.tools import (
+    FIELD_OPTIONS,
     TOOLS,
     ToolOutcome,
     apply_patch,
@@ -109,6 +110,16 @@ async def _execute_tool(
         if field_name and field_name not in state.asked_fields:
             state.asked_fields.append(field_name)
         options = [str(o) for o in args.get("options", [])]
+        # Справочные поля: кнопки только из FIELD_OPTIONS — LLM не выдумывает
+        # значения (MCP-подход: инструментарий, а не фантазии).
+        if field_name in FIELD_OPTIONS:
+            if options and options != FIELD_OPTIONS[field_name]:
+                logger.info(
+                    "clarification_options_replaced: field=%s llm=%s",
+                    field_name,
+                    options,
+                )
+            options = FIELD_OPTIONS[field_name]
         return ToolOutcome(text=question, options=options, asked_field=field_name)
 
     if tc.name == "answer_question":

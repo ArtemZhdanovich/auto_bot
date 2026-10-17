@@ -150,6 +150,50 @@ async def test_unknown_tool_is_handled(fake_redis: FakeRedis, fake_session):
     assert "переформулируйте" in reply.text.lower()  # не падаем на неизвестном tool
 
 
+@pytest.mark.asyncio
+async def test_clarification_options_from_catalog(fake_redis: FakeRedis, fake_session):
+    """Справочные поля: кнопки только из FIELD_OPTIONS — LLM не выдумывает."""
+    llm = _llm(
+        LLMResult(
+            tool_calls=[
+                ToolCall(
+                    id="1",
+                    name="ask_clarification",
+                    arguments={
+                        "field": "body_type",
+                        "question": "Какой кузов?",
+                        "options": ["кроссовер", "лимузин"],
+                    },
+                )
+            ]
+        )
+    )
+    reply = await run_agent(9, "хочу кроссовер", session=fake_session, redis=fake_redis, llm=llm)
+    from app.ai.tools import FIELD_OPTIONS
+
+    assert reply.options == FIELD_OPTIONS["body_type"]
+    assert "кроссовер" not in reply.options and "лимузин" not in reply.options
+
+    # несправочное поле — опции LLM проходят как есть
+    llm2 = _llm(
+        LLMResult(
+            tool_calls=[
+                ToolCall(
+                    id="1",
+                    name="ask_clarification",
+                    arguments={
+                        "field": "price_max",
+                        "question": "Бюджет?",
+                        "options": ["до 30к", "до 45к"],
+                    },
+                )
+            ]
+        )
+    )
+    reply2 = await run_agent(9, "не знаю", session=fake_session, redis=fake_redis, llm=llm2)
+    assert reply2.options == ["до 30к", "до 45к"]
+
+
 # ---------- tool calc_delivery (MVP: расчёт «под ключ» силами агента) ----------
 
 

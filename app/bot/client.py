@@ -103,6 +103,10 @@ class BackendClient:
         """POST /api/dialog/reset — сброс диалога."""
         return await self._post("/api/dialog/reset", {"user_id": user_id})
 
+    async def dialog_restore(self, user_id: int) -> dict | None:
+        """POST /api/dialog/restore — поднять последний диалог из архива."""
+        return await self._post("/api/dialog/restore", {"user_id": user_id})
+
     async def dialog_finalize(
         self, user_id: int, criteria: dict | None = None
     ) -> dict | None:
@@ -188,11 +192,24 @@ class BackendClient:
         self, params: dict | None = None, limit: int = 5
     ) -> list[dict] | None:
         """GET /api/listings — топ-объявления по критериям (фото-карточки в боте)."""
+        found = await self.search_listings_page(params, limit=limit)
+        return found[0] if found else None
+
+    async def search_listings_page(
+        self, params: dict | None = None, limit: int = 5
+    ) -> tuple[list[dict], int] | None:
+        """GET /api/listings — объявления + общий счётчик совпадений.
+
+        total нужен боту: мало результатов → карточки в чат, много →
+        лента миниаппа с фильтром (п. «формат выдачи»).
+        """
         query = {"limit": limit, "offset": 0}
         query.update(params or {})
         qs = "&".join(f"{k}={v}" for k, v in query.items() if v is not None)
         data = await self._get(f"/api/listings?{qs}")
-        return (data or {}).get("items")
+        if data is None:
+            return None
+        return (data.get("items") or [], int(data.get("total") or 0))
 
     async def calc_delivery(
         self,

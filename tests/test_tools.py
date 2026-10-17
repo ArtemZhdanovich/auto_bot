@@ -2,7 +2,13 @@
 
 from decimal import Decimal
 
-from app.ai.tools import apply_patch, has_critical_fields, lookup_reference
+from app.ai.tools import (
+    FIELD_OPTIONS,
+    TOOLS,
+    apply_patch,
+    has_critical_fields,
+    lookup_reference,
+)
 from app.schemas.criteria import SearchCriteria
 from app.services.dialog import match_faq_topic, new_state
 
@@ -49,6 +55,66 @@ def test_lookup_reference():
     assert "Genesis GV80" in (lookup_reference("gv80") or "")
     assert lookup_reference("абракадабра") is None
     assert lookup_reference("") is None
+
+
+# --- справочники значений (MCP-подход: опции из инструментария) ----------
+
+
+def test_apply_patch_normalizes_catalog_values():
+    state = new_state(1)
+    applied = apply_patch(
+        state,
+        {
+            "body_type": "внедорожник",
+            "fuel": "бензин",
+            "transmission": "автомат",
+            "drive": "полный",
+            "seller_type": "частник",
+        },
+    )
+    assert set(applied) == {"body_type", "fuel", "transmission", "drive", "seller_type"}
+    assert state.criteria.body_type == "suv"
+    assert state.criteria.fuel == "petrol"
+    assert state.criteria.transmission == "automatic"
+    assert state.criteria.drive == "awd"
+    assert state.criteria.seller_type == "private"
+
+
+def test_apply_patch_keeps_unknown_spec_value():
+    """Нераспознанное значение не роняет патч — кладётся как есть."""
+    state = new_state(1)
+    apply_patch(state, {"body_type": "лифтбек"})
+    assert state.criteria.body_type == "лифтбек"
+
+
+def test_field_options_are_reference_catalogs():
+    """Каждая кнопка-опция нормализуется в канон справочника."""
+    from app.adapters.common.normalize import (
+        normalize_body,
+        normalize_drive,
+        normalize_fuel,
+        normalize_seller_type,
+        normalize_transmission,
+    )
+
+    checks = {
+        "body_type": normalize_body,
+        "fuel": normalize_fuel,
+        "transmission": normalize_transmission,
+        "drive": normalize_drive,
+        "seller_type": normalize_seller_type,
+    }
+    for field, normalizer in checks.items():
+        for option in FIELD_OPTIONS[field]:
+            assert normalizer(option), f"{field}: {option} не нормализуется"
+
+
+def test_tools_schema_has_enums():
+    """LLM видит допустимые значения прямо в tool-схеме."""
+    update = next(t for t in TOOLS if t["name"] == "update_criteria")
+    assert update["parameters"]["properties"]["body_type"]["enum"] == FIELD_OPTIONS["body_type"]
+    preview = next(t for t in TOOLS if t["name"] == "preview_search")
+    assert "enum" in preview["parameters"]["properties"]["criteria"]["properties"]["fuel"]
 
 
 def test_faq_matching_requires_question():

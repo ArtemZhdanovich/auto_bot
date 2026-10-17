@@ -168,6 +168,31 @@ async def test_upsert_stores_title_raw_and_new_listing_queued_for_translation():
     assert "title_raw" in session.executed[0][0]
 
 
+async def test_upsert_stores_specs_normalized():
+    """Спеки (миграция 0016): кузов/топливо/КПП/привод пишутся в каноне."""
+    session = UpsertSession([NEW_ROW])
+    await save_listings(
+        session,
+        None,
+        [
+            _item(
+                body_type="SUV",
+                fuel="бензин",
+                transmission="автомат",
+                drive="4wd",
+            )
+        ],
+    )
+    params = session.executed[0][1]
+    assert params["body_type"] == "suv"
+    assert params["fuel"] == "petrol"
+    assert params["transmission"] == "automatic"
+    assert params["drive"] == "awd"
+    # UPSERT не затирает имеющиеся спеки пустыми значениями
+    sql = session.executed[0][0]
+    assert "COALESCE(EXCLUDED.body_type, listings.body_type)" in str(sql)
+
+
 async def test_unchanged_listing_not_queued_for_translation():
     session = UpsertSession([_row(_item())])
     stats = await save_listings(session, None, [_item()])

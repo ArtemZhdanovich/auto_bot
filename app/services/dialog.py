@@ -7,16 +7,18 @@
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Any, Awaitable, Callable
 
 from redis.asyncio import Redis
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.models import DialogSession, UserFilter
 from app.schemas.criteria import SearchCriteria
-from app.schemas.dialog import DialogState
+from app.schemas.dialog import DialogState, Message
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +121,8 @@ class DialogStore:
 
 
 async def archive_session(session: AsyncSession, state: DialogState) -> None:
-    """Сохранить/обновить сессию в Postgres — для аналитики и дообучения."""
+    """Сохранить/обновить сессию в Postgres — история диалога живёт дольше
+    Redis-state: её можно посмотреть спустя время (п. «сессии сохраняются»)."""
     existing = await session.get(DialogSession, uuid.UUID(state.session_id))
     if existing is None:
         existing = DialogSession(id=uuid.UUID(state.session_id))
@@ -129,10 +132,75 @@ async def archive_session(session: AsyncSession, state: DialogState) -> None:
     existing.criteria = state.criteria.model_dump(mode="json")
     existing.turn_count = state.turn_count
     existing.messages = [m.model_dump(mode="json") for m in state.messages]
+    existing.updated_at = datetime.now(UTC)
     if existing.created_at is None:
         existing.created_at = state.created_at
     if state.status in ("done", "searching"):
         existing.finished_at = datetime.now(UTC)
+
+
+async def restore_dialog(
+    user_id: int, *, session: AsyncSession, store: DialogStore
+) -> dict[str, Any] | None:
+    """Поднять последний диалог из архива (п. «посмотреть диалог спустя время»).
+
+    Активный Redis-state не трогаем (restored=False, reason=active).
+    Восстановленная сессия получает новый session_id — критерии и историю
+    переносим, диалог продолжается.
+    """
+    active = await store.load(user_id)
+    if active is not None:
+        return {"restored": False, "reason": "active"}
+    row = (
+        await session.execute(
+            select(DialogSession)
+            .where(DialogSession.user_id == user_id)
+            .order_by(
+                DialogSession.updated_at.desc().nulls_last(),
+                DialogSession.created_at.desc().nulls_last(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None or not row.messages:
+        return None
+    state = new_state(user_id)
+    state.criteria = SearchCriteria(**(row.criteria or {}))
+    state.messages = [Message(**m) for m in row.messages]
+    state.turn_count = row.turn_count or len(state.messages)
+    state.status = "collecting"
+    await store.save(state)
+    logger.info("dialog_restored: user_id=%s from=%s", user_id, row.id)
+    return {
+        "restored": True,
+        "session_id": state.session_id,
+        "criteria": row.criteria or {},
+        "messages": row.messages,
+    }
+
+
+async def cleanup_expired_dialogs(session: AsyncSession) -> int:
+    """Снос архивных диалогов, молчащих сутки с последнего сообщения
+    (п. «диалоги сносить через сутки»). Вызывается cron-джобой воркера."""
+    cutoff = datetime.now(UTC) - timedelta(
+        hours=ceil(get_settings().dialog_ttl_sec / 3600)
+    )
+    result = await session.execute(
+        delete(DialogSession).where(
+            or_(
+                DialogSession.updated_at < cutoff,
+                and_(
+                    DialogSession.updated_at.is_(None),
+                    DialogSession.created_at < cutoff,
+                ),
+            )
+        )
+    )
+    await session.commit()
+    deleted = int(getattr(result, "rowcount", 0) or 0)
+    if deleted:
+        logger.info("dialog_cleanup: deleted=%s cutoff=%s", deleted, cutoff)
+    return deleted
 
 
 async def reset_dialog(

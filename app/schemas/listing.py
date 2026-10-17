@@ -87,6 +87,11 @@ class ListingOut(BaseModel):
     currency: Optional[str] = None
     mileage_km: Optional[int] = None
     vin: Optional[str] = None
+    # Спеки (миграция 0016): кузов/топливо/КПП/привод — фильтры и карточки.
+    body_type: Optional[str] = None
+    fuel: Optional[str] = None
+    transmission: Optional[str] = None
+    drive: Optional[str] = None
     images: list[Any] = Field(default_factory=list)
     parsed_at: datetime
 
