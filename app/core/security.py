@@ -50,11 +50,19 @@ def validate_init_data(
 
     data_check_string = "\n".join(f"{key}={raw[key]}" for key in sorted(raw))
     secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-    computed_hash = hmac.new(
-        secret_key, data_check_string.encode(), hashlib.sha256
-    ).hexdigest()
+
+    def _hmac(data: str) -> str:
+        return hmac.new(secret_key, data.encode(), hashlib.sha256).hexdigest()
+
+    # Канон (дока Telegram): подпись по URL-encoded значениям как прислал клиент.
+    # Наблюдение (Telegram Desktop 2026): часть клиентов подписывает initData по
+    # РАСКОДИРОВАННЫМ значениям — пробуем оба варианта, иначе 401 «hash mismatch».
+    computed_hash = _hmac(data_check_string)
     if not hmac.compare_digest(computed_hash, received_hash):
-        raise InitDataError("initData: hash mismatch")
+        decoded = "\n".join(f"{key}={unquote(raw[key])}" for key in sorted(raw))
+        computed_hash = _hmac(decoded)
+        if not hmac.compare_digest(computed_hash, received_hash):
+            raise InitDataError("initData: hash mismatch")
 
     auth_date = int(raw.get("auth_date", "0"))
     auth_dt = datetime.fromtimestamp(auth_date, tz=UTC)

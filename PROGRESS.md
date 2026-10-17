@@ -13,6 +13,15 @@
 - **Тесты:** `test_auth_api.py` 9 passed в новом образе; vitest `Login.test.tsx` 3 passed.
 - **⏳ Открытый вопрос:** почему initData-логин 401. `BOT_TOKEN` подтверждён через getMe (`@ftadasd_bot`/7048715401 — тот же бот, что подписывает initData), алгоритм `validate_init_data` покрыт тестами. Следующий шаг: повторить вход в аппке и прочитать `docker logs auto_bot-backend-1 | grep 'initData login rejected'`.
 
+## 61. КОРЕНЬ ВХОДА НАЙДЕН: Telegram Desktop подписывает initData по раскодированным значениям
+
+- **Диагноз (доказано вычислением):** временно залогировали полный raw initData юзера в проде и пересчитали HMAC в контейнере с токеном из `.env`. `hash` юзера НЕ совпал с канонической схемой (подпись по URL-encoded значениям), но **ТОЧНО совпал** (`bb5c8623...`) при подписи по **раскодированным** (`unquote`) значениям — Telegram Desktop (2026) считает data_check_string по декодированным данным, вопреки доке («data_check_string is built exactly as received, with url-encoded values»).
+- **Фикс `app/core/security.py::validate_init_data`:** каноническая проверка → при `hash mismatch` fallback на dcs из `unquote`-значений. Оба варианта покрыты тестами.
+- **Тесты `tests/test_security_initdata.py` (новый, 4):** канон-подпись ок; **desktop decoded-подпись ок**; битая подпись → `hash mismatch`; старый `auth_date` → `expired`. Полный suite: **579 passed** (575+4).
+- **Проверка на реальных данных:** прод-контейнер принял живой initData юзера (`ACCEPTED: 809464979 PashtetMedved`) до всякого клика — авто-вход в миниаппе теперь работает.
+- **Деплой:** прод backend (build+up --no-deps) и тест-стенд `-p auto_bot_test` с оверрайдом. Временный raw-лог убран, оставлен компактный `initData login rejected: <reason>`; скрипт разбора — `shots/analyze_initdata.py`.
+- **Грабли (запомнить):** 401 при валидном токене — не спешить менять токен; посчитать HMAC по обоим вариантам dcs (encoded/decoded) на реальном initData из лога. В изолированном прогоне pytest в контейнере копировать `pyproject.toml` — иначе `asyncio_mode` не применится и все async-тесты падают (ложные «152 failed»).
+
 ## 32. raw_payload → S3/MinIO (фаза 6)
 
 - **boto3 vs aioboto3 решено: aioboto3** — fetch/send воркеры асинхронные,

@@ -67,8 +67,10 @@ async def _authenticate_via_init_data(
             max_age_seconds=settings.init_data_max_age_sec,
         )
     except InitDataError as exc:
-        # диагностика входа: без причины 401 не найти в логах (hash/expired/user)
         logger.warning("initData login rejected: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
+        ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
         ) from exc
