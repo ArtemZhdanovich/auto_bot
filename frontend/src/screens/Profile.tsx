@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button, Cell, Placeholder, Section } from "@telegram-apps/telegram-ui";
-
 import { api } from "../api/client";
 import { haptic, isGuest, logout, tgUser } from "../api/auth";
 import {
@@ -114,10 +112,22 @@ export function ProfileScreen() {
   const tg = tgUser();
 
   if (error) {
-    return <Placeholder header="Нужна авторизация" description="Откройте приложение из Telegram-бота" />;
+    return (
+      <div className="screen">
+        <div className="state">
+          <div className="state__emoji">🔒</div>
+          <div className="state__title">Нужна авторизация</div>
+          <div className="state__text">Откройте приложение из Telegram-бота</div>
+        </div>
+      </div>
+    );
   }
   if (!user) {
-    return <Placeholder description="Загрузка…" />;
+    return (
+      <div className="screen">
+        <div className="state"><span className="skeleton" style={{ width: 140, height: 16 }} /></div>
+      </div>
+    );
   }
 
   const until = sub?.subscription_until
@@ -129,20 +139,21 @@ export function ProfileScreen() {
   return (
     <div className="screen">
       {guest && (
-        <Section header="Гостевой режим">
-          <div style={{ padding: "0 12px 8px", fontSize: 13, lineHeight: 1.5, opacity: 0.75 }}>
-            Вы смотрите как гость: лента, AI-разбор цены (1 бесплатный), калькулятор и
-            избранное доступны. Сохранённые машины и уведомления в Telegram появятся
-            после входа.
-          </div>
-          <div style={{ display: "flex", gap: 8, padding: 12 }}>
-            <Link to="/login" style={{ flex: 1, textDecoration: "none" }}>
-              <Button stretched mode="filled">Войти / Регистрация</Button>
-            </Link>
-          </div>
-        </Section>
+        <section className="panel profile-card">
+          <h3>Гостевой режим</h3>
+          <p className="profile-card__text">
+            Вы смотрите как гость: лента, AI-разбор цены (1 бесплатный),
+            калькулятор и избранное доступны. Сохранённые машины и уведомления
+            в Telegram появятся после входа.
+          </p>
+          <Link to="/login" className="btn btn--primary btn--block profile-card__cta">
+            Войти / Регистрация
+          </Link>
+        </section>
       )}
-      <Section header="Регион доставки">
+
+      <section className="panel profile-card">
+        <h3>Регион доставки</h3>
         <div className="region-row">
           {(["ru", "by"] as const).map((r) => (
             <button
@@ -162,53 +173,57 @@ export function ProfileScreen() {
           Цены показываем в $ и в валюте региона. Таможенные платежи ЕАЭС
           одинаковы для РФ и РБ; нюансы постановки на учёт уточнит менеджер.
         </div>
-      </Section>
-      <Section header="Профиль">
-        <Cell
-          subtitle={user.username ? `@${user.username}` : undefined}
-          after={<b>{TIER_LABEL[user.subscription_tier]}</b>}
-        >
-          {user.first_name} {user.last_name ?? ""}
-        </Cell>
-        <Cell subtitle="Роль">{user.role}</Cell>
-        <Cell subtitle="С нами с">
-          {new Date(user.created_at).toLocaleDateString("ru")}
-        </Cell>
-      </Section>
-      <Section header="Подписка">
-        <Cell
-          after={<b>{TIER_LABEL[sub?.tier ?? user.subscription_tier]}</b>}
-          subtitle={until ? `активна до ${until}` : "бесплатный тариф"}
-        >
-          Текущий тариф
-        </Cell>
+      </section>
+
+      <section className="panel profile-card">
+        <h3>Профиль</h3>
+        <div className="info-row">
+          <span className="info-row__label">Имя</span>
+          <span className="info-row__value">
+            {user.first_name} {user.last_name ?? ""}
+            {user.username ? <span className="info-row__muted"> · @{user.username}</span> : null}
+          </span>
+          <span className="badge badge--claimed">{TIER_LABEL[user.subscription_tier]}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-row__label">Роль</span>
+          <span className="info-row__value">{user.role}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-row__label">С нами с</span>
+          <span className="info-row__value">{new Date(user.created_at).toLocaleDateString("ru")}</span>
+        </div>
+      </section>
+
+      <section className="panel profile-card">
+        <h3>Подписка</h3>
+        <div className="sub-tier">
+          <div className="sub-tier__name">{TIER_LABEL[sub?.tier ?? user.subscription_tier]}</div>
+          <div className="sub-tier__until">{until ? `активна до ${until}` : "бесплатный тариф"}</div>
+        </div>
         {sub && (
-          <Cell description={`${sub.max_filters ?? "∞"} фильтров · ${sub.ai_daily_limit ?? "∞"} AI-сообщений/день · instant: ${sub.instant ? "да" : "нет"}`}>
-            Лимиты тарифа
-          </Cell>
+          <div className="sub-limits">
+            {sub.max_filters ?? "∞"} фильтров · {sub.ai_daily_limit ?? "∞"} AI-сообщений/день
+            · instant: {sub.instant ? "да" : "нет"}
+          </div>
         )}
-        {sub?.tier !== "pro" && (
-          <Button
-            loading={buying === "pro_month"}
-            onClick={() => buy("pro", "month")}
-          >
-            ⭐ Pro — 500★/мес
-          </Button>
-        )}
-        {sub?.tier !== "pro" && (
-          <Button mode="outline" loading={buying === "pro_year"} onClick={() => buy("pro", "year")}>
-            ⭐ Pro — 4800★/год (−20%)
-          </Button>
-        )}
-        {sub?.tier !== "business" && (
-          <Button
-            mode="outline"
-            loading={buying === "business_month"}
-            onClick={() => buy("business", "month")}
-          >
-            ⭐ Business — 2500★/мес
-          </Button>
-        )}
+        <div className="sub-actions">
+          {sub?.tier !== "pro" && (
+            <button className="btn btn--primary" disabled={buying === "pro_month"} onClick={() => buy("pro", "month")}>
+              {buying === "pro_month" ? "Оформляем…" : "⭐ Pro — 500★/мес"}
+            </button>
+          )}
+          {sub?.tier !== "pro" && (
+            <button className="btn" disabled={buying === "pro_year"} onClick={() => buy("pro", "year")}>
+              {buying === "pro_year" ? "Оформляем…" : "⭐ Pro — 4800★/год (−20%)"}
+            </button>
+          )}
+          {sub?.tier !== "business" && (
+            <button className="btn" disabled={buying === "business_month"} onClick={() => buy("business", "month")}>
+              {buying === "business_month" ? "Оформляем…" : "⭐ Business — 2500★/мес"}
+            </button>
+          )}
+        </div>
         {message && (
           <div className={
             message.startsWith("✅") || message.startsWith("⏳")
@@ -218,14 +233,17 @@ export function ProfileScreen() {
             {message}
           </div>
         )}
-      </Section>
-      <Button mode="outline" onClick={logout}>
+      </section>
+
+      <button className="btn btn--danger btn--block" onClick={logout}>
         Выйти (сбросить сессию)
-      </Button>
+      </button>
+
       {tg && (
-        <Cell subtitle={`Telegram ID: ${tg.id}`} description="Данные получены из Telegram">
-          Контекст Mini App активен
-        </Cell>
+        <div className="info-row info-row--muted">
+          <span className="info-row__label">Контекст Mini App активен</span>
+          <span className="info-row__value">Telegram ID: {tg.id}</span>
+        </div>
       )}
     </div>
   );

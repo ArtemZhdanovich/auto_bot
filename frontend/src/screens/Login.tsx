@@ -1,7 +1,6 @@
 /** Экран «Сайт: вход/регистрация» (вне Telegram). Поиск — только после регистрации. */
 
 import { useState } from "react";
-import { Button, Input, Placeholder, Section } from "@telegram-apps/telegram-ui";
 
 import { webLogin, webRegister } from "../api/auth";
 
@@ -35,48 +34,76 @@ export function LoginScreen({ onAuthed }: Props) {
   };
 
   return (
-    <div style={{ padding: 16 }}>
-      <Placeholder
-        header={mode === "login" ? "Вход" : "Регистрация"}
-        description="Поиск по объявлениям, фильтры и AI-подбор доступны после входа. Уведомления приходят только в Telegram."
-      />
-      <Section>
-        <div style={{ display: "flex", gap: 8, padding: 12 }}>
-          <Button
-            mode={mode === "login" ? "filled" : "plain"}
-            stretched
-            onClick={() => setMode("login")}
-          >
-            Вход
-          </Button>
-          <Button
-            mode={mode === "register" ? "filled" : "plain"}
-            stretched
-            onClick={() => setMode("register")}
-          >
-            Регистрация
-          </Button>
-        </div>
-        <div style={{ display: "grid", gap: 8, padding: 12 }}>
-          {mode === "register" && (
-            <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Имя (необязательно)" />
-          )}
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" />
-          <Input
+    <div className="screen auth">
+      <div className="auth__hero">
+        <div className="auth__hero-icon">🔐</div>
+        <h1 className="auth__title">{mode === "login" ? "Вход" : "Регистрация"}</h1>
+        <p className="auth__sub">
+          Поиск по объявлениям, фильтры и AI-подбор доступны после входа.
+          Уведомления приходят только в Telegram.
+        </p>
+      </div>
+
+      <div className="auth__tabs" role="tablist">
+        <button
+          className={mode === "login" ? "auth__tab auth__tab--active" : "auth__tab"}
+          onClick={() => setMode("login")}
+        >
+          Вход
+        </button>
+        <button
+          className={mode === "register" ? "auth__tab auth__tab--active" : "auth__tab"}
+          onClick={() => setMode("register")}
+        >
+          Регистрация
+        </button>
+      </div>
+
+      <form
+        className="panel auth__form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        {mode === "register" && (
+          <label className="calc-field">
+            <span>Имя (необязательно)</span>
+            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Иван" />
+          </label>
+        )}
+        <label className="calc-field">
+          <span>Email</span>
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@mail.com"
+            type="email"
+            autoComplete="email"
+          />
+        </label>
+        <label className="calc-field">
+          <span>Пароль</span>
+          <input
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={mode === "register" ? "Пароль (мин. 8 символов)" : "Пароль"}
+            placeholder={mode === "register" ? "Минимум 8 символов" : "Пароль"}
             type="password"
+            autoComplete={mode === "register" ? "new-password" : "current-password"}
           />
-          {error && <div style={{ color: "var(--tg-theme-destructive-text-color, #e53935)", fontSize: 13 }}>{error}</div>}
-          <Button size="l" stretched disabled={busy || !email || password.length < (mode === "register" ? 8 : 1)} onClick={submit}>
-            {mode === "register" ? "Зарегистрироваться" : "Войти"}
-          </Button>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>
-            Уведомления о новых вариантах отправляются только в Telegram — привяжите бота после входа.
-          </div>
-        </div>
-      </Section>
+        </label>
+        {error && <div className="form-error">{error}</div>}
+        <button
+          className="btn btn--primary btn--block"
+          disabled={busy || !email || password.length < (mode === "register" ? 8 : 1)}
+        >
+          {busy ? "Секунду…" : mode === "register" ? "Зарегистрироваться" : "Войти"}
+        </button>
+        <p className="auth__hint">
+          Уведомления о новых вариантах отправляются только в Telegram — привяжите
+          бота после входа.
+        </p>
+      </form>
     </div>
   );
 }

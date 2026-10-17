@@ -1166,5 +1166,29 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   2 вьюпорта — ALL CLEAN, JS-ошибок нет.
 - **74 vitest (+1: восстановление ленты без повторного запроса), tsc чисто.**
 
+## 49. Единый дизайн на всех экранах: Login, Filters, Profile (2026-10-17)
+- Проблема: дизайн-система была только на основных экранах (лента, карточка,
+  калькулятор, сравнение, AI-чат), а Login (0 классов), Filters и Profile
+  оставались на дефолтных Section/Cell/Input/Placeholder telegram-ui с inline-
+  стилями — визуально «чужие» страницы.
+- **Login**: свой хиро (🔐 + заголовок), сегмент-табы «Вход/Регистрация»
+  (`.auth__tabs`), поля `.calc-field`, кнопка `.btn--primary .btn--block`,
+  форма на `<form onSubmit>` (Enter = отправка), ошибки `.form-error`.
+- **Filters**: обе секции — карточки `.panel`; все поля `.calc-field`/`.filter-select`
+  в парах `.filter-pair`; Instant-свитч → тумблер-чип `.feed-toggle`; список
+  фильтров — строки `.filter-item` с описанием критериев и ✕ `.btn--danger`;
+  пустое состояние и загрузка — `.state`/`.skeleton`.
+- **Profile**: карточки `.profile-card` (гостевой режим с CTA-ссылкой-кнопкой,
+  регион с чипами, профиль, подписка); строки «label → значение» `.info-row`;
+  тариф — акцентный блок `.sub-tier` + лимиты + кнопки покупки `.btn`;
+  «Выйти» — `.btn--danger .btn--block`; авторизация/загрузка — `.state`.
+- telegram-ui на этих экранах больше не используется (нули импортов).
+- Новые стили: `.btn--block`, `.auth__*`, `.filters-form*`, `.filter-item*`,
+  `.info-row*`, `.sub-*`, `.profile-card*`.
+- Проверено Playwright: `/login`, `/filters`, `/profile` × mob/PC — без
+  overflow-x, без JS-ошибок, табы логина переключаются; полный аудит 9 экранов —
+  ALL CLEAN.
+
+
 
 

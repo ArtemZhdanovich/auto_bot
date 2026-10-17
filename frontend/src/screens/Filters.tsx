@@ -1,15 +1,6 @@
 /** Фильтры (ТЗ п. 9.2.3): полный набор критериев, создание, удаление. */
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  Button,
-  Cell,
-  Input,
-  Placeholder,
-  Section,
-  Spinner,
-  Switch,
-} from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
@@ -181,91 +172,128 @@ export function FiltersScreen() {
 
   return (
     <div className="screen">
-      <Section header="Новый фильтр">
-        <Input header="Название (необязательно)" value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="Семейный кроссовер" />
-        <Input header="Марка" value={form.make} onChange={(e) => set("make")(e.target.value)} placeholder="BMW" />
-        <Input header="Модель" value={form.model} onChange={(e) => set("model")(e.target.value)} placeholder="X5" />
-        <div className="filter-pair">
-          <Input header="Год от" inputMode="numeric" value={form.yearFrom} onChange={(e) => set("yearFrom")(onlyDigits(e.target.value))} placeholder="2019" />
-          <Input header="Год до" inputMode="numeric" value={form.yearTo} onChange={(e) => set("yearTo")(onlyDigits(e.target.value))} placeholder="2024" />
-        </div>
-        <div className="filter-pair">
-          <Input header="Цена $ от" inputMode="numeric" value={form.priceMin} onChange={(e) => set("priceMin")(onlyDigits(e.target.value))} placeholder="15000" />
-          <Input header="Цена $ до" inputMode="numeric" value={form.priceMax} onChange={(e) => set("priceMax")(onlyDigits(e.target.value))} placeholder="40000" />
-        </div>
-        <Input header="Пробег, км — не более" inputMode="numeric" value={form.mileageMax} onChange={(e) => set("mileageMax")(onlyDigits(e.target.value))} placeholder="100000" />
-        <div className="filter-pair">
-          <label className="filter-select">
-            <span>Топливо</span>
-            <select value={form.fuel} onChange={(e) => set("fuel")(e.target.value)}>
-              {FUELS.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
+      <section className="panel">
+        <h3>Новый фильтр</h3>
+        <div className="filters-form">
+          <label className="calc-field">
+            <span>Название (необязательно)</span>
+            <input value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="Семейный кроссовер" />
           </label>
-          <label className="filter-select">
-            <span>КПП</span>
-            <select value={form.transmission} onChange={(e) => set("transmission")(e.target.value)}>
-              {TRANSMISSIONS.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
+          <div className="filter-pair">
+            <label className="calc-field">
+              <span>Марка</span>
+              <input value={form.make} onChange={(e) => set("make")(e.target.value)} placeholder="BMW" />
+            </label>
+            <label className="calc-field">
+              <span>Модель</span>
+              <input value={form.model} onChange={(e) => set("model")(e.target.value)} placeholder="X5" />
+            </label>
+          </div>
+          <div className="filter-pair">
+            <label className="calc-field">
+              <span>Год от</span>
+              <input inputMode="numeric" value={form.yearFrom} onChange={(e) => set("yearFrom")(onlyDigits(e.target.value))} placeholder="2019" />
+            </label>
+            <label className="calc-field">
+              <span>Год до</span>
+              <input inputMode="numeric" value={form.yearTo} onChange={(e) => set("yearTo")(onlyDigits(e.target.value))} placeholder="2024" />
+            </label>
+          </div>
+          <div className="filter-pair">
+            <label className="calc-field">
+              <span>Цена $ от</span>
+              <input inputMode="numeric" value={form.priceMin} onChange={(e) => set("priceMin")(onlyDigits(e.target.value))} placeholder="15000" />
+            </label>
+            <label className="calc-field">
+              <span>Цена $ до</span>
+              <input inputMode="numeric" value={form.priceMax} onChange={(e) => set("priceMax")(onlyDigits(e.target.value))} placeholder="40000" />
+            </label>
+          </div>
+          <label className="calc-field">
+            <span>Пробег, км — не более</span>
+            <input inputMode="numeric" value={form.mileageMax} onChange={(e) => set("mileageMax")(onlyDigits(e.target.value))} placeholder="100000" />
           </label>
-        </div>
-        <div className="filter-pair">
-          <label className="filter-select">
-            <span>Кузов</span>
-            <select value={form.bodyType} onChange={(e) => set("bodyType")(e.target.value)}>
-              {BODIES.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
-          </label>
-          <label className="filter-select">
-            <span>Привод</span>
-            <select value={form.drive} onChange={(e) => set("drive")(e.target.value)}>
-              {DRIVES.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <Cell
-          subtitle="Уведомления сразу, а не в дайджесте"
-          after={
-            <Switch
-              checked={instant}
-              onChange={(e) => setInstant((e.target as HTMLInputElement).checked)}
-            />
-          }
-        >
-          Instant-уведомления
-        </Cell>
-        {error && <div className="form-error">{error}</div>}
-        <Button size="l" stretched loading={creating} onClick={() => void create()}>
-          Создать фильтр
-        </Button>
-      </Section>
-
-      <Section header={`Мои фильтры (${filters.length})`}>
-        {loading && <Spinner size="m" />}
-        {!loading && filters.length === 0 && (
-          <Placeholder description="Создайте первый фильтр — под него придут уведомления" />
-        )}
-        {filters.map((f) => (
-          <Cell
-            key={f.id}
-            subtitle={`${describe(f.criteria)} · ${f.notify_mode}`}
-            after={
-              <Button mode="outline" size="s" onClick={() => void remove(f.id)}>
-                ✕
-              </Button>
-            }
+          <div className="filter-pair">
+            <label className="filter-select">
+              <span>Топливо</span>
+              <select value={form.fuel} onChange={(e) => set("fuel")(e.target.value)}>
+                {FUELS.map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-select">
+              <span>КПП</span>
+              <select value={form.transmission} onChange={(e) => set("transmission")(e.target.value)}>
+                {TRANSMISSIONS.map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="filter-pair">
+            <label className="filter-select">
+              <span>Кузов</span>
+              <select value={form.bodyType} onChange={(e) => set("bodyType")(e.target.value)}>
+                {BODIES.map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-select">
+              <span>Привод</span>
+              <select value={form.drive} onChange={(e) => set("drive")(e.target.value)}>
+                {DRIVES.map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <button
+            className={instant ? "feed-toggle feed-toggle--on" : "feed-toggle"}
+            aria-pressed={instant}
+            onClick={() => setInstant((v) => !v)}
           >
-            {f.name ?? `Фильтр #${f.id}`}
-          </Cell>
-        ))}
-      </Section>
+            ⚡ Instant-уведомления
+          </button>
+          <div className="filters-form__hint">
+            Instant — уведомления сразу, а не в дайджесте
+          </div>
+          {error && <div className="form-error">{error}</div>}
+          <button className="btn btn--primary btn--block" disabled={creating} onClick={() => void create()}>
+            {creating ? "Создаём…" : "Создать фильтр"}
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h3>Мои фильтры ({filters.length})</h3>
+        {loading && <div className="state"><span className="skeleton" style={{ width: 120, height: 14 }} /></div>}
+        {!loading && filters.length === 0 && (
+          <div className="state">
+            <div className="state__emoji">🔔</div>
+            <div className="state__title">Фильтров пока нет</div>
+            <div className="state__text">
+              Создайте первый фильтр — под него придут уведомления
+            </div>
+          </div>
+        )}
+        <div className="filter-list">
+          {filters.map((f) => (
+            <div key={f.id} className="filter-item">
+              <div className="filter-item__body">
+                <div className="filter-item__name">{f.name ?? `Фильтр #${f.id}`}</div>
+                <div className="filter-item__desc">
+                  {describe(f.criteria)} · {f.notify_mode === "instant" ? "instant" : "дайджест"}
+                </div>
+              </div>
+              <button className="btn btn--danger" aria-label={`Удалить ${f.name ?? f.id}`} onClick={() => void remove(f.id)}>
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
