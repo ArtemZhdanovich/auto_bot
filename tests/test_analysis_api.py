@@ -159,3 +159,47 @@ async def test_post_analysis_missing_listing_404(monkeypatch, fake_session):
     finally:
         await client.aclose()
         app.dependency_overrides.clear()
+
+# ---------- Гостям AI-анализ закрыт ----------
+
+
+@pytest.mark.asyncio
+async def test_post_analysis_guest_403(fake_session):
+    """Гость (id < 0, без email) получает 403 — анализ только авторизированным."""
+    user = SimpleNamespace(
+        telegram_id=-123456789, email=None, subscription_tier="free", subscription_until=None
+    )
+    fake_session.add(_listing_row())
+    client, _ = _client(user, fake_session, None)
+    try:
+        resp = await client.post("/api/listings/42/analysis")
+        assert resp.status_code == 403
+        assert "guest_forbidden" in resp.json()["detail"]
+        # LLM даже не вызывался: разбор не создан
+        assert len(fake_session.added) == 1  # только listing
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_post_analysis_email_user_allowed(monkeypatch, fake_session):
+    """Email-пользователь тоже с id < 0, но с email → гость не он, разбор идёт."""
+    monkeypatch.setattr("app.api.analysis.build_llm_client", lambda settings: _FakeLLM())
+    monkeypatch.setattr("app.api.analysis.get_settings", lambda: SimpleNamespace())
+    user = SimpleNamespace(
+        telegram_id=-987654321,
+        email="user@mail.com",
+        subscription_tier="free",
+        subscription_until=None,
+    )
+    fake_session.add(_listing_row())
+    fake_session.set_results([[], [], []])
+    client, _ = _client(user, fake_session, monkeypatch)
+    try:
+        resp = await client.post("/api/listings/42/analysis")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["verdict"] == "deal"
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()

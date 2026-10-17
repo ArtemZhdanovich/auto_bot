@@ -101,8 +101,8 @@ export async function pollTelegramLogin(code: string): Promise<TelegramLoginPoll
 }
 
 /** Гостевой режим: сайт открыт без регистрации — JWT «Гостя» сразу.
- *  Лента, карточка, AI-разбор (1/нед), калькулятор, избранное — доступны;
- *  Telegram-уведомления и Pro — после входа/регистрации. */
+ *  Лента, карточка, калькулятор, избранное — доступны;
+ *  AI-анализ цены, Telegram-уведомления и Pro — после входа/регистрации. */
 export async function guestLogin(): Promise<AuthResponse> {
   const resp = await api<AuthResponse>("/auth/guest", { method: "POST" });
   setTokens(resp.access_token, resp.refresh_token);

@@ -42,6 +42,12 @@ class AnalysisOut(BaseModel):
     created_at: str | None = None  # ISO — «разбор от …» в UI
 
 
+def _is_web_guest(user: User) -> bool:
+    """Гостевой аккаунт сайта (POST /auth/guest): синтетический telegram_id < 0
+    и без email (email-регистрация тоже с id < 0, но с заполненным email)."""
+    return getattr(user, "telegram_id", 0) < 0 and getattr(user, "email", None) is None
+
+
 async def _get_listing(session: AsyncSession, listing_id: int) -> Listing:
     listing = await session.get(Listing, listing_id)
     if listing is None:
@@ -55,7 +61,16 @@ async def create_analysis(
     user: CurrentUserDep,
     session: SessionDep,
 ) -> AnalysisOut:
-    """Разбор цены через LLM (квота: 1/нед на машину для free)."""
+    """Разбор цены через LLM (квота: 1/нед на машину для free).
+
+    Гостям (POST /auth/guest) разбор закрыт — только авторизированным.
+    """
+    if _is_web_guest(user):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "guest_forbidden: AI-анализ цены доступен только после входа "
+            "или регистрации",
+        )
     listing = await _get_listing(session, listing_id)
     try:
         llm = build_llm_client(get_settings())

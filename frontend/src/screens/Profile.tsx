@@ -142,9 +142,9 @@ export function ProfileScreen() {
         <section className="panel profile-card">
           <h3>Гостевой режим</h3>
           <p className="profile-card__text">
-            Вы смотрите как гость: лента, AI-разбор цены (1 бесплатный),
-            калькулятор и избранное доступны. Сохранённые машины и уведомления
-            в Telegram появятся после входа.
+            Вы смотрите как гость: лента, калькулятор и избранное доступны.
+            AI-анализ цены, сохранённые машины и уведомления в Telegram —
+            после входа.
           </p>
           <Link to="/login" className="btn btn--primary btn--block profile-card__cta">
             Войти / Регистрация

@@ -1305,3 +1305,17 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 - Проверено Playwright на стенде: PDP → CTA → /calc (кнопка есть) → назад
   вернулись на /listing/1; /compare → назад → лента. Скриншот back_calc.png.
 - **80 vitest (+2: BackButton в Calc и Compare реально делает navigate(-1)).**
+## 56. AI-анализ цены закрыт для гостей (2026-10-17)
+- Требование: аналитика — только авторизированным. Раньше гость мог 1 раз/нед.
+- **Backend** (POST /listings/{id}/analysis): гость = telegram_id < 0 И email
+  пуст (email-регистрация тоже с id < 0, но с email; TG-юзеры с реальными id).
+  403 guest_forbidden до вызова LLM — денег не тратим. Маркер — 
+  _is_web_guest() в analysis.py (SimpleNamespace-юзеры тестов совместимы).
+- **Frontend** (Listing): GET /analysis гость не запрашивает вовсе; клик по
+  «Анализировать» → модалка входа (LoginPrompt). Кнопка для гостя —
+  «🤖 Анализировать — по входу», подсказка с 🔒.
+- Тексты синхронизированы: гест-баннер App, карточка гостя Profile,
+  докстринги /auth/guest и guestLogin.
+- Проверено на стенде: гостевой JWT → POST 403 guest_forbidden; Playwright:
+  гость видит «по входу», клик открывает модалку входа, кэша разбора нет.
+- **569 pytest (+2: гость 403 без LLM; email-юзер с id < 0 проходит).**

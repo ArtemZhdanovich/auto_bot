@@ -5,8 +5,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Heart, ExternalLink, Truck } from "lucide-react";
 
 import { api } from "../api/client";
-import { haptic } from "../api/auth";
+import { haptic, isGuest } from "../api/auth";
 import { useToast } from "../ui/Toast";
+import { useLoginPrompt } from "../ui/LoginPrompt";
 import { SkeletonCard } from "../ui/Skeleton";
 import { ErrorState } from "../ui/States";
 import type { Listing } from "../api/types";
@@ -24,6 +25,7 @@ export function ListingScreen() {
   const [quotaHit, setQuotaHit] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
+  const loginPrompt = useLoginPrompt();
 
   useEffect(() => {
     api<Listing>(`/listings/${id}`)
@@ -32,14 +34,24 @@ export function ListingScreen() {
     api<{ favorited: boolean }>(`/favorites/${id}`)
       .then((r) => setFavorited(r.favorited))
       .catch(() => undefined); // вне Telegram — без избранного
-    // Кэш последнего разбора (без LLM): если есть — сразу график
-    api<AnalysisData | null>(`/listings/${id}/analysis`)
-      .then((a) => a && setAnalysis(a))
-      .catch(() => undefined);
+    // Кэш последнего разбора (без LLM): если есть — сразу график.
+    // Гостю аналитика недоступна — не запрашиваем вовсе.
+    if (!isGuest()) {
+      api<AnalysisData | null>(`/listings/${id}/analysis`)
+        .then((a) => a && setAnalysis(a))
+        .catch(() => undefined);
+    }
   }, [id]);
 
   const runAnalysis = async () => {
     if (analyzing) return;
+    if (isGuest()) {
+      // Аналитика — только для авторизированных (ТЗ: гость = демо без LLM)
+      loginPrompt.show(
+        "AI-анализ цены доступен после входа — войдите или зарегистрируйтесь.",
+      );
+      return;
+    }
     setAnalyzing(true);
     haptic("medium");
     try {
@@ -165,7 +177,8 @@ export function ListingScreen() {
         </section>
       )}
 
-      {/* AI-анализ стоимости (монетизация: 1/нед бесплатно, далее Pro) */}
+      {/* AI-анализ стоимости (монетизация: 1/нед бесплатно, далее Pro);
+          гостям закрыт — только после входа/регистрации */}
       <section className="panel">
         <h3>🤖 AI-анализ цены</h3>
         {analyzing ? (
@@ -271,15 +284,18 @@ export function ListingScreen() {
         ) : (
           <div className="analysis">
             <div className="analysis__hint">
-              Нейросеть сравнит цену с рынком: сопоставимые объявления, история
-              цены, вердикт и факторы.
+              {isGuest()
+                ? "🔒 Нейросеть сравнит цену с рынком: сопоставимые объявления, история цены, вердикт. Доступно после входа."
+                : "Нейросеть сравнит цену с рынком: сопоставимые объявления, история цены, вердикт и факторы."}
             </div>
             <button
               className="btn btn--primary btn--block"
               style={{ marginTop: 10 }}
               onClick={() => void runAnalysis()}
             >
-              🤖 Анализировать (1 бесплатно в неделю)
+              {isGuest()
+                ? "🤖 Анализировать — по входу"
+                : "🤖 Анализировать (1 бесплатно в неделю)"}
             </button>
           </div>
         )}
