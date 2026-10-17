@@ -1295,3 +1295,13 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   (modelNm с источника), обратного KR→EN словаря нет; лечится переводом
   (этап 5, services/translate + бэкфилл title_ru).
 - **78 vitest (+2: sub без title_ru скрыт; с title_ru — перевод).**
+## 55. Кнопки «назад» на экранах расчётов (2026-10-17)
+- Проблема: «Доставка и растаможка» с карточки ведёт на /calc (и дальше
+  «Сравнить» → /compare), но на этих экранах не было возврата — только таббар,
+  который теряет контекст объявления.
+- Новый ui/BackButton (круглая «‹» по токенам: --border/--bg-secondary,
+  обе темы) в sticky-заголовке Calc и Compare (`.feed-header--with-back`),
+  navigate(-1) → возврат на PDP.
+- Проверено Playwright на стенде: PDP → CTA → /calc (кнопка есть) → назад
+  вернулись на /listing/1; /compare → назад → лента. Скриншот back_calc.png.
+- **80 vitest (+2: BackButton в Calc и Compare реально делает navigate(-1)).**

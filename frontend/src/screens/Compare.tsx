@@ -10,6 +10,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
 import { digits, parseQueryVariants, type Variant } from "../lib/fx";
+import { BackButton } from "../ui/BackButton";
 
 interface CompareItem {
   title: string;
@@ -90,10 +91,13 @@ export function CompareScreen() {
 
   return (
     <div className="calc">
-      <div className="feed-header">
-        <div className="feed-header__title">⚖️ Сравнение «под ключ»</div>
-        <div className="feed-header__counter">
-          Пошлина зависит от возраста и объёма — итог может удивить
+      <div className="feed-header feed-header--with-back">
+        <BackButton />
+        <div>
+          <div className="feed-header__title">⚖️ Сравнение «под ключ»</div>
+          <div className="feed-header__counter">
+            Пошлина зависит от возраста и объёма — итог может удивить
+          </div>
         </div>
       </div>
 

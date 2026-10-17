@@ -860,6 +860,30 @@ main {
   background: var(--bg);
   padding: var(--space-2) var(--space-4);
 }
+.feed-header--with-back {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.screen-back {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+.screen-back:active {
+  transform: scale(0.94);
+}
 .feed-header__title {
   font-size: var(--font-lg);
   font-weight: 700;
