@@ -47,17 +47,19 @@ const renderCard = (listing: Listing, favorited = false) =>
 
 describe("ListingCard", () => {
   it("рисует заголовок, цену и счётчик фото в карточке-контейнере", () => {
+    localStorage.setItem("autopick_region", "ru"); // детерминированный регион
     renderCard(base);
     const card = document.querySelector(".listing-card");
     expect(card).not.toBeNull();
     expect(screen.getByText("Kia Carnival, 2022")).toBeTruthy();
-    // Цепочка цен: сначала $ (KRW ÷1350), потом локальная, источник ниже
+    // В ленте — только валюта региона: 18.4 млн KRW -> $13 630 -> 1 254 000 RUB
     expect(
-      document.querySelector(".listing-card__price")?.textContent?.replace(/ /g, " "),
-    ).toContain("3 630");
-    expect(
-      document.querySelector(".listing-card__orig")?.textContent?.replace(/ /g, " "),
-    ).toContain("18 400 000");
+      document.querySelector(".listing-card__price")?.textContent?.replace(/\s/g, " "),
+    ).toContain("1 254 000");
+    // $ и цена источника (KRW) из ленты убраны — они остаются на PDP
+    expect(document.querySelector(".listing-card__price")?.textContent).not.toContain("$");
+    expect(document.querySelector(".listing-card__orig")).toBeNull();
+    expect(document.querySelector(".listing-card__price")?.textContent).not.toContain("KRW");
     expect(document.querySelector(".listing-card__photos-count")?.textContent).toBe("2");
   });
 

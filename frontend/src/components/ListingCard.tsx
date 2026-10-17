@@ -23,6 +23,7 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
   const [fav, setFav] = useState(favorited);
   const [photoFailed, setPhotoFailed] = useState(false);
   const photo = listing.images[0];
+  // В ленте — только валюта региона (₽/Br); $ и цена источника — на PDP
   const chain = priceChain(listing.price, listing.currency, getRegion());
   // Единый тайтл: без «null undefined», если у источника нет марки/модели
   const title = `${listing.make ?? ""} ${listing.model ?? ""}`.trim() || "Без названия";
@@ -122,22 +123,11 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
             {listing.title_ru ?? listing.title_raw}
           </div>
         )}
-        {/* Цепочка цен: $ → локальная валюта региона → цена источника */}
-        {chain.usd ? (
-          <>
-            <div className="listing-card__price">
-              {chain.usd}
-              {chain.local && <span className="listing-card__local"> · {chain.local}</span>}
-            </div>
-            {chain.original && (
-              <div className="listing-card__orig">{chain.original}</div>
-            )}
-          </>
-        ) : (
-          <div className="listing-card__price">
-            {chain.original ?? "—"}
-          </div>
-        )}
+        {/* Главная цена — только валюта региона; если конвертация невозможна
+            (нет цены/курса) — как есть с источника */}
+        <div className="listing-card__price">
+          {chain.local ?? chain.original ?? "—"}
+        </div>
         <div className="listing-card__meta">
           {listing.mileage_km
             ? `${listing.mileage_km.toLocaleString("ru")} км · `

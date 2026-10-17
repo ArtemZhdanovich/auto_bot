@@ -7,6 +7,7 @@ import { api } from "../api/client";
 import { isGuest } from "../api/auth";
 import { useLoginPrompt } from "../ui/LoginPrompt";
 import { SkeletonCard } from "../ui/Skeleton";
+import { getRegion, priceChain } from "../lib/fx";
 import type { Listing } from "../api/types";
 
 export function FavoritesScreen() {
@@ -95,7 +96,12 @@ export function FavoritesScreen() {
             const dropped =
               l.first_price != null && l.price != null && l.price < l.first_price;
             const badge = l.is_active === false ? "🔴 " : dropped ? "⬇️ " : "";
-            const oldPrice = dropped && l.first_price ? ` (было ${l.first_price.toLocaleString("ru")})` : "";
+            // Цены — в валюте региона (как в ленте), а не в валюте источника
+            const toLocal = (p: number | null) =>
+              priceChain(p, l.currency, getRegion(), { withOriginal: false });
+            const priceNow = toLocal(l.price);
+            const priceWas = dropped ? toLocal(l.first_price) : null;
+            const oldPrice = priceWas?.local ? ` (было ${priceWas.local})` : "";
             return (
               <div
                 key={l.id}
@@ -110,7 +116,7 @@ export function FavoritesScreen() {
                     {`${badge}${l.make ?? ""} ${l.model ?? ""}`.trim() || "Объявление"}
                   </div>
                   <div className="filter-item__desc">
-                    {`${l.year ?? "—"} · ${l.price?.toLocaleString("ru") ?? "—"} ${l.currency ?? ""}${oldPrice} · ${l.mileage_km?.toLocaleString("ru") ?? "—"} км`}
+                    {`${l.year ?? "—"} · ${priceNow.local ?? priceNow.original ?? "—"}${oldPrice} · ${l.mileage_km?.toLocaleString("ru") ?? "—"} км`}
                   </div>
                 </div>
                 <button

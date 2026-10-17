@@ -1763,16 +1763,6 @@ main {
 }
 
 /* --- Карточка: локальная валюта и цена источника --- */
-.listing-card__local {
-  font-weight: 400;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.listing-card__orig {
-  margin-top: 2px;
-  font-size: var(--font-xs);
-  color: var(--text-secondary);
-}
 
 /* --- Галерея карточки: компактные фото, миниатюры, фуллскрин --- */
 .gallery {
