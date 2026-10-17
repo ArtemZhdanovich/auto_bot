@@ -5,6 +5,16 @@ import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate } from "react
 import { AppRoot, Tabbar } from "@telegram-apps/telegram-ui";
 import { Bell, Home, Heart, Sparkles, User } from "lucide-react";
 
+/** Тема Telegram → appearance для telegram-ui (Tabbar и пр.).
+ *  Без неё библиотека всегда рисует светлую тему — в тёмном Telegram
+ *  светлые бары с белым текстом сливаются. Вне Telegram — светлая. */
+export function tgAppearance(): "light" | "dark" {
+  const cs = (
+    window as unknown as { Telegram?: { WebApp?: { colorScheme?: string } } }
+  ).Telegram?.WebApp?.colorScheme;
+  return cs === "dark" ? "dark" : "light";
+}
+
 import { authorize, guestLogin, isGuest, clearGuest } from "./api/auth";
 import { api, getAccessToken } from "./api/client";
 import { LoginScreen } from "./screens/Login";
@@ -171,7 +181,7 @@ function MiniApp() {
 
   if (auth === "loading" || (authed && onboarded === null)) {
     return (
-      <AppRoot>
+      <AppRoot appearance={tgAppearance()}>
         <div className="state" style={{ minHeight: "60vh" }}>
           <div className="state__title">Загрузка…</div>
         </div>
@@ -181,7 +191,7 @@ function MiniApp() {
 
   if (!authed) {
     return (
-      <AppRoot>
+      <AppRoot appearance={tgAppearance()}>
         <LoginScreen onAuthed={() => setAuthed(true)} />
       </AppRoot>
     );
@@ -189,7 +199,7 @@ function MiniApp() {
 
   if (!onboarded) {
     return (
-      <AppRoot>
+      <AppRoot appearance={tgAppearance()}>
         <OnboardingScreen onDone={finishOnboarding} />
       </AppRoot>
     );
@@ -197,7 +207,7 @@ function MiniApp() {
 
   return (
     <ToastProvider>
-      <AppRoot>
+      <AppRoot appearance={tgAppearance()}>
         <div className={isDesktop ? "app-shell app-shell--desktop" : "app-shell"}>
           <BrowserRouter>
             {isDesktop && <NavBar desktop />}
