@@ -1142,8 +1142,13 @@ main {
   cursor: pointer;
   white-space: nowrap;
 }
-.btn:hover:not(:disabled) {
+.btn:hover:not(:disabled):not(.btn--primary) {
   background: var(--bg-secondary);
+}
+/* primary при ховере не теряет акцентный фон (иначе белый текст на светлом);
+   затемнение вместо смены фона — контраст accent-text только растёт */
+.btn--primary:hover:not(:disabled) {
+  filter: brightness(0.88);
 }
 .btn--primary {
   background: var(--accent);

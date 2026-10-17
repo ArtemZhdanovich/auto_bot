@@ -1367,3 +1367,27 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   переключатель РБ шлёт region=by и рисует Br, deep-link ?cur=BYN), ruff/tsc
   чисто.** Деплой miniapp+backend на тестовый стенд; /api/calc/delivery
   region=by отвечает Br живьём.
+## 59. Ховер кнопок + Compare по региону + redeploy прода (2026-10-17)
+- **Ховер (жалоба «на кнопках при ховере хуёво видно»):** корень —
+  `.btn:hover:not(:disabled) { background: var(--bg-secondary) }` перебивал
+  `.btn--primary` (специфичность 0,3,0 против 0,1,0): при наведении primary
+  теряла акцентный фон, оставая белый текст на светло-сером. Фикс: hover
+  смены фона только для не-primary (`:not(.btn--primary)`), для primary —
+  `filter: brightness(0.88)` (затемнение, контраст accent-text только растёт,
+  обе темы). Новый shots/contrast_hover.py — WCAG-контраст кнопок под ховером
+  в light/dark.
+- **Compare по юрисдикции** (хвост п.58): чипы 🇷🇺/🇧🇾 (как в Calc, выбор
+  синхронизируется через setRegion), region в каждом item запроса, итоги в
+  местной валюте (`total_local` + currency, $ вторым числом), route-заметка
+  по региону. CompareItem: total_local/currency. **85 vitest (+2: чип РБ →
+  region=by и Br в итоге; дефолт ru).**
+- **Грабли стендов:** поднимал тестовый проект (`-p auto_bot_test`) без
+  оверрайда `deploy/docker-compose.test.yml` → контейнеры пересоздались на
+  боевых портах 8080/8443. Восстановлено правильной командой (тест: 8081/8444,
+  LLM mock). Запомнить: тест-стенд поднимать только через
+  `docker compose -p auto_bot_test -f docker-compose.yml -f
+  deploy/docker-compose.test.yml --profile mono up -d ...` (или teststand.sh).
+- **Redeploy прода** (п.4 бэклога): боевой стек (default project, prod
+  override) пересобран и поднят — backend+bot с новым кодом (login_-коды и
+  регион-расчёт в проде), п.56–58 в проде.
+
