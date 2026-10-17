@@ -851,7 +851,11 @@ main {
     width: 220px;
     flex-shrink: 0;
     border-right: 1px solid var(--bg-secondary);
-    min-height: 100vh;
+    position: sticky; /* вкладки остаются на экране при скролле ленты */
+    top: 0;
+    align-self: flex-start;
+    height: 100vh;
+    overflow-y: auto;
     padding: var(--space-4) var(--space-2);
   }
   .app-shell--desktop .app-content {

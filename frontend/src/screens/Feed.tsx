@@ -146,6 +146,9 @@ export function FeedScreen() {
   const totalRef = useRef(total);
   totalRef.current = total;
   const scrollYRef = useRef(restore.current?.scrollY ?? 0);
+  // refs для авто-подгрузки: слушатели скролла/IO читают свежие значения
+  const busyRef = useRef(false);
+  const errorRef = useRef(false);
 
   // Динамические чипсы: пресеты + сохранённые фильтры (ТЗ §2.2)
   useEffect(() => {
@@ -155,9 +158,11 @@ export function FeedScreen() {
   }, []);
 
   const load = useCallback(async (q: FeedQuery, reset: boolean) => {
+    busyRef.current = true;
     if (reset) setLoading(true);
     else setLoadingMore(true);
     setError(null);
+    errorRef.current = false;
     try {
       const params = new URLSearchParams();
       if (q.make) params.set("make", q.make);
@@ -177,9 +182,11 @@ export function FeedScreen() {
       offsetRef.current = reset ? data.items.length : offsetRef.current + data.items.length;
     } catch (e) {
       setError((e as Error).message);
+      errorRef.current = true;
     } finally {
       setLoading(false);
       setLoadingMore(false);
+      busyRef.current = false;
     }
     // sort в deps: смена сортировки перезагружает ленту с первой страницы
   }, [sort]);
@@ -219,23 +226,39 @@ export function FeedScreen() {
     };
   }, []);
 
-  // Бесконечный скролл (ТЗ §2.2) вместо кнопки «Ещё»
+  // Бесконечный скролл «как в Instagram»: лента сама догружается, когда
+  // пользователь приближается к концу. Два триггера: сентинел в вьюпорте
+  // (IntersectionObserver) и близость к низу документа (фолбэк для вьюпортов,
+  // где IO ведёт себя капризно).
+  const loadMore = useCallback(() => {
+    if (busyRef.current || errorRef.current) return;
+    if (itemsRef.current.length >= totalRef.current) return;
+    void load(queryRef.current, false);
+  }, [load]);
+
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el) return;
+    if (!el || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !loading && !loadingMore && !error) {
-          if (items.length < total) {
-            void load(queryRef.current, false);
-          }
-        }
+        if (entries[0]?.isIntersecting) loadMore();
       },
-      { rootMargin: "400px" },
+      { rootMargin: "800px" }, // начинаем грузить заранее, до конца списка
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [items.length, total, loading, loadingMore, error, load]);
+  }, [loadMore]);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const doc = document.documentElement;
+      const nearBottom =
+        window.innerHeight + window.scrollY >= (doc.scrollHeight || 0) - 1200;
+      if (nearBottom) loadMore();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [loadMore]);
 
   const activeChip = chips.find((c) => sameQuery(c.query, query))?.key ?? "";
   const activeCount = activeFields(query);
@@ -433,21 +456,6 @@ export function FeedScreen() {
           >
             Повторить
           </button>
-        </div>
-      )}
-
-      {/* Ручная подгрузка — фолбэк, если IntersectionObserver не сработал */}
-      {!loading && !loadingMore && !error && items.length < total && (
-        <div className="feed-more">
-          <button
-            className="feed-more__btn"
-            onClick={() => void load(query, false)}
-          >
-            Показать ещё
-          </button>
-          <span className="feed-more__hint">
-            {items.length} из {total.toLocaleString("ru")}
-          </span>
         </div>
       )}
 

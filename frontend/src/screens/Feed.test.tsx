@@ -1,4 +1,4 @@
-/** Тесты пагинации ленты: «Показать ещё», ретрай после ошибки, конец списка. */
+/** Тесты пагинации ленты: авто-подгрузка скроллом, ретрай после ошибки, конец списка. */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,8 +11,9 @@ vi.mock("../api/client", () => ({ api: vi.fn() }));
 vi.mock("../api/auth", () => ({ haptic: vi.fn() }));
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ show: vi.fn() }) }));
 
-// jsdom не знает IntersectionObserver — бесконечный скролл в тестах отключён,
-// подгрузка проверяется кнопкой «Показать ещё».
+// jsdom не умеет ни IntersectionObserver (стаб-заглушка: не срабатывает),
+// ни реальный скролл — авто-подгрузку в тестах триггерим событием scroll
+// (фолбэк-обработчик «близко к низу документа» в jsdom срабатывает всегда).
 vi.stubGlobal(
   "IntersectionObserver",
   class {
@@ -21,6 +22,9 @@ vi.stubGlobal(
     disconnect() {}
   },
 );
+
+/** Имитация прокрутки ленты пользователем. */
+const scrollFeed = () => fireEvent.scroll(window);
 
 const apiMock = vi.mocked(api);
 
@@ -73,25 +77,20 @@ const renderFeed = () =>
   );
 
 describe("Feed pagination", () => {
-  it("загружает первую страницу и предлагает «Показать ещё» со счётчиком", async () => {
+  it("загружает первую страницу, затем авто-подгружает при скролле до конца списка", async () => {
     renderFeed();
     await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
-    expect(screen.getByText("Показать ещё")).toBeTruthy();
-    expect(screen.getByText("20 из 45")).toBeTruthy();
-  });
-
-  it("кнопка «Показать ещё» догружает страницы до конца списка", async () => {
-    renderFeed();
-    await waitFor(() => expect(screen.getByText("Показать ещё")).toBeTruthy());
     // страница 2: offset=20 → ещё 20 карточек
-    fireEvent.click(screen.getByText("Показать ещё"));
+    scrollFeed();
     await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(40));
-    expect(screen.getByText("40 из 45")).toBeTruthy();
-    // страница 3: последние 5 → кнопка исчезает, плашка «все показаны»
-    fireEvent.click(screen.getByText("Показать ещё"));
+    // страница 3: последние 5 → плашка «все показаны»
+    scrollFeed();
     await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(45));
-    expect(screen.queryByText("Показать ещё")).toBeNull();
     expect(screen.getByText("Показаны все найденные варианты")).toBeTruthy();
+    // лишних запросов после конца списка нет
+    const before = apiMock.mock.calls.length;
+    scrollFeed();
+    expect(apiMock.mock.calls.length).toBe(before);
   });
 
   it("при ошибке догрузки показывает ретрай и дозагружает после клика", async () => {
@@ -102,8 +101,8 @@ describe("Feed pagination", () => {
       return page(0, TOTAL, 20);
     });
     renderFeed();
-    await waitFor(() => expect(screen.getByText("Показать ещё")).toBeTruthy());
-    fireEvent.click(screen.getByText("Показать ещё"));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+    scrollFeed();
     await waitFor(() =>
       expect(screen.getByText("Не удалось загрузить следующие объявления")).toBeTruthy(),
     );
@@ -117,7 +116,6 @@ describe("Feed pagination", () => {
     fireEvent.click(screen.getByText("Повторить"));
     await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(40));
     expect(screen.queryByText("Не удалось загрузить следующие объявления")).toBeNull();
-    expect(screen.getByText("40 из 45")).toBeTruthy();
   });
 
   it("чип цены шлёт price_max в вонах ($10 000 × 1350)", async () => {
@@ -164,9 +162,9 @@ describe("Feed pagination", () => {
 
   it("сортировка «Цена ↑» перезагружает ленту с sort=price_asc и сбросом offset", async () => {
     renderFeed();
-    await waitFor(() => expect(screen.getByText("Показать ещё")).toBeTruthy());
-    fireEvent.click(screen.getByText("Показать ещё")); // offset=20
-    await waitFor(() => expect(screen.getByText("40 из 45")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+    scrollFeed(); // offset=20
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(40));
     fireEvent.change(screen.getByLabelText("Сортировка"), { target: { value: "price_asc" } });
     await waitFor(() => {
       const calls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
@@ -184,7 +182,6 @@ describe("Feed pagination", () => {
     unmount(); // лента сохранена в кэш
     renderFeed(); // POP-навигация → гидратация из кэша
     expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20);
-    expect(screen.getByText("20 из 45")).toBeTruthy();
     // повторного запроса ленты не было (1 вызов — от первого рендера)
     const listingCalls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
     expect(listingCalls.length).toBe(1);
