@@ -38,6 +38,15 @@
 - **589 pytest (+10: нормализация патчей, enum в схеме, справочные опции
   ask_clarification, restore×3, cleanup, UPSERT-спеки; CRON_JOBS-тест обновлён),
   85+ vitest, ruff/tsc чисто.**
+- **Живая проверка спеков (прод):** разовый fetch kcar (1 стр.) → 100 объявлений
+  с body_type. Корейские категории carctgrNm (중형차/경차/승합차/화물차…)
+  замаплены в канон во втором коммите (`fix(normalize)`): итого suv 46, sedan 41,
+  hatchback 8, pickup 4, van 1. Encar list-API BodyType/transmission/drive не
+  отдаёт (fuel отдаёт) — обогащение из detail-страниц в бэклог. Дедуп-кэш
+  (dedup:*, TTL 48ч) при разовом рефетче чистится: `redis-cli --scan --pattern
+  "dedup:*" | xargs -r redis-cli del`. Грабля-продолжение: `docker compose up`
+  после упавшего recreate оставляет контейнеры-сироты вида
+  `1b11f34f9fae_auto_bot-backend-1` — снимать `docker rm -f` и поднимать поимённо.
 
 # Auto Selection — PROGRESS
 
