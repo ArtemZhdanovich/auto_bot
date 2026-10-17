@@ -1,4 +1,4 @@
-/** Фильтры (ТЗ п. 9.2.3): полный набор критериев, создание, удаление. */
+/** Слежение (ТЗ п. 9.2.3): сохранённые критерии + уведомления о новых лотах. */
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -156,8 +156,8 @@ export function FiltersScreen() {
       const msg = (e as Error).message || "";
       setError(
         msg.includes("403") || msg.toLowerCase().includes("limit")
-          ? "Достигнут лимит фильтров тарифа Free — освободите старый или оформите Pro"
-          : "Не удалось создать фильтр, попробуйте позже",
+          ? "Достигнут лимит слежений тарифа Free — освободите старое или оформите Pro"
+          : "Не удалось создать слежение, попробуйте позже",
       );
     } finally {
       setCreating(false);
@@ -173,7 +173,11 @@ export function FiltersScreen() {
   return (
     <div className="screen">
       <section className="panel">
-        <h3>Новый фильтр</h3>
+        <h3>Новое слежение</h3>
+        <p className="filters-form__intro">
+          Следим за всеми источниками по этим критериям и пришлём уведомление
+          в Telegram, когда появятся новые варианты.
+        </p>
         <div className="filters-form">
           <label className="calc-field">
             <span>Название (необязательно)</span>
@@ -261,20 +265,21 @@ export function FiltersScreen() {
           </div>
           {error && <div className="form-error">{error}</div>}
           <button className="btn btn--primary btn--block" disabled={creating} onClick={() => void create()}>
-            {creating ? "Создаём…" : "Создать фильтр"}
+            {creating ? "Запускаем…" : "Начать слежение"}
           </button>
         </div>
       </section>
 
       <section className="panel">
-        <h3>Мои фильтры ({filters.length})</h3>
+        <h3>Мои слежения ({filters.length})</h3>
         {loading && <div className="state"><span className="skeleton" style={{ width: 120, height: 14 }} /></div>}
         {!loading && filters.length === 0 && (
           <div className="state">
             <div className="state__emoji">🔔</div>
-            <div className="state__title">Фильтров пока нет</div>
+            <div className="state__title">Слежений пока нет</div>
             <div className="state__text">
-              Создайте первый фильтр — под него придут уведомления
+              Создайте первое слежение — пришлём уведомление, когда появятся
+              новые варианты
             </div>
           </div>
         )}
@@ -282,7 +287,7 @@ export function FiltersScreen() {
           {filters.map((f) => (
             <div key={f.id} className="filter-item">
               <div className="filter-item__body">
-                <div className="filter-item__name">{f.name ?? `Фильтр #${f.id}`}</div>
+                <div className="filter-item__name">{f.name ?? `Слежение #${f.id}`}</div>
                 <div className="filter-item__desc">
                   {describe(f.criteria)} · {f.notify_mode === "instant" ? "instant" : "дайджест"}
                 </div>

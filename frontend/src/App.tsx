@@ -49,7 +49,7 @@ type AuthState = "loading" | "ready";
 const NAV_ITEMS = [
   { path: "/", icon: Home, text: "Лента" },
   { path: "/ai", icon: Sparkles, text: "AI" },
-  { path: "/filters", icon: SlidersHorizontal, text: "Фильтры" },
+  { path: "/filters", icon: SlidersHorizontal, text: "Слежение" },
   { path: "/favorites", icon: Heart, text: "Избранное" },
   { path: "/profile", icon: User, text: "Профиль" },
 ];

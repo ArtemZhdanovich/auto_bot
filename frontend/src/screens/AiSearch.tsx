@@ -149,7 +149,7 @@ export function AiSearchScreen() {
           </Button>
         </div>
         <Button mode="plain" size="s" onClick={() => navigate("/filters")}>
-          Настроить фильтры вручную →
+          Настроить слежение вручную →
         </Button>
       </div>
     </div>

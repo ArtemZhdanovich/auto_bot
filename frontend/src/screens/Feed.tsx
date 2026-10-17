@@ -68,7 +68,7 @@ function buildChips(filters: UserFilter[]): Chip[] {
     const c = f.criteria;
     return {
       key: `f${f.id}`,
-      label: f.name ?? `Фильтр #${f.id}`,
+      label: f.name ?? `Слежение #${f.id}`,
       query: {
         make: c.make,
         model: c.model,

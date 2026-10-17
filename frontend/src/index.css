@@ -516,6 +516,12 @@ main {
 }
 
 /* --- Фильтры --- */
+.filters-form__intro {
+  margin: -6px 0 2px;
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
 .filters-form {
   display: flex;
   flex-direction: column;

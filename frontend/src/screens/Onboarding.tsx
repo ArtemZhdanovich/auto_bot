@@ -37,7 +37,7 @@ export function OnboardingScreen({ onDone }: { onDone: (data: { role: string; co
             <h2 style={{ margin: "0 0 8px" }}>Привет, {name}!</h2>
             <p style={{ color: "var(--text-secondary)", lineHeight: 1.5 }}>
               Подбираем автомобили из Кореи, Китая, Европы, США и Японии.
-              Настроите фильтры — пришлём уведомление, когда появятся новые варианты.
+              Настроите слежение — пришлём уведомление, когда появятся новые варианты.
             </p>
           </div>
           <div style={{ color: "var(--text-secondary)", fontSize: 14 }}>
