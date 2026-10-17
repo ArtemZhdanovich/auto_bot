@@ -1,6 +1,7 @@
 /**
- * Калькулятор доставки Корея → РФ («под ключ»): авто + море + брокер +
- * СБКТС/ЭПТС + пошлина + сбор + утильсбор. Префилл из query (?price=&cc=&year=).
+ * Калькулятор доставки Корея → РФ/РБ («под ключ»): авто + море + брокер +
+ * СБКТС/ЭПТС + пошлина + сбор + утильсбор. Префилл из query (?price=&cc=&year=&cur=).
+ * Юрисдикция следует за валютой объявления: BYN → РБ, RUB → РФ (можно переключить).
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -8,7 +9,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
-import { getRegion } from "../lib/fx";
+import { type Region, getRegion, setRegion } from "../lib/fx";
 import { BackButton } from "../ui/BackButton";
 import { SkeletonCard } from "../ui/Skeleton";
 
@@ -16,6 +17,7 @@ interface CalcComponent {
   label: string;
   usd: number;
   rub: number;
+  local: number;
 }
 
 /** Кнопка перехода к сравнению (bot → webapp идея: продолжай в удобном UI). */
@@ -48,6 +50,8 @@ interface CalcOut {
   year: number;
   age_years: number;
   age_group: string;
+  region: string;
+  currency: string;
   power_hp?: number | null;
   util_category?: string;
   util_note?: string;
@@ -55,10 +59,20 @@ interface CalcOut {
   legal_refs?: LegalRef[];
   total_rub: number;
   total_usd: number;
+  total_local: number;
+}
+
+/** Регион из query ?cur= (валюта объявления) или сохранённый выбор пользователя. */
+function regionFromParams(params: URLSearchParams): Region {
+  const cur = (params.get("cur") ?? "").toUpperCase();
+  if (cur === "BYN") return "by";
+  if (cur === "RUB") return "ru";
+  return getRegion();
 }
 
 export function CalcScreen() {
   const [params] = useSearchParams();
+  const [region, setRegionState] = useState<Region>(() => regionFromParams(params));
   const [price, setPrice] = useState(params.get("price") ?? "");
   const [cc, setCc] = useState(params.get("cc") ?? "2000");
   const [hp, setHp] = useState(params.get("hp") ?? "");
@@ -67,36 +81,40 @@ export function CalcScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const calc = useCallback(async (p: string, c: string, h: string, y: string) => {
-    const priceNum = parseFloat(p.replace(/\s/g, ""));
-    const ccNum = parseInt(c, 10);
-    const hpNum = parseInt(h, 10);
-    const yearNum = parseInt(y, 10);
-    if (!priceNum || priceNum <= 0 || !yearNum || yearNum < 1980 || yearNum > new Date().getFullYear() + 1) {
-      setError("Проверьте цену и год (1980 – след. год)");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    haptic("light");
-    try {
-      const out = await api<CalcOut>("/calc/delivery", {
-        method: "POST",
-        body: JSON.stringify({
-          price_usd: priceNum,
-          engine_cc: ccNum || 2000,
-          power_hp: hpNum || undefined,
-          year: yearNum,
-        }),
-      });
-      setResult(out);
-      haptic("medium");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const calc = useCallback(
+    async (p: string, c: string, h: string, y: string, r: Region) => {
+      const priceNum = parseFloat(p.replace(/\s/g, ""));
+      const ccNum = parseInt(c, 10);
+      const hpNum = parseInt(h, 10);
+      const yearNum = parseInt(y, 10);
+      if (!priceNum || priceNum <= 0 || !yearNum || yearNum < 1980 || yearNum > new Date().getFullYear() + 1) {
+        setError("Проверьте цену и год (1980 – след. год)");
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      haptic("light");
+      try {
+        const out = await api<CalcOut>("/calc/delivery", {
+          method: "POST",
+          body: JSON.stringify({
+            price_usd: priceNum,
+            engine_cc: ccNum || 2000,
+            power_hp: hpNum || undefined,
+            year: yearNum,
+            region: r,
+          }),
+        });
+        setResult(out);
+        haptic("medium");
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   // Префилл из deep-link (кнопка «Рассчитать доставку» в карточке)
   useEffect(() => {
@@ -106,10 +124,18 @@ export function CalcScreen() {
         params.get("cc") ?? "2000",
         params.get("hp") ?? "",
         params.get("year") ?? "",
+        regionFromParams(params),
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const pickRegion = (r: Region) => {
+    haptic("light");
+    setRegionState(r);
+    setRegion(r); // запоминаем выбор и для ленты/PDP
+    if (result && result.region !== r) void calc(price, cc, hp, year, r);
+  };
 
   const fmt = (n: number) => n.toLocaleString("ru-RU");
   /** Группировка тысяч при вводе: 18400 → 18 400 */
@@ -125,11 +151,29 @@ export function CalcScreen() {
         <BackButton />
         <div>
           <div className="feed-header__title">🚚 Доставка «под ключ»</div>
-          <div className="feed-header__counter">Корея → Владивосток → вам</div>
+          <div className="feed-header__counter">
+            {region === "by" ? "Корея → Владивосток → Минск" : "Корея → Владивосток → вам"}
+          </div>
         </div>
       </div>
 
       <div className="calc-form">
+        <div className="chip-row" role="group" aria-label="Юрисдикция расчёта">
+          <button
+            type="button"
+            className={region === "ru" ? "chip chip--active" : "chip"}
+            onClick={() => pickRegion("ru")}
+          >
+            🇷🇺 Расчёт по РФ
+          </button>
+          <button
+            type="button"
+            className={region === "by" ? "chip chip--active" : "chip"}
+            onClick={() => pickRegion("by")}
+          >
+            🇧🇾 Расчёт по РБ
+          </button>
+        </div>
         <label className="calc-field">
           <span>Цена авто, $</span>
           <input
@@ -184,7 +228,7 @@ export function CalcScreen() {
         <button
           className="btn btn--primary btn--block"
           disabled={loading}
-          onClick={() => void calc(price, cc, hp, year)}
+          onClick={() => void calc(price, cc, hp, year, region)}
         >
           {loading ? "Считаю…" : "Рассчитать"}
         </button>
@@ -206,8 +250,12 @@ export function CalcScreen() {
       {result && (
         <div className="calc-result">
           <div className="calc-total">
-            <div className="calc-total__label">Итого «под ключ»</div>
-            <div className="calc-total__value">{fmt(Math.round(result.total_rub))} ₽</div>
+            <div className="calc-total__label">
+              Итого «под ключ»{result.region === "by" ? " (РБ)" : ""}
+            </div>
+            <div className="calc-total__value">
+              {fmt(Math.round(result.total_local))} {result.currency}
+            </div>
             <div className="calc-total__sub">≈ {fmt(Math.round(result.total_usd))} $</div>
             <div className="calc-total__badge">
               {result.power_hp ? `${result.power_hp} л.с. · ` : ""}
@@ -220,7 +268,7 @@ export function CalcScreen() {
               <div key={c.label} className="calc-row">
                 <span>{c.label}</span>
                 <b>
-                  {fmt(c.rub)} ₽
+                  {fmt(c.local)} {result.currency}
                   <small>≈ {fmt(Math.round(c.usd))} $</small>
                 </b>
               </div>
@@ -230,13 +278,13 @@ export function CalcScreen() {
           {result.util_note && <div className="calc-warn">⚠️ {result.util_note}</div>}
 
           <div className="calc-note">
-            Оценка для физлица (личное пользование, не более 1 авто в год), курс
-            фиксированный. Льготный утильсбор действует при мощности до 160 л.с.
-            и объёме до 3000 см³ (ставки сверены 16.10.2026). Точную смету даст
-            менеджер.
+            {result.region === "by"
+              ? "Оценка для физлица (личное пользование). Ставки РБ — ориентир: сбор за оформление и утильсбор проверяйте на customs.gov.by или у брокера на дату ввоза."
+              : "Оценка для физлица (личное пользование, не более 1 авто в год), курс фиксированный. Льготный утильсбор действует при мощности до 160 л.с. и объёме до 3000 см³ (ставки сверены 16.10.2026)."}
+            {" "}Точную смету даст менеджер.
           </div>
 
-          <RegionNote />
+          <RegionNote region={result.region === "by" ? "by" : "ru"} />
 
           {result.legal_refs && result.legal_refs.length > 0 && (
             <div className="calc-legal">
@@ -251,8 +299,9 @@ export function CalcScreen() {
           )}
 
           <div className="calc-note">
-            🚢 Море Бусан → Владивосток, далее по РФ — менеджер подберёт
-            маршрут и точные сроки.
+            {result.region === "by"
+              ? "🚢 Море Бусан → Владивосток, далее перегон/автовоз до Минска — менеджер подберёт маршрут и сроки."
+              : "🚢 Море Бусан → Владивосток, далее по РФ — менеджер подберёт маршрут и точные сроки."}
           </div>
         </div>
       )}
@@ -260,15 +309,14 @@ export function CalcScreen() {
   );
 }
 
-/** Заметка по региону: платежи ЕАЭС одинаковы, регистрация — разная. */
-function RegionNote() {
-  const region = getRegion();
+/** Заметка по региону расчёта: платежи ЕАЭС одинаковы, регистрация — разная. */
+function RegionNote({ region }: { region: Region }) {
   if (region !== "by") return null;
   return (
     <div className="calc-note">
-      🇧🇾 Беларусь: таможенные платежи ЕАЭС одинаковы с РФ, но при постановке на
-      учёт в ГАИ действуют свои правила и утильсбор РБ — менеджер подскажет
-      полный маршрут: порт Владивосток → Минск.
+      🇧🇾 Беларусь: пошлины ЕАЭС едины с РФ, но сбор за оформление, утильсбор,
+      СБКТС/ЭПТС и постановка на учёт в ГАИ — по законодательству РБ. Юрисдикция
+      выбрана по валюте объявления; переключатель выше меняет расчёт.
     </div>
   );
 }

@@ -145,3 +145,102 @@ async def test_delivery_power_validation_422(http):
         json={"price_usd": 18000, "year": 2022, "power_hp": 5},
     )
     assert resp.status_code == 422
+
+
+# ---------- Регион «by»: валюта объявления BYN → юрисдикция РБ ----------
+
+
+@pytest.mark.asyncio
+async def test_delivery_by_region_local_currency(http):
+    """region="by": итог в BYN, сбор/утильсбор и маршрут — по законодательству РБ."""
+    resp = await http.post(
+        "/api/calc/delivery",
+        json={"price_usd": 18000, "engine_cc": 2000, "year": 2022, "region": "by"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["region"] == "by"
+    assert body["currency"] == "Br"
+    # льготный утильсбор РБ: 544,5 × 0.5 = 272,25 BYN (объём ≤ 3 000 см³)
+    util = next(c for c in body["components"] if "утиль" in c["label"].lower())
+    assert "РБ" in util["label"]
+    assert util["local"] == 272  # round(544,5 × 0.5 = 272,25)
+    # сбор за оформление РБ: 48 BYN (не шкала ПП № 1637)
+    fee = next(c for c in body["components"] if "оформление" in c["label"].lower())
+    assert fee["local"] == 48
+    # итог локальный согласован с USD-эквивалентом (курс 3.05)
+    assert body["total_usd"] == pytest.approx(body["total_local"] / 3.05, rel=0.01)
+    assert body["total_local"] > 0
+    # местные суммы в каждом компоненте заполнены
+    assert all(c["local"] > 0 for c in body["components"])
+    # утильсбор РБ заметно меньше РФ-льготного (5 200 ₽ ≈ 155 Br)
+    assert util["local"] < 400
+
+
+@pytest.mark.asyncio
+async def test_delivery_by_region_legal_refs(http):
+    """Для РБ — ссылки на НПА РБ, а не только ПП РФ."""
+    resp = await http.post(
+        "/api/calc/delivery",
+        json={"price_usd": 18000, "engine_cc": 2000, "year": 2022, "region": "by"},
+    )
+    refs = resp.json()["legal_refs"]
+    joined = " ".join(r["ref"] for r in refs)
+    assert "ЕТТ ЕАЭС" in joined  # пошлины ЕАЭС общие
+    assert "Совмина РБ" in joined  # сбор + утильсбор РБ
+    assert "customs.gov.by" in joined  # пометка «проверять»
+
+
+@pytest.mark.asyncio
+async def test_delivery_by_region_full_util_over_3000cc(http):
+    """Объём > 3 000 см³ в РБ → без льготы (полный утильсбор, ориентир)."""
+    resp = await http.post(
+        "/api/calc/delivery",
+        json={"price_usd": 30000, "engine_cc": 3400, "year": 2022, "region": "by"},
+    )
+    body = resp.json()
+    assert body["util_category"] == "полный"
+    util = next(c for c in body["components"] if "утиль" in c["label"].lower())
+    assert util["local"] == 1_089.0  # 544,5 × 2.0
+
+
+@pytest.mark.asyncio
+async def test_delivery_default_region_is_ru(http):
+    """Без region — РФ как раньше (обратная совместимость бота/агента)."""
+    resp = await http.post(
+        "/api/calc/delivery", json={"price_usd": 18000, "engine_cc": 2000, "year": 2022}
+    )
+    body = resp.json()
+    assert body["region"] == "ru"
+    assert body["currency"] == "₽"
+    assert body["total_local"] == body["total_rub"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_region_validation_422(http):
+    resp = await http.post(
+        "/api/calc/delivery",
+        json={"price_usd": 18000, "year": 2022, "region": "kz"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_compare_region_passthrough(http):
+    """compare: region прокидывается в расчёт каждого варианта (BYN → Br)."""
+    resp = await http.post(
+        "/api/calc/compare",
+        json={
+            "items": [
+                {"price_usd": 15000, "engine_cc": 1600, "year": 2021, "region": "by"},
+                {"price_usd": 20000, "engine_cc": 2000, "year": 2022},
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 2
+    by_item = next(i for i in items if i["currency"] == "Br")
+    assert by_item["total_local"] > 0
+    ru_item = next(i for i in items if i["currency"] == "₽")
+    assert ru_item["total_local"] == ru_item["total_rub"]

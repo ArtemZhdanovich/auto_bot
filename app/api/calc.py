@@ -1,4 +1,6 @@
-"""Калькулятор доставки Корея → РФ (MVP: сравнение цен «под ключ»)."""
+"""Калькулятор доставки Корея → РФ/РБ (MVP: сравнение цен «под ключ»)."""
+
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -13,6 +15,8 @@ class DeliveryIn(BaseModel):
     engine_cc: int = Field(default=2000, ge=50, le=10_000)
     year: int = Field(ge=1980, le=2100)
     power_hp: int | None = Field(default=None, ge=10, le=2000)
+    # Юрисдикция расчёта (валюта объявления: BYN → РБ, RUB → РФ)
+    region: Literal["ru", "by"] = "ru"
 
 
 class DeliveryOut(BaseModel):
@@ -21,6 +25,8 @@ class DeliveryOut(BaseModel):
     year: int
     age_years: int
     age_group: str
+    region: str = "ru"
+    currency: str = "₽"
     power_hp: int | None = None
     util_category: str = "льготный"
     util_note: str = ""
@@ -28,14 +34,15 @@ class DeliveryOut(BaseModel):
     legal_refs: list[dict] = []
     total_rub: float
     total_usd: float
+    total_local: float
     rates_note: str = "Курс фиксированный (MVP). Логистика/брокер/СБКТС — средние по рынку."
 
 
 @router.post("/delivery", response_model=DeliveryOut)
 async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
-    """Расчёт «авто + море + брокер + СБКТС/ЭПТС + пошлина + сборы + утиль»."""
+    """Расчёт «авто + море + брокер + СБКТС/ЭПТС + пошлина + сборы + утиль» (region: ru|by)."""
     b: DeliveryBreakdown = calc_delivery(
-        payload.price_usd, payload.engine_cc, payload.year, power_hp=payload.power_hp
+        payload.price_usd, payload.engine_cc, payload.year, region=payload.region, power_hp=payload.power_hp
     )
     return DeliveryOut(
         price_usd=b.price_usd,
@@ -43,6 +50,8 @@ async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
         year=b.year,
         age_years=b.age_years,
         age_group=b.age_group,
+        region=b.region,
+        currency=b.currency,
         power_hp=b.power_hp,
         util_category=b.util_category,
         util_note=b.util_note,
@@ -50,6 +59,7 @@ async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
         legal_refs=b.legal_refs,
         total_rub=b.total_rub,
         total_usd=b.total_usd,
+        total_local=b.total_local,
     )
 
 
@@ -69,6 +79,7 @@ async def calc_compare(payload: CompareIn) -> dict:
                 float(it["price_usd"]),
                 int(it.get("engine_cc", 2000)),
                 int(it["year"]),
+                region=str(it.get("region", "ru")),
                 power_hp=int(it["power_hp"]) if it.get("power_hp") else None,
             )
         except (KeyError, TypeError, ValueError):
@@ -79,6 +90,8 @@ async def calc_compare(payload: CompareIn) -> dict:
                 "price_usd": b.price_usd,
                 "total_usd": round(b.total_usd),
                 "total_rub": round(b.total_rub),
+                "total_local": round(b.total_local),
+                "currency": b.currency,
                 "age_group": b.age_group,
             }
         )

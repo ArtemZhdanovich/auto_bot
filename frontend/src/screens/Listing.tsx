@@ -344,7 +344,7 @@ export function ListingScreen() {
         onClick={() => {
           haptic();
           navigate(
-            `/calc?${usd != null ? `price=${usd}&` : ""}year=${listing.year ?? ""}`,
+            `/calc?${usd != null ? `price=${usd}&` : ""}year=${listing.year ?? ""}&cur=${encodeURIComponent(listing.currency ?? "")}`,
           );
         }}
       >

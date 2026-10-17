@@ -19,6 +19,13 @@ describe("toUsd", () => {
     expect(toUsd(18000.4)).toBe(18_000); // валюта не указана → USD
   });
 
+  it("RUB ÷92, BYN ÷3.05 (фикс-курсы MVP, регистр не важен)", () => {
+    expect(toUsd(9_200, "RUB")).toBe(100);
+    expect(toUsd(9200, "rub")).toBe(100);
+    expect(toUsd(3_050, "BYN")).toBe(1_000);
+    expect(toUsd(3050, "byn")).toBe(1_000);
+  });
+
   it("мусор → null", () => {
     expect(toUsd(null)).toBeNull();
     expect(toUsd(0)).toBeNull();

@@ -78,7 +78,7 @@ export function priceChain(
   return { usd: formatUsd(usd), local, original: orig };
 }
 
-/** Цена в $: KRW ÷1350, EUR ×1.08, USD как есть; null для пустых/нулевых. */
+/** Цена в $: KRW ÷1350, EUR ×1.08, RUB ÷92, BYN ÷3.05, USD как есть; null для пустых/нулевых. */
 export function toUsd(
   price: number | null | undefined,
   currency?: string | null,
@@ -87,7 +87,20 @@ export function toUsd(
   const cur = (currency ?? "USD").toUpperCase();
   if (cur === "KRW") return Math.round(price / KRW_PER_USD);
   if (cur === "EUR") return Math.round(price * EUR_PER_USD);
+  if (cur === "RUB") return Math.round(price / RUB_PER_USD);
+  if (cur === "BYN") return Math.round(price / BYN_PER_USD);
   return Math.round(price);
+}
+
+/**
+ * Регион для расчёта растаможки из валюты объявления:
+ * BYN → Беларусь (сборы/утильсбор РБ), RUB → РФ, остальное → регион пользователя.
+ */
+export function regionFromCurrency(currency: string | null | undefined, fallback: Region): Region {
+  const cur = (currency ?? "").toUpperCase();
+  if (cur === "BYN") return "by";
+  if (cur === "RUB") return "ru";
+  return fallback;
 }
 
 /** Вариант для экрана сравнения: строки-цифры из инпутов. */

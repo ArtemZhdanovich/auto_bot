@@ -16,12 +16,20 @@
   И мощности до 160 л.с. включительно. Иначе — полная ставка по шкале.
 
 При смене законодательства правятся только константы ниже + тесты.
+
+Регион (region="ru" | "by"): валюта объявления задаёт юрисдикцию расчёта —
+BYN → Беларусь (свои сбор/утильсбор/маршрут, итог в BYN), RUB/USD → РФ
+(итог в ₽). Пошлины ЕАЭС (Решение Совета ЕЭК № 54) едины, различаются сбор
+за оформление, утильсбор, логистика и СБКТС/ЭПТС. Ставки РБ — ориентир MVP:
+в UI и rates_note явно помечены «проверять актуальную редакцию».
 """
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-# --- Правовые основания (выводим в UI — расчёт не «из воздуха») -------------
+Region = str  # "ru" | "by"
+
+# --- Правовые основания РФ ---------------------------------------------------
 LEGAL_REFS: list[dict[str, str]] = [
     {
         "label": "Пошлины",
@@ -54,15 +62,51 @@ LEGAL_REFS: list[dict[str, str]] = [
     },
 ]
 
+# --- Правовые основания РБ (ставки-ориентиры: проверять на customs.gov.by) ---
+LEGAL_REFS_BY: list[dict[str, str]] = [
+    {
+        "label": "Пошлины",
+        "ref": "ЕТТ ЕАЭС, единые ставки для физлиц — Решение Совета ЕЭК № 54 от 20.07.2018 (общие для РБ и РФ)",
+    },
+    {
+        "label": "Сбор за таможенное оформление",
+        "ref": "Ставки сбора РБ — постановление Совмина РБ (ориентир ~48 BYN); проверять актуальную редакцию",
+    },
+    {
+        "label": "Утильсбор РБ",
+        "ref": (
+            "Постановление Совмина РБ: базовая ставка 544,5 BYN × коэффициент (объём/возраст); "
+            "льготный коэффициент для физлиц ~0.5 при объёме ≤ 3 000 см³; проверять актуальную редакцию"
+        ),
+    },
+    {
+        "label": "Маршрут и учёт",
+        "ref": "Корея → Владивосток → Минск; СБКТС/ЭПТС и постановка на учёт в ГАИ РБ",
+    },
+    {
+        "label": "Актуальность ставок",
+        "ref": (
+            "Ставки РБ — ориентир MVP (сверены 16.10.2026). Перед сделкой проверяйте расчёт "
+            "на customs.gov.by (калькулятор ГТК Беларуси) или у брокера"
+        ),
+    },
+]
 
-# --- Курсовые константы (заглушка MVP; потом — ежедневный курс из ЦБ) ------
+
+# --- Курсовые константы (заглушка MVP; потом — ежедневный курс из ЦБ/НРБ) ----
 USD_RUB = 92.0
+USD_BYN = 3.05
 EUR_USD = 1.08
 
 # --- Логистика и услуги (USD) ----------------------------------------------
 LOGISTICS_USD = 1_800  # море Бусан → Владивосток + портовые и СВХ
 BROKER_USD = 250  # услуги брокера во Владивостоке
 LAB_USD = 350  # СБКТС + ЭПТС (лаборатория, оформление ЭПТС)
+
+# РБ: море до Владивостока + перегон/автовоз Владивосток → Минск (ориентир).
+LOGISTICS_BY_USD = 3_600
+BROKER_BY_USD = 150  # брокер/декларант в РБ
+LAB_BY_USD = 250  # СБКТС + ЭПТС в РБ
 
 # --- Сбор за таможенные операции: ПП № 1637 (ред. № 1638), с 01.01.2026 -----
 # (верхняя граница таможенной стоимости ₽ → сбор ₽); порог партии — 10 млн ₽.
@@ -125,6 +169,31 @@ def _util_full_scale(cc: int) -> list[tuple[int, float, float]]:
     if cc <= 3_500:
         return _UTIL_SCALE_3000_3500
     return _UTIL_SCALE_GT_3500
+
+
+# --- Сбор за таможенное оформление РБ (ориентир; проверять акту. редакцию) ---
+CLEARANCE_FEE_BYN = 48.0
+
+# --- Утильсбор РБ (ориентир; проверять актуальную редакцию) ------------------
+UTIL_BY_BASE_BYN = 544.5  # базовая ставка
+UTIL_BY_LTC_COEF = 0.5  # льготный коэффициент физлица (объём ≤ 3 000 см³)
+UTIL_BY_CC_LIMIT = 3_000
+UTIL_BY_LTC_BYN = UTIL_BY_BASE_BYN * UTIL_BY_LTC_COEF  # ≈ 272 BYN
+UTIL_BY_FULL_COEF = 2.0  # ориентир полной ставки вне льготы (объём/возраст)
+UTIL_BY_FULL_BYN = UTIL_BY_BASE_BYN * UTIL_BY_FULL_COEF
+
+UTIL_BY_NOTE = (
+    "Утильсбор РБ — ориентир: базовая ставка 544,5 BYN × коэффициент "
+    "(льготный ~0.5 для физлиц при объёме до 3 000 см³). Проверяйте "
+    "актуальную редакцию постановления Совмина РБ на дату ввоза."
+)
+
+
+def _util_fee_by(cc: int) -> tuple[float, str]:
+    """Утильсбор РБ → (сумма BYN, категория). Льгота физлица: объём ≤ 3 000 см³."""
+    if cc <= UTIL_BY_CC_LIMIT:
+        return UTIL_BY_LTC_BYN, "льготный"
+    return UTIL_BY_FULL_BYN, "полный"
 
 
 def _util_fee(cc: int, age: int, power_hp: int | None) -> tuple[float, str]:
@@ -201,39 +270,68 @@ class DeliveryBreakdown:
     broker_usd: float
     lab_usd: float
     duty_usd: float
-    fee_rub: float
-    util_rub: float
+    fee_rub: float  # сбор в местной валюте (₽ для РФ, BYN для РБ)
+    util_rub: float  # утильсбор в местной валюте
     power_hp: int | None = None
+    region: str = "ru"
     util_category: str = "льготный"
     util_note: str = ""
     components: list[dict] = field(default_factory=list)
     legal_refs: list[dict[str, str]] = field(default_factory=lambda: LEGAL_REFS)
-    total_rub: float = 0.0
+    total_rub: float = 0.0  # итог в местной валюте (совместимость названия)
     total_usd: float = 0.0
+    total_local: float = 0.0
+    currency: str = "₽"
 
     def finalize(self) -> "DeliveryBreakdown":
-        car_rub = self.price_usd * USD_RUB
-        logistics_rub = (self.logistics_usd + self.broker_usd + self.lab_usd) * USD_RUB
-        util_label = f"Утильсбор ({self.util_category})"
+        by = self.region == "by"
+        rate = USD_BYN if by else USD_RUB
+        self.currency = "Br" if by else "₽"
+        car_local = self.price_usd * rate
+        util_label = (f"Утильсбор РБ ({self.util_category})" if by else f"Утильсбор ({self.util_category})")
         self.components = [
-            {"label": "Авто по счёту", "usd": round(self.price_usd), "rub": round(car_rub)},
+            {"label": "Авто по счёту", "usd": round(self.price_usd), "rub": round(car_local), "local": round(car_local)},
             {
-                "label": "Доставка море + порт",
+                "label": "Доставка море + порт" + (" + перегон до Минска" if by else ""),
                 "usd": round(self.logistics_usd),
-                "rub": round(self.logistics_usd * USD_RUB),
+                "rub": round(self.logistics_usd * rate),
+                "local": round(self.logistics_usd * rate),
             },
-            {"label": "Брокер во Владивостоке", "usd": self.broker_usd, "rub": round(self.broker_usd * USD_RUB)},
-            {"label": "СБКТС + ЭПТС", "usd": self.lab_usd, "rub": round(self.lab_usd * USD_RUB)},
+            {
+                "label": "Брокер" + (" в Минске" if by else " во Владивостоке"),
+                "usd": self.broker_usd,
+                "rub": round(self.broker_usd * rate),
+                "local": round(self.broker_usd * rate),
+            },
+            {
+                "label": "СБКТС + ЭПТС" + (" (РБ)" if by else ""),
+                "usd": self.lab_usd,
+                "rub": round(self.lab_usd * rate),
+                "local": round(self.lab_usd * rate),
+            },
             {
                 "label": f"Таможенная пошлина ({self.age_group})",
                 "usd": round(self.duty_usd),
-                "rub": round(self.duty_usd * USD_RUB),
+                "rub": round(self.duty_usd * rate),
+                "local": round(self.duty_usd * rate),
             },
-            {"label": "Таможенный сбор", "usd": round(self.fee_rub / USD_RUB), "rub": round(self.fee_rub)},
-            {"label": util_label, "usd": round(self.util_rub / USD_RUB), "rub": round(self.util_rub)},
+            {
+                "label": "Сбор за таможенное оформление" if by else "Таможенный сбор",
+                "usd": round(self.fee_rub / rate),
+                "rub": round(self.fee_rub),
+                "local": round(self.fee_rub),
+            },
+            {"label": util_label, "usd": round(self.util_rub / rate), "rub": round(self.util_rub), "local": round(self.util_rub)},
         ]
-        self.total_rub = car_rub + logistics_rub + self.duty_usd * USD_RUB + self.fee_rub + self.util_rub
-        self.total_usd = round(self.total_rub / USD_RUB)
+        self.total_local = round(
+            car_local
+            + (self.logistics_usd + self.broker_usd + self.lab_usd) * rate
+            + self.duty_usd * rate
+            + self.fee_rub
+            + self.util_rub
+        )
+        self.total_rub = self.total_local  # совместимость: для РФ это ₽
+        self.total_usd = round(self.total_local / rate)
         return self
 
 
@@ -242,10 +340,14 @@ def calc_delivery(
     engine_cc: int,
     year: int,
     *,
+    region: str = "ru",
     power_hp: int | None = None,
     current_year: int | None = None,
 ) -> DeliveryBreakdown:
-    """Полный расчёт стоимости «авто + доставка + таможня» во Владивостоке."""
+    """Расчёт «авто + доставка + таможня»: region="ru" → Владивосток (₽), "by" → Минск (BYN).
+
+    Юрисдикцию задаёт валюта объявления на фронте: BYN → РБ, RUB → РФ.
+    """
     cc = max(50, int(engine_cc))
     hp = int(power_hp) if power_hp else None
     now = current_year or datetime.now(UTC).year
@@ -253,15 +355,20 @@ def calc_delivery(
     group = "до 3 лет" if age < 3 else ("3–5 лет" if age <= 5 else "старше 5 лет")
 
     duty = _duty_by_age(age, price_usd, cc)
-    customs_value_rub = price_usd * USD_RUB
-    fee = _clearance_fee(customs_value_rub)
-    util, util_category = _util_fee(cc, age, hp)
-    util_note = ""
-    if util_category == "льготный" and hp is None:
-        util_note = (
-            "Мощность не указана: льготный утильсбор показан в предположении "
-            f"до {UTIL_HP_LIMIT} л.с. При мощности выше льгота не действует."
-        )
+    if region == "by":
+        fee = CLEARANCE_FEE_BYN
+        util, util_category = _util_fee_by(cc)
+        util_note = UTIL_BY_NOTE
+    else:
+        customs_value_rub = price_usd * USD_RUB
+        fee = _clearance_fee(customs_value_rub)
+        util, util_category = _util_fee(cc, age, hp)
+        util_note = ""
+        if util_category == "льготный" and hp is None:
+            util_note = (
+                "Мощность не указана: льготный утильсбор показан в предположении "
+                f"до {UTIL_HP_LIMIT} л.с. При мощности выше льгота не действует."
+            )
 
     return DeliveryBreakdown(
         price_usd=price_usd,
@@ -269,15 +376,17 @@ def calc_delivery(
         year=int(year),
         age_years=age,
         age_group=group,
-        logistics_usd=LOGISTICS_USD,
-        broker_usd=BROKER_USD,
-        lab_usd=LAB_USD,
+        logistics_usd=LOGISTICS_BY_USD if region == "by" else LOGISTICS_USD,
+        broker_usd=BROKER_BY_USD if region == "by" else BROKER_USD,
+        lab_usd=LAB_BY_USD if region == "by" else LAB_USD,
         duty_usd=round(duty),
         fee_rub=fee,
         util_rub=util,
         power_hp=hp,
+        region="by" if region == "by" else "ru",
         util_category=util_category,
         util_note=util_note,
+        legal_refs=LEGAL_REFS_BY if region == "by" else LEGAL_REFS,
     ).finalize()
 
 
