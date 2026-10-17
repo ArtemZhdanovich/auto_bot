@@ -39,7 +39,7 @@ export function LoginScreen({ onAuthed }: Props) {
         <div className="auth__hero-icon">🔐</div>
         <h1 className="auth__title">{mode === "login" ? "Вход" : "Регистрация"}</h1>
         <p className="auth__sub">
-          Поиск по объявлениям, слежение и AI-подбор доступны после входа.
+          Поиск по объявлениям, уведомления и AI-подбор доступны после входа.
           Уведомления приходят только в Telegram.
         </p>
       </div>

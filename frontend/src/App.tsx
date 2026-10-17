@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AppRoot, Tabbar } from "@telegram-apps/telegram-ui";
-import { Home, Heart, SlidersHorizontal, Sparkles, User } from "lucide-react";
+import { Bell, Home, Heart, Sparkles, User } from "lucide-react";
 
 import { authorize, guestLogin, isGuest, clearGuest } from "./api/auth";
 import { api, getAccessToken } from "./api/client";
@@ -49,7 +49,7 @@ type AuthState = "loading" | "ready";
 const NAV_ITEMS = [
   { path: "/", icon: Home, text: "Лента" },
   { path: "/ai", icon: Sparkles, text: "AI" },
-  { path: "/filters", icon: SlidersHorizontal, text: "Слежение" },
+  { path: "/filters", icon: Bell, text: "Уведомления" },
   { path: "/favorites", icon: Heart, text: "Избранное" },
   { path: "/profile", icon: User, text: "Профиль" },
 ];

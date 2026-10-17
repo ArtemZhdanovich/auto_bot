@@ -1,4 +1,4 @@
-/** Слежение (ТЗ п. 9.2.3): сохранённые критерии + уведомления о новых лотах. */
+/** Уведомления (ТЗ п. 9.2.3): сохранённые критерии + сообщения о новых лотах. */
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -156,8 +156,8 @@ export function FiltersScreen() {
       const msg = (e as Error).message || "";
       setError(
         msg.includes("403") || msg.toLowerCase().includes("limit")
-          ? "Достигнут лимит слежений тарифа Free — освободите старое или оформите Pro"
-          : "Не удалось создать слежение, попробуйте позже",
+          ? "Достигнут лимит уведомлений тарифа Free — удалите ненужное или оформите Pro"
+          : "Не удалось создать уведомление, попробуйте позже",
       );
     } finally {
       setCreating(false);
@@ -173,10 +173,10 @@ export function FiltersScreen() {
   return (
     <div className="screen">
       <section className="panel">
-        <h3>Новое слежение</h3>
+        <h3>Новое уведомление</h3>
         <p className="filters-form__intro">
-          Следим за всеми источниками по этим критериям и пришлём уведомление
-          в Telegram, когда появятся новые варианты.
+          Заполните, какой авто ищете, — и мы напишем вам в Telegram, когда
+          такой появится в продаже.
         </p>
         <div className="filters-form">
           <label className="calc-field">
@@ -258,28 +258,29 @@ export function FiltersScreen() {
             aria-pressed={instant}
             onClick={() => setInstant((v) => !v)}
           >
-            ⚡ Instant-уведомления
+            ⚡ Прислать сразу, как найдётся
           </button>
           <div className="filters-form__hint">
-            Instant — уведомления сразу, а не в дайджесте
+            {instant
+              ? "Сообщим сразу, как только авто появится"
+              : "Иначе пришлём подборкой раз в день"}
           </div>
           {error && <div className="form-error">{error}</div>}
           <button className="btn btn--primary btn--block" disabled={creating} onClick={() => void create()}>
-            {creating ? "Запускаем…" : "Начать слежение"}
+            {creating ? "Создаём…" : "Создать уведомление"}
           </button>
         </div>
       </section>
 
       <section className="panel">
-        <h3>Мои слежения ({filters.length})</h3>
+        <h3>Мои уведомления ({filters.length})</h3>
         {loading && <div className="state"><span className="skeleton" style={{ width: 120, height: 14 }} /></div>}
         {!loading && filters.length === 0 && (
           <div className="state">
             <div className="state__emoji">🔔</div>
-            <div className="state__title">Слежений пока нет</div>
+            <div className="state__title">Уведомлений пока нет</div>
             <div className="state__text">
-              Создайте первое слежение — пришлём уведомление, когда появятся
-              новые варианты
+              Создайте первое — и мы напишем, когда появится подходящий авто
             </div>
           </div>
         )}
@@ -287,9 +288,9 @@ export function FiltersScreen() {
           {filters.map((f) => (
             <div key={f.id} className="filter-item">
               <div className="filter-item__body">
-                <div className="filter-item__name">{f.name ?? `Слежение #${f.id}`}</div>
+                <div className="filter-item__name">{f.name ?? `Уведомление #${f.id}`}</div>
                 <div className="filter-item__desc">
-                  {describe(f.criteria)} · {f.notify_mode === "instant" ? "instant" : "дайджест"}
+                  {describe(f.criteria)} · {f.notify_mode === "instant" ? "сообщим сразу" : "подборкой раз в день"}
                 </div>
               </div>
               <button className="btn btn--danger" aria-label={`Удалить ${f.name ?? f.id}`} onClick={() => void remove(f.id)}>
