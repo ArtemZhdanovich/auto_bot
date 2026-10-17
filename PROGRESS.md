@@ -1461,3 +1461,43 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   override) пересобран и поднят — backend+bot с новым кодом (login_-коды и
   регион-расчёт в проде), п.56–58 в проде.
 
+
+## 60. Фильтры и карточки как на avtokorea.by + обогащение encar detail (2026-10-17)
+
+**Референс:** фильтры avtokorea.by/search (марка→модель→поколение, топливо,
+объём от/до, КПП, цвет, год/цена/пробег от-до) и карточки (цена $ + BYN,
+спек-строка «топливо · объём · КПП»). Осмотры (карта повреждений + чек-лист)
+у них — ручные WP-репорты; решили тянуть только из encar, показывать только
+в вебаппе.
+
+- **Карточка (ListingCard):** спек-строка `⛽ топливо · 🔋 2.0 · ⚙️ автомат ·
+  🚙 кузов · 🔧 привод · 🎨 цвет` (labelOf — канон + сырое значение источника
+  как есть); мета — «N км · 🇰🇷 Корея · дата»; ссылка на источник (encar.com ↗
+  / kcar.com ↗, stopPropagation — не открывает PDP).
+- **Лента (Feed):** в панель фильтров добавлены кузов/топливо/КПП/привод
+  (API 0016 уже принимал — фронт не передавал), пробег «от», объём от/до (л),
+  цвет. Марка/модель — зависимые селекты из нового `GET /api/listings/facets`
+  (DISTINCT make / model WHERE make, как есть в БД). FeedQuery расширен,
+  deep-link + sameQuery учат новые поля. Справочники вынесены в lib/specs.ts
+  (Feed/Filters без дублей), COLORS — 16 цветов (канон англ., подписи рус.).
+- **API:** `mileage_min`, `engine_volume_min/max` (ge=0/le=20), `color`
+  (ilike), `/facets` (до `/{listing_id}` — порядок роутов).
+- **Обогащение encar detail (миграция 0017: listings.engine_volume Float,
+  listings.color Text):** `api.encar.com/v1/readside/vehicle/{source_id}`
+  отдаёт spec: bodyName/displacement(см³)/colorName(кор.)/fuelName/
+  transmissionName — всего, чего нет в list-API. `enrich_listing_specs()`
+  (services/fetch.py): только encar, только если поля NULL (повторные PDP
+  бесплатны), normalize_body/fuel/transmission + новые normalize_color
+  (COLOR_MAP кор/рус/англ) и normalize_engine_volume (см³→л, 1 знак).
+  Подключено лениво в GET /api/listings/{id}; сбой encar не ломает PDP.
+- **Осмотры (карта повреждений/чек-лист):** прямой inspection-эндпоинт encar
+  не найден (перебор /v1/readside/... 404, fem-SPA без данных в HTML);
+  condition.inspection.formats=["TABLE"] — осмотр рендерится на детальной
+  странице, данные надо копать дальше (БД-чёрный список из detail API пока
+  только спеки). Перенесено в бэклог.
+- **Счётчики: 598 pytest (+9: color/volume normalize, enrichment ×3, API
+  mileage_min/facets×2/volume+color), 85 vitest.**
+- **Деплой:** прод (коммит 0d493d0): build+up backend/miniapp, alembic 0017.
+  Живая проверка: лот 231 (encar 42935199) → sedan/diesel/automatic/2.0/blue;
+  `?engine_volume_min=2.0&engine_volume_max=2.0` → total=1. Тест-стенд —
+  то же, миграция прошла.
