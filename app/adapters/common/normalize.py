@@ -21,6 +21,14 @@ FUEL_MAP = {
 BODY_MAP = {
     "suv": "suv", "внедорожник": "suv", "rv": "suv",
     "sedan": "sedan", "седан": "sedan", "세단": "sedan",
+    # Корейская классификация кузовов (kcar carctgrNm)
+    "경차": "hatchback",  # кей-кар
+    "소형차": "hatchback",  # малый класс
+    "준중형차": "sedan",  # субкомпакт
+    "중형차": "sedan",  # средний класс
+    "대형차": "sedan",  # полноразмерный
+    "승합차": "van",  # микроавтобус
+    "화물차": "pickup",  # грузовой
     "hatchback": "hatchback", "хэтчбек": "hatchback",
     "wagon": "wagon", "универсал": "wagon",
     "coupe": "coupe", "купе": "coupe", "쿠페": "coupe",

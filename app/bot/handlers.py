@@ -268,6 +268,8 @@ def build_listing_caption(listing: dict) -> str:
         else "цена не указана"
     )
     details = []
+    if listing.get("body_type"):
+        details.append(str(listing["body_type"]))
     if listing.get("year"):
         details.append(str(listing["year"]))
     if listing.get("mileage_km"):
