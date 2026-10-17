@@ -1,12 +1,21 @@
 /** Экран «Сайт: вход/регистрация» (вне Telegram). Поиск — только после регистрации. */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Send } from "lucide-react";
 
-import { webLogin, webRegister } from "../api/auth";
+import {
+  createTelegramLoginLink,
+  pollTelegramLogin,
+  webLogin,
+  webRegister,
+} from "../api/auth";
 
 interface Props {
   onAuthed: () => void;
 }
+
+const TG_POLL_INTERVAL_MS = 2500;
+const TG_POLL_MAX_TRIES = 72; // ~3 минуты
 
 export function LoginScreen({ onAuthed }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -15,6 +24,60 @@ export function LoginScreen({ onAuthed }: Props) {
   const [firstName, setFirstName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Вход через Telegram: ссылка на бота + состояние ожидания подтверждения
+  const [tgUrl, setTgUrl] = useState<string | null>(null);
+  const tgTimer = useRef<number | null>(null);
+
+  const stopTelegramLogin = (message?: string) => {
+    if (tgTimer.current !== null) {
+      window.clearInterval(tgTimer.current);
+      tgTimer.current = null;
+    }
+    setTgUrl(null);
+    if (message) setError(message);
+  };
+
+  useEffect(() => () => stopTelegramLogin(), []);
+
+  const startTelegramLogin = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const link = await createTelegramLoginLink();
+      window.open(link.url, "_blank", "noopener");
+      setTgUrl(link.url);
+      let tries = 0;
+      tgTimer.current = window.setInterval(() => {
+        tries += 1;
+        if (tries > TG_POLL_MAX_TRIES) {
+          stopTelegramLogin("Время ожидания вышло — попробуйте войти ещё раз.");
+          return;
+        }
+        void pollTelegramLogin(link.code)
+          .then((r) => {
+            if ("access_token" in r) {
+              stopTelegramLogin();
+              onAuthed();
+            } else if (r.status === "expired") {
+              stopTelegramLogin("Ссылка входа устарела — попробуйте ещё раз.");
+            }
+          })
+          .catch(() => {
+            /* сетевая осечка — повторим на следующем тике */
+          });
+      }, TG_POLL_INTERVAL_MS);
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error && e.message.includes("503")
+          ? "Вход через Telegram сейчас недоступен — используйте email."
+          : e instanceof Error
+            ? e.message
+            : "Ошибка сети",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async () => {
     setError(null);
@@ -99,9 +162,42 @@ export function LoginScreen({ onAuthed }: Props) {
         >
           {busy ? "Секунду…" : mode === "register" ? "Зарегистрироваться" : "Войти"}
         </button>
+
+        <div className="auth__divider"><span>или</span></div>
+
+        {tgUrl ? (
+          <div className="tg-login">
+            <div className="tg-login__title">📨 Подтвердите вход в Telegram</div>
+            <div className="tg-login__text">
+              Мы открыли бота — нажмите <b>Start</b>, и вы сразу войдёте на сайт.
+              Окно обновится само.
+            </div>
+            <a className="btn btn--block" href={tgUrl} target="_blank" rel="noreferrer">
+              Открыть бота снова
+            </a>
+            <button
+              className="btn btn--block"
+              type="button"
+              onClick={() => stopTelegramLogin()}
+            >
+              Отменить
+            </button>
+          </div>
+        ) : (
+          <button
+            className="btn btn--block"
+            type="button"
+            disabled={busy}
+            onClick={() => void startTelegramLogin()}
+          >
+            <Send size={18} />
+            Войти через Telegram
+          </button>
+        )}
+
         <p className="auth__hint">
-          Уведомления о новых вариантах отправляются только в Telegram — привяжите
-          бота после входа.
+          Уведомления о новых вариантах отправляются только в Telegram — при входе
+          через бота он привязывается автоматически.
         </p>
       </form>
     </div>

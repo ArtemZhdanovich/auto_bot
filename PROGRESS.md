@@ -1258,3 +1258,27 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 
 
 
+## 53. Вход через Telegram с сайта: ссылка на бота из env (2026-10-17)
+- Флоу: кнопка «Войти через Telegram» на Login → POST /api/auth/telegram/link
+  (одноразовый код, Redis tglogin:{code}, TTL 600 с) → открытие
+  https://t.me/{BOT_USERNAME}?start=login_{code} → пользователь жмёт Start →
+  бот зовёт internal POST /api/auth/telegram/link/confirm (профиль из
+  from_user, статус ok, TTL 120 с) → фронт опрашивает каждые 2,5 с (до 3 мин)
+  GET /api/auth/telegram/link/{code} и получает JWT-пару + upsert пользователя
+  (source=telegram_link). Код одноразовый, без токена confirm отдаёт 401.
+- **Ссылка на бота строится из env**: новая переменная BOT_USERNAME (без @)
+  в Settings (.env/.env.example); пусто → 503, фронт показывает «вход через
+  Telegram недоступен». Текущее значение: ftadasd_bot (получено getMe).
+- Bot: BackendClient.confirm_login_link + handle_deep_link ветка login_
+  («✅ Вход подтверждён…» / «⌛ Ссылка устарела»). Bot-хендлер смок-тестить на
+  стенде нельзя (поллинг токена в проде) — юнит-тесты в test_bot_calc.py.
+- Frontend: createTelegramLoginLink/pollTelegramLogin в api/auth.ts (токены
+  пишет setTokens), Login.tsx — кнопка с иконкой Send, разделитель «или»,
+  карточка ожидания `.tg-login` («Открыть бота снова» / «Отменить»),
+  автосброс по expired/таймауту, cleanup при размонтировании. Стили:
+  `.auth__divider`, `.tg-login*` (границы var(--border), обе темы).
+- Проверено на стенде curl-циклом: link → pending → confirm ok → JWT-пара →
+  повторный GET expired. Образы miniapp/backend пересобраны
+  (-p auto_bot_test, реcтарт miniapp после force-recreate, .Image совпадает).
+- **567 pytest (+6), 76 vitest (+3), ruff чисто.** Прод-стек (backend+bot)
+  redeployить отдельно — иначе прод-бот не подтвердит login_-коды.

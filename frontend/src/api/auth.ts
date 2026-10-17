@@ -71,6 +71,35 @@ export async function webLogin(email: string, password: string): Promise<AuthRes
   return resp;
 }
 
+// ---------- Вход через Telegram (веб-режим): код → /start в боте → JWT ----------
+
+interface TelegramLoginLink {
+  code: string;
+  url: string;
+  expires_in: number;
+}
+
+type TelegramLoginPoll =
+  | { status: "pending" }
+  | { status: "expired" }
+  | AuthResponse;
+
+/** Создать одноразовый код входа и ссылку на бота (BOT_USERNAME задаётся в env backend). */
+export async function createTelegramLoginLink(): Promise<TelegramLoginLink> {
+  return api<TelegramLoginLink>("/auth/telegram/link", { method: "POST" });
+}
+
+/** Опрос статуса входа: pending / expired / AuthResponse (одноразовый). */
+export async function pollTelegramLogin(code: string): Promise<TelegramLoginPoll> {
+  const resp = await api<TelegramLoginPoll>(
+    `/auth/telegram/link/${encodeURIComponent(code)}`,
+  );
+  if ("access_token" in resp) {
+    setTokens(resp.access_token, resp.refresh_token);
+  }
+  return resp;
+}
+
 /** Гостевой режим: сайт открыт без регистрации — JWT «Гостя» сразу.
  *  Лента, карточка, AI-разбор (1/нед), калькулятор, избранное — доступны;
  *  Telegram-уведомления и Pro — после входа/регистрации. */

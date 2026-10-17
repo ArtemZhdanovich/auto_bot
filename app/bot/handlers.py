@@ -300,6 +300,29 @@ async def handle_deep_link(message: Message, args: str) -> bool:
         )
         return True
 
+    if args.startswith("login_"):
+        # Вход на сайт через Telegram: одноразовый код из ссылки (UI/UX веб-логин)
+        code = args.removeprefix("login_")
+        user = message.from_user
+        result = await backend.confirm_login_link(
+            code=code,
+            telegram_id=user.id if user else 0,
+            username=user.username if user else None,
+            first_name=user.first_name if user else None,
+            last_name=user.last_name if user else None,
+            language_code=user.language_code if user else None,
+        )
+        if result and result.get("status") == "ok":
+            await message.answer(
+                "✅ Вход подтверждён — вернитесь на сайт: вы уже вошли.\n\n"
+                "🔔 Уведомления о новых вариантах будут приходить сюда."
+            )
+        else:
+            await message.answer(
+                "⌛ Ссылка входа устарела — запросите новую на сайте."
+            )
+        return True
+
     if args.startswith("ref_"):
         # Реферальная программа — P4 (бэкенд), пока фиксируем переход в лог.
         logger.info(

@@ -1,9 +1,10 @@
 """Вспомогательные зависимости для внутренних/admin эндпоинтов."""
 
 import hmac
+from typing import Annotated
 from functools import lru_cache
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from redis.asyncio import Redis
 
 from app.core.config import get_settings
@@ -41,4 +42,7 @@ def check_internal_token(
 def get_redis() -> Redis:
     """Общий клиент Redis для диалогов (bot/backend в одном процессе)."""
     return Redis.from_url(get_settings().redis_url)
+
+
+RedisDep = Annotated[Redis, Depends(get_redis)]
 

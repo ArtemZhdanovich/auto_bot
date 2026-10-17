@@ -76,6 +76,29 @@ class BackendClient:
             timeout=self.DIALOG_TIMEOUT,
         )
 
+    async def confirm_login_link(
+        self,
+        *,
+        code: str,
+        telegram_id: int,
+        username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+        language_code: str | None,
+    ) -> dict | None:
+        """POST /api/auth/telegram/link/confirm — вход на сайт через /start login_."""
+        return await self._post(
+            "/api/auth/telegram/link/confirm",
+            {
+                "code": code,
+                "telegram_id": telegram_id,
+                "username": username,
+                "first_name": first_name,
+                "last_name": last_name,
+                "language_code": language_code,
+            },
+        )
+
     async def dialog_reset(self, user_id: int) -> dict | None:
         """POST /api/dialog/reset — сброс диалога."""
         return await self._post("/api/dialog/reset", {"user_id": user_id})

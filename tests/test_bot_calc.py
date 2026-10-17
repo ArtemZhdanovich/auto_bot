@@ -1,10 +1,14 @@
-"""Хелперы калькулятора и фото-карточек в боте (MVP): цены в $, сметы, кнопки."""
+"""Хелперы калькулятора и фото-карточек в боте (MVP): цены в $, сметы, кнопки.
+
+Вход через Telegram: /start login_{code} (веб-логин) — тесты в конце файла."""
 
 from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import asyncio
+
+import pytest
 
 from aiogram.filters import CommandObject
 
@@ -372,3 +376,44 @@ def test_fallback_text_plain_text_goes_to_agent(monkeypatch):
     asyncio.run(h.fallback_text(msg, AsyncMock()))
     get_by_url.assert_not_called()
     agent.assert_awaited_once()
+
+
+# ---------- /start login_{code}: вход на сайт через Telegram ----------
+@pytest.mark.asyncio
+async def test_login_deep_link_confirms_and_answers(monkeypatch):
+    """login_{code} → confirm в backend, ответ «вход подтверждён», True."""
+    confirm = AsyncMock(return_value={"status": "ok"})
+    monkeypatch.setattr(h.backend, "confirm_login_link", confirm)
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(
+            id=42, username="u", first_name="Иван", last_name=None, language_code="ru"
+        ),
+        answer=AsyncMock(),
+    )
+    handled = await h.handle_deep_link(message, "login_abc12345")
+    assert handled is True
+    confirm.assert_awaited_once_with(
+        code="abc12345",
+        telegram_id=42,
+        username="u",
+        first_name="Иван",
+        last_name=None,
+        language_code="ru",
+    )
+    text = message.answer.await_args.args[0]
+    assert "Вход подтверждён" in text
+
+
+@pytest.mark.asyncio
+async def test_login_deep_link_expired(monkeypatch):
+    """Истёкший/неизвестный код → ответ про устаревшую ссылку, True."""
+    confirm = AsyncMock(return_value=None)
+    monkeypatch.setattr(h.backend, "confirm_login_link", confirm)
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(id=1, username=None, first_name="A", last_name=None, language_code=None),
+        answer=AsyncMock(),
+    )
+    handled = await h.handle_deep_link(message, "login_deadbeef00")
+    assert handled is True
+    text = message.answer.await_args.args[0]
+    assert "устарела" in text

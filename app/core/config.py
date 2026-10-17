@@ -24,6 +24,9 @@ class Settings(BaseSettings):
 
     # Bot
     bot_token: str = ""
+    # Юзернейм бота (без @) для ссылок «Войти через Telegram» с сайта;
+    # пусто = веб-вход через Telegram недоступен (кнопка вернёт 503).
+    bot_username: str = ""
     admin_chat_id: int | None = None
     manager_chat_id: int | None = None
 

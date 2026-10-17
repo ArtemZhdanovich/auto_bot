@@ -1,17 +1,19 @@
-"""Авторизация: initData из Mini App, веб-регистрация, magic-link (ТЗ п. 4.3, 9.5)."""
+"""Авторизация: initData из Mini App, веб-регистрация, вход через Telegram-бота."""
 
 import hashlib
 import hmac
+import json
 import re
 import secrets
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.deps_internal import RedisDep, check_internal_token
 from app.core.deps import SessionDep
 from app.core.security import (
     InitDataError,
@@ -93,6 +95,114 @@ async def auth_telegram(body: TelegramAuthRequest, session: SessionDep) -> AuthR
 async def auth_magic_link(body: MagicLinkRequest) -> dict[str, str]:
     """Вход по ссылке из бота. Реализуется на этапах 3–4 (ТЗ п. 14.3)."""
     return {"detail": "magic-link auth will be implemented at stage 3-4"}
+
+
+# ---------- Вход через Telegram (веб-режим): код → /start в боте → JWT ----------
+
+_LOGIN_CODE_TTL_SEC = 600  # жизнь одноразового кода входа
+_LOGIN_CONFIRM_TTL_SEC = 120  # сколько времени веб может забрать JWT после /start
+
+
+class TelegramLoginLinkResponse(BaseModel):
+    code: str
+    url: str
+    expires_in: int
+
+
+def _login_key(code: str) -> str:
+    return f"tglogin:{code}"
+
+
+@router.post("/telegram/link", response_model=TelegramLoginLinkResponse)
+async def create_telegram_login_link(redis: RedisDep) -> TelegramLoginLinkResponse:
+    """Одноразовый код входа + ссылка на бота (юзернейм из BOT_USERNAME)."""
+    settings = get_settings()
+    bot = (settings.bot_username or "").strip().lstrip("@")
+    if not bot:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Bot username is not configured",
+        )
+    code = secrets.token_urlsafe(12)
+    await redis.set(
+        _login_key(code), json.dumps({"status": "pending"}), ex=_LOGIN_CODE_TTL_SEC
+    )
+    return TelegramLoginLinkResponse(
+        code=code,
+        url=f"https://t.me/{bot}?start=login_{code}",
+        expires_in=_LOGIN_CODE_TTL_SEC,
+    )
+
+
+@router.get("/telegram/link/{code}", response_model=None)
+async def telegram_login_status(code: str, session: SessionDep, redis: RedisDep) -> dict:
+    """Статус входа: pending / expired / JWT-пара с профилем (одноразово)."""
+    key = _login_key(code)
+    raw = await redis.get(key)
+    if raw is None:
+        return {"status": "expired"}
+    data = json.loads(raw)
+    if data.get("status") != "ok":
+        return {"status": "pending"}
+    await redis.delete(key)
+    user = await upsert_user(
+        session,
+        telegram_id=int(data["telegram_id"]),
+        username=data.get("username"),
+        first_name=data.get("first_name"),
+        last_name=data.get("last_name"),
+        language_code=data.get("language_code"),
+        source="telegram_link",
+    )
+    settings = get_settings()
+    return AuthResponse(
+        access_token=create_access_token(user.telegram_id, settings),
+        refresh_token=create_refresh_token(user.telegram_id, settings),
+        user=UserOut.model_validate(user),
+    )
+
+
+class TelegramLoginConfirmRequest(BaseModel):
+    code: str = Field(min_length=8, max_length=128)
+    telegram_id: int
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    language_code: str | None = None
+
+
+@router.post(
+    "/telegram/link/confirm",
+    dependencies=[Depends(check_internal_token)],
+)
+async def confirm_telegram_login(
+    body: TelegramLoginConfirmRequest, redis: RedisDep
+) -> dict:
+    """Internal: бот подтвердил /start login_{code} — помечаем код подтверждённым."""
+    key = _login_key(body.code)
+    raw = await redis.get(key)
+    if raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Login link expired"
+        )
+    data = json.loads(raw)
+    if data.get("status") == "ok":
+        return {"status": "ok"}
+    await redis.set(
+        key,
+        json.dumps(
+            {
+                "status": "ok",
+                "telegram_id": body.telegram_id,
+                "username": body.username,
+                "first_name": body.first_name,
+                "last_name": body.last_name,
+                "language_code": body.language_code,
+            }
+        ),
+        ex=_LOGIN_CONFIRM_TTL_SEC,
+    )
+    return {"status": "ok"}
 
 
 @router.post("/refresh", response_model=TokenPair)
