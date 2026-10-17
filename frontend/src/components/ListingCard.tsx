@@ -117,11 +117,10 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
           {title}
           {listing.year ? `, ${listing.year}` : ""}
         </div>
-        {/* Переведённый тайтл источника (фаза 5): есть — показываем строкой ниже */}
-        {(listing.title_ru ?? listing.title_raw) && (
-          <div className="listing-card__sub">
-            {listing.title_ru ?? listing.title_raw}
-          </div>
+        {/* Подпись — только переведённый тайтл (фаза 5): без title_ru сырой
+            корейский/китайский title_raw дублирует тайтл и выглядит мусором */}
+        {listing.title_ru && (
+          <div className="listing-card__sub">{listing.title_ru}</div>
         )}
         {/* Главная цена — только валюта региона; если конвертация невозможна
             (нет цены/курса) — как есть с источника */}

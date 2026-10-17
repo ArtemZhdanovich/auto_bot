@@ -73,6 +73,22 @@ describe("ListingCard", () => {
     expect(document.querySelector(".listing-card__badge--drop")?.textContent).toContain("−8%");
   });
 
+  it("нет перевода (title_ru) → сырой title_raw на карточке не показываем", () => {
+    renderCard({ ...base, title_raw: "현대 그랜저 가솔린" });
+    expect(document.querySelector(".listing-card__sub")).toBeNull();
+    expect(document.body.textContent).not.toContain("현대");
+  });
+
+  it("есть перевод → подпись = title_ru, а не title_raw", () => {
+    renderCard({
+      ...base,
+      title_raw: "현대 그랜저 가솔린",
+      title_ru: "Hyundai Grandeur бензин",
+    });
+    const sub = document.querySelector(".listing-card__sub");
+    expect(sub?.textContent).toBe("Hyundai Grandeur бензин");
+  });
+
   it("объявление исчезло → бейдж «Исчезло» вместо бейджа цены", () => {
     renderCard({ ...base, is_active: false, first_price: 20_000_000 });
     expect(document.querySelector(".listing-card__badge--gone")).not.toBeNull();
