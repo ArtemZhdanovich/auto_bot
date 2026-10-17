@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Cell, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
 import { isGuest } from "../api/auth";
 import { useLoginPrompt } from "../ui/LoginPrompt";
+import { SkeletonCard } from "../ui/Skeleton";
 import type { Listing } from "../api/types";
 
 export function FavoritesScreen() {
@@ -48,64 +48,86 @@ export function FavoritesScreen() {
           Избранное доступно после входа через Telegram или по email — так машины
           сохраняются за вашим аккаунтом.
         </div>
-        <Button size="l" onClick={() => navigate("/login")}>
+        <button className="btn btn--primary" style={{ marginTop: 12 }} onClick={() => navigate("/login")}>
           Войти
-        </Button>
+        </button>
       </div>
     );
   }
   if (error) {
     return (
-      <Placeholder
-        header="Нужна авторизация"
-        description="Избранное доступно после входа через Telegram"
-      />
+      <div className="state">
+        <div className="state__emoji">🔒</div>
+        <div className="state__title">Нужна авторизация</div>
+        <div className="state__text">Избранное доступно после входа через Telegram</div>
+      </div>
     );
   }
   if (items === null) {
-    return <Spinner size="l" />;
+    return (
+      <div className="screen">
+        <SkeletonCard />
+        <SkeletonCard />
+        <SkeletonCard />
+      </div>
+    );
   }
   if (items.length === 0) {
     return (
-      <Placeholder
-        header="Пока пусто"
-        description="Откройте объявление в ленте и нажмите «В избранное»"
-      />
+      <div className="state">
+        <div className="state__emoji">🤍</div>
+        <div className="state__title">Пока пусто</div>
+        <div className="state__text">Откройте объявление в ленте и нажмите «В избранное»</div>
+        <button className="btn btn--primary" style={{ marginTop: 12 }} onClick={() => navigate("/")}>
+          К ленте
+        </button>
+      </div>
     );
   }
 
   return (
-    <List>
-      <Section header={`Избранное: ${items.length}`}>
-        {items.map((l) => {
-          // Бейджи отслеживания (PLAN.md, фаза 4): ⬇️ цена снизилась, 🔴 исчезло
-          const dropped =
-            l.first_price != null && l.price != null && l.price < l.first_price;
-          const badge = l.is_active === false ? "🔴 " : dropped ? "⬇️ " : "";
-          const oldPrice = dropped && l.first_price ? ` (было ${l.first_price.toLocaleString("ru")})` : "";
-          return (
-            <Cell
-              key={l.id}
-              subtitle={`${l.year ?? "—"} · ${l.price?.toLocaleString("ru") ?? "—"} ${l.currency ?? ""}${oldPrice} · ${l.mileage_km?.toLocaleString("ru") ?? "—"} км`}
-              onClick={() => navigate(`/listing/${l.id}`)}
-              after={
-                <Button
-                  mode="plain"
-                  size="s"
-                  onClick={(e: React.MouseEvent) => {
+    <div className="screen">
+      <section className="panel">
+        <h3>Избранное: {items.length}</h3>
+        <div className="fav-list">
+          {items.map((l) => {
+            // Бейджи отслеживания (PLAN.md, фаза 4): ⬇️ цена снизилась, 🔴 исчезло
+            const dropped =
+              l.first_price != null && l.price != null && l.price < l.first_price;
+            const badge = l.is_active === false ? "🔴 " : dropped ? "⬇️ " : "";
+            const oldPrice = dropped && l.first_price ? ` (было ${l.first_price.toLocaleString("ru")})` : "";
+            return (
+              <div
+                key={l.id}
+                className="filter-item"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/listing/${l.id}`)}
+                onKeyDown={(e) => e.key === "Enter" && navigate(`/listing/${l.id}`)}
+              >
+                <div className="filter-item__body">
+                  <div className="filter-item__name">
+                    {`${badge}${l.make ?? ""} ${l.model ?? ""}`.trim() || "Объявление"}
+                  </div>
+                  <div className="filter-item__desc">
+                    {`${l.year ?? "—"} · ${l.price?.toLocaleString("ru") ?? "—"} ${l.currency ?? ""}${oldPrice} · ${l.mileage_km?.toLocaleString("ru") ?? "—"} км`}
+                  </div>
+                </div>
+                <button
+                  className="btn btn--danger"
+                  aria-label="Убрать из избранного"
+                  onClick={(e) => {
                     e.stopPropagation();
-                    unfavorite(l.id);
+                    void unfavorite(l.id);
                   }}
                 >
                   ✕
-                </Button>
-              }
-            >
-              {`${badge}${l.make ?? ""} ${l.model ?? ""}`.trim() || "Объявление"}
-            </Cell>
-          );
-        })}
-      </Section>
-    </List>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
   );
 }

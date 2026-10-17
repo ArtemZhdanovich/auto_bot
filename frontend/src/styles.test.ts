@@ -69,7 +69,7 @@ describe("контраст: текст не сливается с фоном", (
   });
 
   it("карточка объявления отделена рамкой от фона ленты", () => {
-    expect(rule(".listing-card")).toContain("border: 1px solid var(--bg-secondary)");
+    expect(rule(".listing-card")).toContain("border: 1px solid var(--border)");
   });
 });
 

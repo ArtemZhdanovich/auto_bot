@@ -5,7 +5,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button } from "@telegram-apps/telegram-ui";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
@@ -178,9 +177,13 @@ export function CalcScreen() {
             placeholder="2022"
           />
         </label>
-        <Button size="l" stretched loading={loading} onClick={() => void calc(price, cc, hp, year)}>
-          Рассчитать
-        </Button>
+        <button
+          className="btn btn--primary btn--block"
+          disabled={loading}
+          onClick={() => void calc(price, cc, hp, year)}
+        >
+          {loading ? "Считаю…" : "Рассчитать"}
+        </button>
         <CompareBtn price={price} cc={cc} hp={hp} year={year} />
       </div>
 

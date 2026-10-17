@@ -4,7 +4,6 @@
  * или query ?v=18000x2000x2022,15000x1600x2021 (deep-link из бота).
  */
 
-import { Button } from "@telegram-apps/telegram-ui";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
@@ -161,9 +160,13 @@ export function CompareScreen() {
           )}
         </div>
 
-        <Button size="l" stretched loading={loading} onClick={() => void compare(variants)}>
-          Сравнить
-        </Button>
+        <button
+          className="btn btn--primary btn--block"
+          disabled={loading}
+          onClick={() => void compare(variants)}
+        >
+          {loading ? "Сравниваю…" : "Сравнить"}
+        </button>
       </div>
 
       {error && (

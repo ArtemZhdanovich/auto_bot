@@ -44,9 +44,14 @@ main {
   --destructive: var(--tg-theme-destructive-text-color, #e53935);
   --link: var(--tg-theme-link-color, #2481cc);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+  --shadow-md: 0 2px 4px rgba(16, 24, 40, 0.06), 0 6px 16px rgba(16, 24, 40, 0.12);
+  --shadow-lg: 0 10px 30px rgba(16, 24, 40, 0.18);
+
+  /* Границы карточек/панелей — видимы и в светлой, и в тёмной теме
+     (section-separator-color Telegram адаптируется под тему) */
+  --border: var(--tg-theme-section-separator-color, rgba(16, 24, 40, 0.1));
+  --border-strong: var(--tg-theme-hint-color, #a8b0b9);
 
   --content-max: 1200px;
   --tabbar-h: 56px;
@@ -59,7 +64,7 @@ main {
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.15s ease;
@@ -369,7 +374,7 @@ main {
   justify-content: center;
   width: 44px;
   height: 44px;
-  border: 1px solid var(--tgui--secondary_hint_color, #e5e7eb);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--tgui--text_color, #222);
@@ -449,6 +454,7 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-2);
   width: 100%;
   box-sizing: border-box;
   padding: 12px 16px;
@@ -933,7 +939,7 @@ main {
 .onboarding__role {
   padding: var(--space-4);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   background: var(--bg);
   text-align: left;
   cursor: pointer;
@@ -1062,12 +1068,16 @@ main {
 .btn {
   padding: 8px 16px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border-strong);
   background: var(--bg);
   color: var(--text);
   font-size: var(--font-sm);
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--bg-secondary);
 }
 .btn--primary {
   background: var(--accent);
@@ -1108,6 +1118,7 @@ main {
 
 .panel {
   background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-4);
   box-shadow: var(--shadow-sm);
@@ -1123,7 +1134,7 @@ main {
   box-sizing: border-box;
   padding: 10px var(--space-3);
   border-radius: var(--radius-md);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
   font-size: var(--font-md);
@@ -1150,7 +1161,7 @@ main {
   padding: var(--space-4);
   margin: 0 var(--space-3);
   background: var(--bg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
@@ -1170,7 +1181,7 @@ main {
   min-width: 0;
   padding: 10px var(--space-3);
   border-radius: var(--radius-md);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
   font-size: var(--font-md);
@@ -1217,7 +1228,7 @@ main {
 }
 .calc-rows {
   background: var(--bg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   padding: 4px 14px;
@@ -1272,7 +1283,7 @@ main {
 /* Правовые основания расчёта (НПА) — отдельная карточка */
 .calc-legal {
   background: var(--bg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   padding: var(--space-3) var(--space-4);
@@ -1304,7 +1315,7 @@ main {
   margin-bottom: 14px;
   padding: 12px;
   background: var(--bg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
@@ -1333,7 +1344,7 @@ main {
   padding: 12px;
   background: var(--bg);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
 }
 .compare-item--best {
@@ -1389,7 +1400,7 @@ main {
   gap: 10px;
   font-size: 14px;
   background: var(--bg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   padding: var(--space-3) var(--space-4);
@@ -1574,7 +1585,7 @@ main {
   color: #4d7cfe;
   background: var(--bg);
   box-shadow: var(--shadow-sm);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   padding: 1px 6px;
   border-radius: 8px;
   pointer-events: none;
@@ -1732,7 +1743,7 @@ main {
   appearance: none;
   padding: 10px 12px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text);
   font-size: var(--font-sm);
@@ -1957,7 +1968,7 @@ main {
 .ai-chat {
   display: flex;
   flex-direction: column;
-  max-width: 760px;
+  max-width: 640px;
   margin: 0 auto;
   padding: var(--space-4);
   gap: var(--space-3);
@@ -1968,8 +1979,8 @@ main {
   padding: var(--space-6) var(--space-4);
   background: var(--bg);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--bg-secondary);
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
 }
 .ai-chat__intro-icon {
   font-size: 40px;
@@ -1992,6 +2003,19 @@ main {
   flex-direction: column;
   gap: var(--space-2);
 }
+.ai-chat__link {
+  align-self: center;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  padding: var(--space-2);
+}
+.ai-chat__link:hover {
+  text-decoration: underline;
+}
 .ai-msg {
   max-width: 86%;
   padding: 10px 14px;
@@ -2004,7 +2028,7 @@ main {
 .ai-msg--bot {
   align-self: flex-start;
   background: var(--bg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
   border-bottom-left-radius: 6px;
 }
 .ai-msg--user {
@@ -2050,7 +2074,7 @@ main {
   background: var(--bg);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  border: 1px solid var(--bg-secondary);
+  border: 1px solid var(--border);
 }
 .ai-chat__input {
   width: 100%;
@@ -2106,4 +2130,32 @@ main {
 }
 @media (prefers-color-scheme: dark) {
   .profile-msg--ok { color: #5fd39a; }
+}
+
+/* ============================================================
+   PDP: карточка характеристик и панели (замена telegram-ui)
+   ============================================================ */
+.spec-card__price {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--accent);
+  margin: 2px 0 var(--space-2);
+}
+.listing-page__side .btn--block {
+  margin-bottom: var(--space-2);
+}
+.listing-page__side .btn--block:last-child {
+  margin-bottom: 0;
+}
+
+/* --- Избранное: список строк-карточек --- */
+.fav-list {
+  display: flex;
+  flex-direction: column;
+}
+.fav-list .filter-item {
+  cursor: pointer;
+}
+.fav-list .filter-item:hover .filter-item__name {
+  color: var(--accent);
 }

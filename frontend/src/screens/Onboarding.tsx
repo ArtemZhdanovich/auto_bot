@@ -1,7 +1,6 @@
 /** Онбординг 3 шага (UI/UX ТЗ §2.8): приветствие → роль → страны. */
 
 import { useState } from "react";
-import { Button } from "@telegram-apps/telegram-ui";
 
 import { tgUser } from "../api/auth";
 
@@ -43,9 +42,9 @@ export function OnboardingScreen({ onDone }: { onDone: (data: { role: string; co
           <div style={{ color: "var(--text-secondary)", fontSize: 14 }}>
             🔎 Поиск · ❤️ Избранное · 🔔 Уведомления — всё в одном месте
           </div>
-          <Button size="l" stretched onClick={() => setStep(1)}>
+          <button className="btn btn--primary btn--block" onClick={() => setStep(1)}>
             Начать
-          </Button>
+          </button>
         </>
       )}
 
@@ -64,9 +63,9 @@ export function OnboardingScreen({ onDone }: { onDone: (data: { role: string; co
               </button>
             ))}
           </div>
-          <Button size="l" stretched disabled={!role} onClick={() => setStep(2)}>
+          <button className="btn btn--primary btn--block" disabled={!role} onClick={() => setStep(2)}>
             Далее
-          </Button>
+          </button>
         </>
       )}
 
@@ -85,13 +84,12 @@ export function OnboardingScreen({ onDone }: { onDone: (data: { role: string; co
               </button>
             ))}
           </div>
-          <Button
-            size="l"
-            stretched
+          <button
+            className="btn btn--primary btn--block"
             onClick={() => onDone({ role: role ?? "buyer", countries })}
           >
             Готово
-          </Button>
+          </button>
         </>
       )}
     </div>

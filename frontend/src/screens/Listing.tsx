@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, Placeholder, Section, Cell } from "@telegram-apps/telegram-ui";
 import { Heart, ExternalLink, Truck } from "lucide-react";
 
 import { api } from "../api/client";
@@ -101,50 +100,74 @@ export function ListingScreen() {
         {listing.images.length > 0 ? (
           <Gallery images={listing.images} alt={title} />
         ) : (
-          <Placeholder description="Фото не загружены" />
+          <div className="state">
+            <div className="state__emoji">📷</div>
+            <div className="state__text">Фото не загружены</div>
+          </div>
         )}
 
-        <Section header={title}>
-          <Cell
-            after={
-              <b>
-                {chain.usd
-                  ? `${chain.usd}${chain.local ? ` · ${chain.local}` : ""}`
-                  : chain.original ?? "—"}
-              </b>
-            }
-          >
-            Цена
-          </Cell>
+        {/* Характеристики — карточка дизайн-системы вместо telegram-ui Section */}
+        <section className="panel spec-card">
+          <h3>{title}</h3>
+          <div className="spec-card__price">
+            {chain.usd
+              ? `${chain.usd}${chain.local ? ` · ${chain.local}` : ""}`
+              : chain.original ?? "—"}
+          </div>
           {chain.original && (
-            <Cell after={<b>{chain.original}</b>}>Цена у источника</Cell>
+            <div className="info-row">
+              <span className="info-row__label">Цена у источника</span>
+              <span className="info-row__value">{chain.original}</span>
+            </div>
           )}
-          <Cell after={listing.year ?? "—"}>Год</Cell>
-          <Cell after={listing.mileage_km ? `${listing.mileage_km.toLocaleString("ru")} км` : "—"}>
-            Пробег
-          </Cell>
+          <div className="info-row">
+            <span className="info-row__label">Год</span>
+            <span className="info-row__value">{listing.year ?? "—"}</span>
+          </div>
+          <div className="info-row">
+            <span className="info-row__label">Пробег</span>
+            <span className="info-row__value">
+              {listing.mileage_km ? `${listing.mileage_km.toLocaleString("ru")} км` : "—"}
+            </span>
+          </div>
           {usd != null && (listing.currency ?? "").toUpperCase() !== "USD" && (
-            <Cell after={<b>≈ {usd.toLocaleString("ru")} $</b>}>По курсу (оценка)</Cell>
+            <div className="info-row">
+              <span className="info-row__label">По курсу (оценка)</span>
+              <span className="info-row__value">≈ {usd.toLocaleString("ru")} $</span>
+            </div>
           )}
-          <Cell after={listing.vin ?? "не указан"}>VIN</Cell>
-          <Cell after={listing.source}>Источник</Cell>
-          <Cell after={new Date(listing.parsed_at).toLocaleDateString("ru")}>Обновлено</Cell>
-        </Section>
+          <div className="info-row">
+            <span className="info-row__label">VIN</span>
+            <span className="info-row__value">{listing.vin ?? "не указан"}</span>
+          </div>
+          <div className="info-row">
+            <span className="info-row__label">Источник</span>
+            <span className="info-row__value">{listing.source}</span>
+          </div>
+          <div className="info-row">
+            <span className="info-row__label">Обновлено</span>
+            <span className="info-row__value">
+              {new Date(listing.parsed_at).toLocaleDateString("ru")}
+            </span>
+          </div>
+        </section>
 
       </div>
 
       <div className="listing-page__side">
       {/* Название с источника (PLAN.md, фаза 5): перевод, иначе оригинал */}
       {(listing.title_ru ?? listing.title_raw) && (
-        <Section>
-          <Cell after={<b>{listing.title_ru ?? listing.title_raw}</b>}>
-            Название
-          </Cell>
-        </Section>
+        <section className="panel">
+          <div className="info-row">
+            <span className="info-row__label">Название с источника</span>
+            <span className="info-row__value">{listing.title_ru ?? listing.title_raw}</span>
+          </div>
+        </section>
       )}
 
       {/* AI-анализ стоимости (монетизация: 1/нед бесплатно, далее Pro) */}
-      <Section header="🤖 AI-анализ цены">
+      <section className="panel">
+        <h3>🤖 AI-анализ цены</h3>
         {analyzing ? (
           <div className="analysis">
             <div className="analysis__loading">
@@ -234,10 +257,8 @@ export function ListingScreen() {
           <div className="analysis analysis--locked">
             🔒 Бесплатный разбор этой машины на этой неделе уже использован —
             он доступен снова через несколько дней.
-            <Button
-              size="s"
-              mode="filled"
-              stretched
+            <button
+              className="btn btn--primary btn--block"
               style={{ marginTop: 10 }}
               onClick={() => {
                 haptic();
@@ -245,7 +266,7 @@ export function ListingScreen() {
               }}
             >
               ⚡ Безлимит в Pro
-            </Button>
+            </button>
           </div>
         ) : (
           <div className="analysis">
@@ -253,59 +274,57 @@ export function ListingScreen() {
               Нейросеть сравнит цену с рынком: сопоставимые объявления, история
               цены, вердикт и факторы.
             </div>
-            <Button
-              size="s"
-              mode="filled"
-              stretched
+            <button
+              className="btn btn--primary btn--block"
+              style={{ marginTop: 10 }}
               onClick={() => void runAnalysis()}
             >
               🤖 Анализировать (1 бесплатно в неделю)
-            </Button>
+            </button>
           </div>
         )}
-      </Section>
+      </section>
 
       {/* История цен (PLAN.md, фаза 4): точки listing_price_history, новые сверху */}
       {listing.price_history && listing.price_history.length > 1 && (
-        <Section header="История цен">
+        <section className="panel">
+          <h3>История цен</h3>
           {[...listing.price_history].reverse().map((p, i) => (
-            <Cell
-              key={`${p.recorded_at}-${i}`}
-              after={
+            <div className="info-row" key={`${p.recorded_at}-${i}`}>
+              <span className="info-row__label">
+                {new Date(p.recorded_at).toLocaleDateString("ru")}
+                {i === 0 ? " · текущая" : ""}
+              </span>
+              <span className="info-row__value">
                 <b>
                   {p.price.toLocaleString("ru")} {p.currency ?? ""}
                 </b>
-              }
-            >
-              {new Date(p.recorded_at).toLocaleDateString("ru")}
-              {i === 0 ? " · текущая" : ""}
-            </Cell>
+              </span>
+            </div>
           ))}
-        </Section>
+        </section>
       )}
       {listing.is_active === false && (
-        <Placeholder
-          header="🔴 Исчезло с продажи"
-          description="Объявления больше нет на источнике"
-        />
+        <div className="state">
+          <div className="state__emoji">🔴</div>
+          <div className="state__title">Исчезло с продажи</div>
+          <div className="state__text">Объявления больше нет на источнике</div>
+        </div>
       )}
 
       {/* CTA-блок: primary один — «Открыть у источника» (e-commerce стандарт) */}
-      <Button
-        size="l"
-        mode="filled"
-        before={<ExternalLink size={18} />}
+      <button
+        className="btn btn--primary btn--block"
         onClick={() => {
           haptic();
           window.open(listing.url, "_blank");
         }}
       >
+        <ExternalLink size={18} />
         Открыть у источника
-      </Button>
-      <Button
-        size="l"
-        mode="outline"
-        before={<Truck size={18} />}
+      </button>
+      <button
+        className="btn btn--block"
         onClick={() => {
           haptic();
           navigate(
@@ -313,25 +332,20 @@ export function ListingScreen() {
           );
         }}
       >
+        <Truck size={18} />
         Доставка и растаможка
-      </Button>
-      <Button
-        size="l"
-        mode="outline"
-        before={
-          <Heart
-            size={18}
-            fill={favorited ? "var(--accent)" : "none"}
-            color={favorited ? "var(--accent)" : undefined}
-          />
-        }
-        onClick={() => void toggleFavorite()}
-      >
+      </button>
+      <button className="btn btn--block" onClick={() => void toggleFavorite()}>
+        <Heart
+          size={18}
+          fill={favorited ? "var(--accent)" : "none"}
+          color={favorited ? "var(--accent)" : undefined}
+        />
         {favorited ? "В избранном" : "В избранное"}
-      </Button>
-      <Button mode="plain" size="l" onClick={() => navigate(-1)}>
+      </button>
+      <button className="btn btn--block" onClick={() => navigate(-1)}>
         Назад
-      </Button>
+      </button>
       </div>
 
       {/* Sticky-CTA на мобиле: цена + избранное + главное действие под пальцем */}

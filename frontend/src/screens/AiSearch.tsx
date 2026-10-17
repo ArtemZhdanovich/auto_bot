@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@telegram-apps/telegram-ui";
 
 import { aiFinalize, aiMessage, aiReset, type AiReply } from "../api/ai";
 
@@ -118,9 +117,9 @@ export function AiSearchScreen() {
 
       {last?.finalize && (
         <div className="ai-chat__finalize">
-          <Button size="l" stretched loading={busy} onClick={finalize}>
-            🔎 Запустить поиск
-          </Button>
+          <button className="btn btn--primary btn--block" disabled={busy} onClick={finalize}>
+            {busy ? "Запускаю…" : "🔎 Запустить поиск"}
+          </button>
         </div>
       )}
 
@@ -141,16 +140,21 @@ export function AiSearchScreen() {
           rows={2}
         />
         <div className="ai-chat__composer-actions">
-          <Button size="s" stretched loading={busy} disabled={!input.trim()} onClick={() => void send(input)}>
-            Отправить
-          </Button>
-          <Button mode="outline" size="s" onClick={() => void reset()}>
+          <button
+            className="btn btn--primary"
+            style={{ flex: 1 }}
+            disabled={busy || !input.trim()}
+            onClick={() => void send(input)}
+          >
+            {busy ? "…" : "Отправить"}
+          </button>
+          <button className="btn" onClick={() => void reset()}>
             Сброс
-          </Button>
+          </button>
         </div>
-        <Button mode="plain" size="s" onClick={() => navigate("/filters")}>
+        <button className="ai-chat__link" onClick={() => navigate("/filters")}>
           Настроить уведомления вручную →
-        </Button>
+        </button>
       </div>
     </div>
   );
