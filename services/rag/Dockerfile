@@ -31,6 +31,11 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/alembic.ini ./
 COPY --from=builder --chown=app:app /app/migrations ./migrations
+# rag_core нужен в рантайме: миграции (env.py) импортируют его; rag_worker/rag_api —
+# editable-установка ссылается на /app, каталоги должны существовать в рантайме
+COPY --from=builder --chown=app:app /app/rag_core ./rag_core
+COPY --from=builder --chown=app:app /app/rag_worker ./rag_worker
+COPY --from=builder --chown=app:app /app/rag_api ./rag_api
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1

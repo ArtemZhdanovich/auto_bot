@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # ORM metadata for autogenerate.
-from infrastructure.repositories import Base  # noqa: E402
+from rag_core.infrastructure.repositories import Base  # noqa: E402
 
 config = context.config
 
@@ -25,7 +25,7 @@ def _database_url() -> str:
     url = os.environ.get("POSTGRES_DSN")
     if url:
         return url
-    from config import Settings  # requires DEEPSEEK_API_KEY / JWT_SECRET in .env
+    from rag_core.config import Settings  # requires DEEPSEEK_API_KEY / JWT_SECRET in .env
 
     return Settings().postgres_dsn
 

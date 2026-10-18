@@ -188,4 +188,7 @@ def translate_client_from_settings(redis: Redis | None = None) -> TranslateClien
         timeout=s.translate_timeout_sec,
         cache_ttl=s.translate_cache_ttl_sec,
         redis=redis,
+        # Docker Desktop: embedded-DNS/сеть флапает — 2 попыток мало, иначе
+        # батч целиком уходит в None и падает в circuit breaker на 5 минут
+        max_retries=4,
     )

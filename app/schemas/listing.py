@@ -113,6 +113,8 @@ class ListingOut(BaseModel):
     # Перевод тайтла (PLAN.md, фаза 5): оригинал с источника + перевод (NLLB)
     title_raw: Optional[str] = None
     title_ru: Optional[str] = None
+    # Язык оригинала (ISO-код) — показываем под тайтлом, если title_ru != title_raw
+    source_language: Optional[str] = None
 
 
 class ListingListOut(BaseModel):

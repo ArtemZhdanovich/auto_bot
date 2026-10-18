@@ -46,6 +46,32 @@
   скачан.
 - **Проверки:** сьют 618 passed (+4: heartbeat ×2, doctor-лок ×2), vitest
   88/88, tsc чист, ruff чист. `docker compose config` валиден.
+- **Запуск и живые правки (стек поднят, все сервисы healthy):** translate —
+  transformers v5 убрал pipeline «translation» → пин `transformers>=4.44,<5`;
+  rag — `migrations/env.py` импортировал несуществующий top-level
+  `infrastructure` → `rag_core.infrastructure.repositories`; в рантайм-стейдж
+  докерфайла добавлены COPY rag_core/rag_worker/rag_api (editable-установка
+  ссылается на /app). rag_worker/rag_api/translate healthcheck —
+  `start_period: 300s` (первая загрузка весов e5/NLLB с HF занимает минуты,
+  иначе контейнер помечается unhealthy). miniapp — `wget http://127.0.0.1/`
+  (localhost резолвится в ::1, nginx слушает только IPv4). MinIO: quay-зеркало
+  официального образа закрыто (401) — остались на bitnamilegacy, named-volume
+  `auto_bot_minio_data` разово chown на 1001:1001 (bitnami run-as non-root).
+  `.env`: `RAG_LLM_PROVIDER=glm-5-turbo` → `glm` (pydantic-валидация провайдера;
+  модель осталась `glm-5-turbo`). `ListingOut` + `source_language` (колонка
+  была в ORM, забыли в схеме — фронт ждёт её для показа языка тайтла).
+  Итог: 14/14 контейнеров healthy, one-shot миграции exit 0; смоук
+  `POST /translate` → 200 с переводом; openapi отдаёт updated_at/
+  last_seen_at/price_changed_at/source_language. Полный pytest 618 passed.
+  HF-токен (опционально): без HF_TOKEN загрузка моделей медленная и
+  rate-limited — можно добавить `HF_TOKEN` в .env и пробросить в
+  translate/rag_worker.
+- **Инцидент «вебапп не открывается»:** широкий `docker compose up -d` без
+  `--profile` поднял gateway (micro), а у него сетевой алиас `backend` — DNS
+  сети стал отдавать два IP на имя `backend` round-robin, и половина запросов
+  nginx→API уходила в шлюз без каталога (`service 'catalog' unavailable` →
+  502). Правило из №60 подтверждено: строго один профиль; gateway погашен
+  (`docker compose stop gateway`), `/api/listings` стабильно 200.
 
 ## 64. Квота AI «за выдачу результата» вместо «за сообщение» (2026-10-17)
 

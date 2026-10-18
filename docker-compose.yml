@@ -145,8 +145,9 @@ services:
     environment:
       NG_HOST_IP: ${LAN_IP:-127.0.0.1}   # LAN-IP хоста → SAN сертификата
     healthcheck:
-      # nginx:alpine — busybox wget
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      # nginx:alpine — busybox wget; 127.0.0.1 явно: localhost резолвится в ::1,
+      # а nginx слушает только IPv4
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -316,8 +317,10 @@ services:
       - qdrant_storage:/qdrant/storage
 
   minio:
-    # minio/minio удалён из Docker Hub (2025) — рабочий образ bitnamilegacy;
-    # при желании заменяется через MINIO_IMAGE в .env
+    # minio/minio удалён из Docker Hub (2025), quay-зеркало закрыто (401) —
+    # рабочий образ bitnamilegacy (uid 1001); заменяется через MINIO_IMAGE в .env.
+    # Если named-volume minio_data создан другим образом (root), сделать разово:
+    #   docker run --rm -v auto_bot_minio_data:/data alpine chown -R 1001:1001 /data
     image: ${MINIO_IMAGE:-bitnamilegacy/minio:latest}
     command: server /data --console-address ":9001"
     healthcheck:
@@ -397,6 +400,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+      # первая загрузка embedding-модели с HF может занять минуты — не считать unhealthy
+      start_period: 300s
 
   rag_api:
     build: ./services/rag
@@ -438,9 +443,16 @@ services:
       TRANSLATE_MODEL: ${TRANSLATE_MODEL:-facebook/nllb-200-distilled-600M}
       OMP_NUM_THREADS: "2"
       TOKENIZERS_PARALLELISM: "false"
-      TRANSLATE_MAX_RSS_MB: "2600"
-    mem_limit: 3g
-    memswap_limit: 3g
+      # Порог должен быть ВЫШЕ легитимного пика модель+инференс (~2.9ГБ на
+      # батче 32), иначе сторож зациклит рестарты (было 30 рестартов/3ч):
+      # ловим только реальную утечку сверх пика.
+      TRANSLATE_MAX_RSS_MB: "2950"
+    mem_limit: 3500m
+    memswap_limit: 3500m
+    volumes:
+      # Кэш весов NLLB (~2.4ГБ): без volume каждая загрузка после рестарта
+      # (в т.ч. по RSS-сторожу) перекачивала модель с HF заново
+      - hf_cache:/srv/.hf
     ports:
       - "8200:8200"
     restart: unless-stopped
@@ -449,6 +461,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+      # прогрев NLLB (~30с) + первая загрузка весов из HF — не считать unhealthy
+      start_period: 300s
 
 
 volumes:
@@ -457,3 +471,4 @@ volumes:
   pg_data:
   redis_data:
   rabbitmq_data:
+  hf_cache:
