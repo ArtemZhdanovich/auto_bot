@@ -14,6 +14,8 @@ import type { Listing } from "../api/types";
 import { getRegion, priceChain, toUsd } from "../lib/fx";
 import { VERDICT_LABEL, deltaPct, fairPosition, type AnalysisData } from "../lib/analysis";
 import { PriceChart } from "../ui/PriceChart";
+import { InspectionSection } from "../components/Inspection";
+import type { InspectionReport } from "../lib/inspection";
 
 export function ListingScreen() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +25,7 @@ export function ListingScreen() {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [quotaHit, setQuotaHit] = useState(false);
+  const [inspection, setInspection] = useState<InspectionReport | null>(null);
   const navigate = useNavigate();
   const toast = useToast();
   const loginPrompt = useLoginPrompt();
@@ -34,6 +37,10 @@ export function ListingScreen() {
     api<{ favorited: boolean }>(`/favorites/${id}`)
       .then((r) => setFavorited(r.favorited))
       .catch(() => undefined); // вне Telegram — без избранного
+    // Осмотр (0018): если отчёта нет — блок просто не показываем (404 молча)
+    api<InspectionReport>(`/listings/${id}/inspection`)
+      .then(setInspection)
+      .catch(() => undefined);
     // Кэш последнего разбора (без LLM): если есть — сразу график.
     // Гостю аналитика недоступна — не запрашиваем вовсе.
     if (!isGuest()) {
@@ -300,6 +307,14 @@ export function ListingScreen() {
           </div>
         )}
       </section>
+
+      {/* Осмотр (миграция 0018): карта повреждений + чек-лист, только если есть отчёт */}
+      {inspection && (
+        <section className="panel">
+          <h3>🔍 Осмотр</h3>
+          <InspectionSection report={inspection} />
+        </section>
+      )}
 
       {/* История цен (PLAN.md, фаза 4): точки listing_price_history, новые сверху */}
       {listing.price_history && listing.price_history.length > 1 && (

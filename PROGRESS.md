@@ -1501,3 +1501,55 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   Живая проверка: лот 231 (encar 42935199) → sedan/diesel/automatic/2.0/blue;
   `?engine_volume_min=2.0&engine_volume_max=2.0` → total=1. Тест-стенд —
   то же, миграция прошла.
+
+## 61. Осмотр: карта повреждений + чек-лист на PDP (миграция 0018) (2026-10-17)
+
+- **Исследование encar (доделано):** в бандле fem.encar.com найдены реальные
+  пути — `readside/diagnosis/vehicle/{id}`, `readside/inspection/vehicle/{id}`,
+  `readside/record/vehicle/{id}/open?vehicleNo=...` (базовый URL пустой =
+  same-origin, fem отдаёт SPA-fallback; api.encar.io мёртв). Все отдают 404 —
+  диагностика encar (`view.encarDiagnosis`) закрыта авторизацией (withAllToken,
+  гостевого токена в бандле нет). Вывод: structured-парсинг заблокирован.
+- **Решение — свои отчёты осмотра (как у avtokorea.by, где осмотры тоже
+  ручные):** таблица `inspection_reports` (миграция 0018, применена на стенд):
+  listing_id unique FK, source (manual|encar — слот под будущий парсинг),
+  inspector, inspected_at, grade (excellent/good/fair/poor), summary,
+  marks JSONB [{zone,type,note}], items JSONB [{key,status,note}].
+- **Справочники** в `app/schemas/listing.py`: 14 зон кузова (BODY_ZONES),
+  7 типов дефектов (MARK_TYPES), 12 агрегатов чек-листа (ITEM_KEYS),
+  4 статуса (ok/warn/defect/na). Ключи синхронизированы с фронтовым
+  `frontend/src/lib/inspection.ts` (там же русские лейблы, цвета, severity).
+- **API** (app/api/listings.py): `GET /api/listings/{id}/inspection` (404 если
+  нет — фронт молча скрывает блок), `PUT` — только role=admin (upsert).
+  ⚠️ Искали по PK session.get → фикс: select по listing_id (PK у таблицы id).
+- **UI** (frontend/src/components/Inspection.tsx): SVG-схема кузова вид
+  сверху (14 зон), зоны с дефектами залиты цветом по типу (replace > crack >
+  dent > rust > repaint > glass > scratch), тап по зоне — детали; легенда;
+  чек-лист с ✅⚠️❌➖ и заметками; бейдж грейда; summary. Секция «🔍 Осмотр»
+  на PDP (Listing.tsx) после блока анализа. CSS — `.inspection__*` в index.css.
+- **Демо:** отчёт осмотра вставлен для лота 231 (проверено GET 200 в API).
+- **Счётчики: 602 pytest (+4 inspection), 88 vitest (+3 InspectionSection),
+  tsc/ruff чисто.**
+- **Дальше:** деплой прода (build miniapp + backend, миграция 0018); по
+  желанию — форма ручного ввода осмотра для админа (сейчас только PUT API).
+
+## 2026-10-17: фикс «Ссылка входа устарела» (site login через бота)
+
+- **Симптом:** вход на сайте через Telegram-бота падал с «⌛ Ссылка входа
+  устарела — запросите новую на сайте»; вход в Mini App (initData) работал.
+- **Причина:** одновременно были подняты СЕРВИСЫ ОБОИХ профилей compose —
+  mono `backend` (:8000) и micro `gateway`. У обоих сетевой алиас `backend`,
+  Docker DNS отвечал двумя IP (round-robin): сайт создавал `tglogin:{code}`
+  в Redis на одном инстансе, а confirm от бота прилетал на другой (там ключа
+  нет → 404 → бот отвечает «устарела»). Плюс у gateway REDIS_URL был
+  `redis://localhost:6379/0` (из .env, без compose-оверрайда) — внутри
+  контейнера localhost это он сам, Redis'а там нет.
+- **Фикс:** `docker compose stop gateway` (микросервисы и mono не должны
+  работать одновременно — это взаимоисключающие профили), restart bot +
+  miniapp (сброс DNS-кэша nginx/контейнера).
+- **Проверено E2E:** link → confirm (200 ok, X-Internal-Token) →
+  GET status = JWT-пара + user → повторный GET = expired (одноразовость).
+  Тестовый юзер из БД удалён.
+- **Правило на будущее:** поднимать строго один профиль
+  (`--profile mono` ИЛИ `--profile micro`); если нужен micro — погасить mono
+  и прописать микросервисам REDIS_URL через compose environment.

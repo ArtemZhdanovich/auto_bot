@@ -114,3 +114,69 @@ class ListingOut(BaseModel):
 class ListingListOut(BaseModel):
     total: int
     items: list[ListingOut]
+
+
+# --- Осмотр (карта повреждений + чек-лист, миграция 0018) -------------------
+
+# Зоны кузова (вид сверху) — ключи совпадают с SVG-зонами на фронте.
+BODY_ZONES = (
+    "front_bumper", "hood", "roof", "trunk",
+    "fender_fl", "fender_fr", "fender_rl", "fender_rr",
+    "door_fl", "door_fr", "door_rl", "door_rr",
+    "rocker_l", "rocker_r",
+)
+
+# Типы повреждений на карте.
+MARK_TYPES = ("scratch", "dent", "repaint", "replace", "rust", "crack", "glass")
+
+# Агрегаты чек-листа.
+ITEM_KEYS = (
+    "engine", "transmission", "suspension", "brakes", "steering",
+    "electronics", "interior", "optics", "glass", "tires", "ac", "leaks",
+)
+
+ITEM_STATUSES = ("ok", "warn", "defect", "na")
+
+GRADES = ("excellent", "good", "fair", "poor")
+
+
+class InspectionMark(BaseModel):
+    """Отметка на карте кузова."""
+
+    zone: Literal[tuple(BODY_ZONES)]  # type: ignore[valid-type]
+    type: Literal[tuple(MARK_TYPES)]  # type: ignore[valid-type]
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class InspectionItem(BaseModel):
+    """Пункт чек-листа: агрегат + статус."""
+
+    key: Literal[tuple(ITEM_KEYS)]  # type: ignore[valid-type]
+    status: Literal[tuple(ITEM_STATUSES)]  # type: ignore[valid-type]
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class InspectionReportIn(BaseModel):
+    """Создание/замена отчёта осмотра (только admin)."""
+
+    source: Literal["manual", "encar"] = "manual"
+    inspector: Optional[str] = Field(default=None, max_length=120)
+    inspected_at: Optional[datetime] = None
+    grade: Optional[Literal[tuple(GRADES)]] = None  # type: ignore[valid-type]
+    summary: Optional[str] = Field(default=None, max_length=1000)
+    marks: list[InspectionMark] = Field(default_factory=list, max_length=60)
+    items: list[InspectionItem] = Field(default_factory=list, max_length=40)
+
+
+class InspectionReportOut(BaseModel):
+    """Отчёт осмотра для PDP."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    source: str
+    inspector: Optional[str] = None
+    inspected_at: Optional[datetime] = None
+    grade: Optional[str] = None
+    summary: Optional[str] = None
+    marks: list[InspectionMark] = Field(default_factory=list)
+    items: list[InspectionItem] = Field(default_factory=list)

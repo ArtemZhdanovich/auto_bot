@@ -31,8 +31,8 @@ main {
   --font-xs: 12px;
   --font-sm: 14px;
   --font-md: 16px;
-  --font-lg: 20px;
-  --font-xl: 24px;
+  --font-lg: 18px;
+  --font-xl: 22px;
   --font-2xl: 32px;
 
   --bg: var(--tg-theme-bg-color, #ffffff);
@@ -258,12 +258,12 @@ main {
 }
 .chip {
   flex-shrink: 0;
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: var(--radius-full);
   border: 1px solid var(--tg-theme-hint-color, #707579);
   background: transparent;
   color: var(--text);
-  font-size: var(--font-sm);
+  font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -770,12 +770,12 @@ main {
 }
 .feed-toggle {
   flex: none;
-  padding: 8px 14px;
+  padding: 6px 12px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-strong);
   background: var(--bg-secondary);
   color: var(--text);
-  font-size: var(--font-sm);
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -794,12 +794,12 @@ main {
 /* Сортировка ленты (PLP-стандарт): стилизована как .feed-toggle */
 .feed-sort {
   flex: none;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-strong);
   background: var(--bg-secondary);
   color: var(--text);
-  font-size: var(--font-sm);
+  font-size: 13px;
   font-weight: 600;
   appearance: none;
   cursor: pointer;
@@ -809,29 +809,43 @@ main {
 .feed-panel {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px 12px;
+  gap: 8px 10px;
   margin-top: 10px;
-  padding: 12px;
+  padding: 10px;
   border-radius: var(--radius-lg);
   background: var(--bg-secondary);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-sm);
+  /* Панель внутри sticky-шапки: без лимита по высоте низ (кнопки
+     «Применить/Сбросить») оказывается за экраном и недостижим. */
+  max-height: calc(100vh - 150px);
+  max-height: calc(100dvh - 150px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.feed-panel__pair {
+  min-width: 0; /* grid-элементы не должны распирать панель шире экрана */
 }
 .feed-panel__field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: var(--font-xs);
+  gap: 3px;
+  min-width: 0;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 .feed-panel__field input,
 .feed-panel__field select {
-  padding: 9px 10px;
+  width: 100%;
+  min-width: 0; /* иначе input не сжимается ниже intrinsic-ширины → горизонтальный скролл */
+  box-sizing: border-box;
+  padding: 7px 9px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-strong);
   background: var(--bg);
   color: var(--text);
-  font-size: var(--font-sm);
+  font-size: 13px;
 }
 .feed-panel__pair {
   display: grid;
@@ -910,12 +924,12 @@ main {
   transform: scale(0.94);
 }
 .feed-header__title {
-  font-size: var(--font-lg);
+  font-size: 17px;
   font-weight: 700;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 .feed-header__counter {
-  font-size: var(--font-sm);
+  font-size: 12px;
   color: var(--text-secondary);
   margin-bottom: var(--space-2);
 }
@@ -2237,3 +2251,148 @@ main {
 .fav-list .filter-item:hover .filter-item__name {
   color: var(--accent);
 }
+
+/* ============================================================
+   Осмотр (миграция 0018): SVG-карта кузова + чек-лист
+   ============================================================ */
+.inspection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.inspection__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.inspection__grade {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+}
+.inspection__grade--excellent { background: #dcfce7; }
+.inspection__grade--good { background: #e0f2fe; }
+.inspection__grade--fair { background: #fef9c3; }
+.inspection__grade--poor { background: #fee2e2; }
+
+.inspection__meta {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+
+.inspection__map {
+  width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
+  display: block;
+}
+
+.inspection__zone {
+  fill: var(--bg-secondary);
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: fill 0.15s ease, opacity 0.15s ease;
+}
+.inspection__zone:hover { opacity: 0.85; }
+.inspection__zone--sel { stroke: var(--accent); stroke-width: 3; }
+
+.inspection__axis {
+  font-size: 13px;
+  font-weight: 700;
+  fill: var(--text-secondary);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.inspection__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+.inspection__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.inspection__legend-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.inspection__zone-details {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  font-size: var(--font-sm);
+}
+.inspection__zone-title {
+  font-weight: 700;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-1);
+}
+.inspection__close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-md);
+  padding: 0 4px;
+}
+.inspection__zone-ok { color: var(--text-secondary); }
+.inspection__zone-mark { margin-top: 2px; }
+
+.inspection__hint {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.inspection__checklist-head {
+  font-weight: 700;
+  font-size: var(--font-sm);
+  margin-bottom: var(--space-1);
+}
+.inspection__checklist-badge {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.inspection__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-sm);
+}
+.inspection__item:last-child { border-bottom: none; }
+.inspection__item--defect .inspection__item-label {
+  color: var(--destructive);
+  font-weight: 600;
+}
+.inspection__item-note {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  margin-left: auto;
+  text-align: right;
+}
+
+.inspection__summary {
+  font-size: var(--font-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+

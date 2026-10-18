@@ -422,3 +422,32 @@ class AdminAction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class InspectionReport(Base):
+    """Отчёт осмотра (миграция 0018): карта повреждений + чек-лист.
+
+    Один отчёт на объявление. marks/items — JSONB-списки (схема гибкая,
+    валидируется на уровне Pydantic-схем API, не БД).
+    """
+
+    __tablename__ = "inspection_reports"
+    __table_args__ = (Index("idx_inspection_reports_listing", "listing_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    listing_id: Mapped[int] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    source: Mapped[str] = mapped_column(Text, default="manual")  # manual / encar
+    inspector: Mapped[str | None] = mapped_column(Text)
+    inspected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    grade: Mapped[str | None] = mapped_column(Text)  # excellent / good / fair / poor
+    summary: Mapped[str | None] = mapped_column(Text)
+    marks: Mapped[list[Any]] = mapped_column(JSONB, default=list)  # [{zone, type, note}]
+    items: Mapped[list[Any]] = mapped_column(JSONB, default=list)  # [{key, status, note}]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

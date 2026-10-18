@@ -6,9 +6,15 @@ import re
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import case, func, select
 
-from app.core.deps import SessionDep
-from app.db.models import Listing, ListingPriceHistory
-from app.schemas.listing import ListingListOut, ListingOut, PricePointOut
+from app.core.deps import CurrentUserDep, SessionDep
+from app.db.models import InspectionReport, Listing, ListingPriceHistory
+from app.schemas.listing import (
+    InspectionReportIn,
+    InspectionReportOut,
+    ListingListOut,
+    ListingOut,
+    PricePointOut,
+)
 from app.services.analytics import EVENT_SEARCH_COMPLETED, track
 from app.services.fetch import enrich_listing_specs
 
@@ -208,3 +214,57 @@ async def get_listing(
         for row in result.all()
     ]
     return out
+
+
+# --- Осмотр (миграция 0018): карта повреждений + чек-лист --------------------
+
+
+@router.get("/{listing_id}/inspection", response_model=InspectionReportOut)
+async def get_inspection(listing_id: int, session: SessionDep) -> InspectionReportOut:
+    """Отчёт осмотра для PDP; 404, если осмотра ещё нет."""
+    result = await session.execute(
+        select(InspectionReport).where(InspectionReport.listing_id == listing_id)
+    )
+    report = result.scalar_one_or_none()
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found"
+        )
+    return InspectionReportOut.model_validate(report)
+
+
+@router.put("/{listing_id}/inspection", response_model=InspectionReportOut)
+async def upsert_inspection(
+    listing_id: int,
+    payload: InspectionReportIn,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> InspectionReportOut:
+    """Создать/заменить отчёт осмотра. Только admin (ручной осмотр)."""
+    if getattr(user, "role", None) != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin only"
+        )
+    listing = await session.get(Listing, listing_id)
+    if listing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found"
+        )
+    result = await session.execute(
+        select(InspectionReport).where(InspectionReport.listing_id == listing_id)
+    )
+    report = result.scalar_one_or_none()
+    if report is None:
+        report = InspectionReport(listing_id=listing_id)
+        session.add(report)
+    report.source = payload.source
+    report.inspector = payload.inspector
+    report.inspected_at = payload.inspected_at
+    report.grade = payload.grade
+    report.summary = payload.summary
+    report.marks = [m.model_dump() for m in payload.marks]
+    report.items = [i.model_dump() for i in payload.items]
+    report.updated_at = func.now()
+    await session.commit()
+    await session.refresh(report)
+    return InspectionReportOut.model_validate(report)

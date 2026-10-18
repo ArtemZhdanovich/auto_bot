@@ -379,3 +379,109 @@ def test_norm_url_variants():
     assert _norm_url("HTTPS://WWW.Encar.com/car/1/") == "encar.com/car/1"
     assert _norm_url("http://m.encar.com/car/1") == "encar.com/car/1"
     assert _norm_url("  encar.com/car/1  ") == "encar.com/car/1"
+
+
+# ---------- Осмотр (миграция 0018): карта повреждений + чек-лист ----------
+
+
+@pytest.mark.asyncio
+async def test_inspection_404_when_absent(client):
+    """Нет отчёта осмотра — 404 (фронт молча скрывает блок)."""
+    http, _session = client
+    resp = await http.get("/api/listings/42/inspection")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_inspection_put_forbidden_for_non_admin(client):
+    """PUT осмотра — только admin (ручной осмотр)."""
+    http, _session = client
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        telegram_id=1, role="buyer", is_active=True
+    )
+    try:
+        resp = await http.put(
+            "/api/listings/42/inspection", json={"marks": [], "items": []}
+        )
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+
+
+@pytest.mark.asyncio
+async def test_inspection_put_404_without_listing(client):
+    """Несуществующее объявление — 404 даже у админа."""
+    http, _session = client
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        telegram_id=1, role="admin", is_active=True
+    )
+    try:
+        resp = await http.put("/api/listings/42/inspection", json={})
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+
+
+@pytest.mark.asyncio
+async def test_inspection_upsert_roundtrip(client):
+    """Админ создаёт отчёт: marks/items сохраняются, схема валидируется."""
+    from typing import Any
+
+    http, session = client
+    listing = SimpleNamespace(id=42, source="encar")
+    report_holder: dict[str, Any] = {}
+
+    async def fake_get(model: Any, pk: Any) -> Any:
+        if model.__name__ == "Listing":
+            return listing if pk == 42 else None
+        if model.__name__ == "InspectionReport":
+            return report_holder.get("report")
+        return None
+
+    async def fake_refresh(obj: Any) -> None:
+        return None
+
+    session.get = fake_get  # type: ignore[method-assign]
+    session.refresh = fake_refresh  # type: ignore[method-assign]
+    real_add = session.add
+
+    def add(obj: Any) -> None:
+        real_add(obj)
+        if obj.__class__.__name__ == "InspectionReport":
+            report_holder["report"] = obj
+
+    session.add = add  # type: ignore[method-assign]
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        telegram_id=1, role="admin", is_active=True
+    )
+    try:
+        payload = {
+            "source": "manual",
+            "inspector": "Иван",
+            "grade": "good",
+            "summary": "Машина в хорошем состоянии",
+            "marks": [
+                {"zone": "front_bumper", "type": "scratch", "note": "скол на кромке"},
+                {"zone": "door_rl", "type": "dent"},
+            ],
+            "items": [
+                {"key": "engine", "status": "ok"},
+                {"key": "brakes", "status": "warn", "note": "передние колодки"},
+            ],
+        }
+        resp = await http.put("/api/listings/42/inspection", json=payload)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["grade"] == "good"
+        assert len(body["marks"]) == 2
+        assert body["marks"][0]["zone"] == "front_bumper"
+        assert body["items"][1]["status"] == "warn"
+        assert session.committed is True
+
+        # Валидация: неизвестная зона — 422
+        bad = dict(payload)
+        bad["marks"] = [{"zone": "wheel", "type": "scratch"}]
+        resp = await http.put("/api/listings/42/inspection", json=bad)
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: TEST_USER

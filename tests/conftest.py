@@ -116,6 +116,10 @@ class FakeSession:
                 or getattr(obj, "telegram_id", None) == pk
                 or getattr(obj, "source_name", None) == pk
                 or getattr(obj, "name", None) == pk  # Source.name и др. строковые PK
+                or (
+                    getattr(obj, "listing_id", None) is not None
+                    and getattr(obj, "listing_id", None) == pk
+                )  # InspectionReport и др. с unique listing_id
             ):
                 return obj
         return None
