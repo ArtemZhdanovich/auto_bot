@@ -53,12 +53,12 @@ upserted AS (
     INSERT INTO listings (
         source, source_id, url, make, model, year, price, currency,
         mileage_km, vin, images, schema_version, parsed_at,
-        body_type, fuel, transmission, drive,
+        body_type, fuel, transmission, drive, engine_volume, color,
         content_hash, is_active, first_seen_at, last_seen_at, title_raw
     ) VALUES (
         :source, :source_id, :url, :make, :model, :year, :price, :currency,
         :mileage_km, :vin, :images, :schema_version, :parsed_at,
-        :body_type, :fuel, :transmission, :drive,
+        :body_type, :fuel, :transmission, :drive, :engine_volume, :color,
         :content_hash, TRUE, now(), now(), :title_raw
     )
     ON CONFLICT ON CONSTRAINT uq_listings_source_source_id DO UPDATE SET
@@ -69,7 +69,7 @@ upserted AS (
         price = EXCLUDED.price,
         currency = EXCLUDED.currency,
         mileage_km = EXCLUDED.mileage_km,
-        vin = EXCLUDED.vin,
+        vin = COALESCE(EXCLUDED.vin, listings.vin),
         images = EXCLUDED.images,
         schema_version = EXCLUDED.schema_version,
         parsed_at = EXCLUDED.parsed_at,
@@ -77,6 +77,8 @@ upserted AS (
         fuel = COALESCE(EXCLUDED.fuel, listings.fuel),
         transmission = COALESCE(EXCLUDED.transmission, listings.transmission),
         drive = COALESCE(EXCLUDED.drive, listings.drive),
+        engine_volume = COALESCE(EXCLUDED.engine_volume, listings.engine_volume),
+        color = COALESCE(EXCLUDED.color, listings.color),
         content_hash = EXCLUDED.content_hash,
         is_active = TRUE,
         disappeared_at = NULL,
@@ -142,6 +144,8 @@ def _to_row(item: UnifiedListing) -> dict:
         "transmission": normalize_transmission(item.transmission)
         or _clean_value(item.transmission),
         "drive": normalize_drive(item.drive) or _clean_value(item.drive),
+        "engine_volume": normalize_engine_volume(item.engine_volume),
+        "color": normalize_color(item.color),
         "images": [str(i) for i in item.images],
         "schema_version": item.schema_version,
         "parsed_at": item.parsed_at,
@@ -339,28 +343,47 @@ async def mark_stale(
     return ids
 
 
-# --- Обогащение из detail encar (миграция 0017) ------------------------------
+# --- Обогащение из detail encar / kcar (миграция 0017) -----------------------
 
 # Detail API encar отдаёт спеки, которых нет в list-API: displacement (см³),
-# colorName (корейский), bodyName. Тянем лениво (PDP) — обогащаем только
-# просмотренные лоты, а не весь каталог.
-async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
-    """Догрузка кузова/топлива/КПП/объёма/цвета из detail encar.
+# colorName (корейский), bodyName. KCar detail (`bc/car-info-detail-of-ng`,
+# воспроизведено из фронтового бандла www.kcar.com chunk359): rvo с engdispmnt
+# (см³), drvgYnNm (привод, корейский), extrColorNm, vin, fuelTypecdNm,
+# trnsmsncdNm, carctgr. Тянем лениво (PDP) — обогащаем только просмотренные
+# лоты, а не весь каталог.
+_KCAR_DETAIL_URL = (
+    "https://api.kcar.com/bc/car-info-detail-of-ng"
+    "?i_sCarCd={source_id}&i_sPassYn=&i_sPosYn=&bltbdKnd=CM050"
+)
 
-    Только для encar и только если чего-то не хватает (1 запрос на лот,
-    повторные открытия PDP бесплатны). Возвращает True, если обновили.
+
+async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
+    """Догрузка спеков из detail источника (encar / kcar).
+
+    Только если чего-то не хватает (1 запрос на лот, повторные открытия PDP
+    бесплатны). Возвращает True, если обновили хоть одно поле.
     """
-    if listing.source != "encar":
-        return False
-    if all(
-        getattr(listing, field) is not None
-        for field in ("body_type", "fuel", "transmission", "engine_volume", "color")
-    ):
+    spec_fields = ("body_type", "fuel", "transmission", "engine_volume", "color")
+    if listing.source == "encar":
+        if all(getattr(listing, f) is not None for f in spec_fields):
+            return False
+        detail_url = f"https://api.encar.com/v1/readside/vehicle/{listing.source_id}"
+    elif listing.source == "kcar":
+        if all(
+            getattr(listing, f, None) is not None
+            for f in (*spec_fields, "drive", "vin")
+        ):
+            return False
+        # detail-of-ng ждёт id с префиксом EC (EC61405190); рент-лоты уже
+        # приходят с префиксом (RC148047) — их не трогаем.
+        source_id = listing.source_id
+        detail_id = f"EC{source_id}" if source_id.isdigit() else source_id
+        detail_url = _KCAR_DETAIL_URL.format(source_id=detail_id)
+    else:
         return False
 
     from app.adapters.common.http import HttpClient
 
-    detail_url = f"https://api.encar.com/v1/readside/vehicle/{listing.source_id}"
     try:
         http = HttpClient(timeout=10, max_retries=1)
         payload = await http.get_json(detail_url)
@@ -368,16 +391,32 @@ async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
         logger.warning("enrich_fetch_failed: %s: %s", listing.source_id, exc)
         return False
 
-    spec = payload.get("spec") or {}
+    if listing.source == "encar":
+        spec = payload.get("spec") or {}
+        pairs: dict[str, Any] = {
+            "body_type": normalize_body(spec.get("bodyName")),
+            "fuel": normalize_fuel(spec.get("fuelName")),
+            "transmission": normalize_transmission(spec.get("transmissionName")),
+            "engine_volume": normalize_engine_volume(spec.get("displacement")),
+            "color": normalize_color(spec.get("colorName")),
+        }
+    else:  # kcar: rvo может отсутствовать («차량정보가 없습니다») — не ошибка
+        rvo = (payload.get("data") or {}).get("rvo") or {}
+        if not rvo:
+            return False
+        pairs = {
+            "body_type": normalize_body(rvo.get("carctgr")),
+            "fuel": normalize_fuel(rvo.get("fuelTypecdNm")),
+            "transmission": normalize_transmission(rvo.get("trnsmsncdNm")),
+            "engine_volume": normalize_engine_volume(rvo.get("engdispmnt")),
+            "color": normalize_color(rvo.get("extrColorNm")),
+            "drive": normalize_drive(rvo.get("drvgYnNm")),
+            "vin": (rvo.get("vin") or "").strip() or None,
+        }
+
     updates: dict[str, Any] = {}
-    for field, value in (
-        ("body_type", normalize_body(spec.get("bodyName"))),
-        ("fuel", normalize_fuel(spec.get("fuelName"))),
-        ("transmission", normalize_transmission(spec.get("transmissionName"))),
-        ("engine_volume", normalize_engine_volume(spec.get("displacement"))),
-        ("color", normalize_color(spec.get("colorName"))),
-    ):
-        if value is not None and getattr(listing, field) is None:
+    for field, value in pairs.items():
+        if value is not None and getattr(listing, field, None) is None:
             setattr(listing, field, value)
             updates[field] = value
     if updates:

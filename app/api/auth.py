@@ -106,8 +106,8 @@ async def auth_magic_link(body: MagicLinkRequest) -> dict[str, str]:
 
 # ---------- Вход через Telegram (веб-режим): код → /start в боте → JWT ----------
 
-_LOGIN_CODE_TTL_SEC = 600  # жизнь одноразового кода входа
-_LOGIN_CONFIRM_TTL_SEC = 600  # сколько времени веб может забрать JWT после /start
+_LOGIN_CODE_TTL_SEC = 900  # жизнь одноразового кода входа
+_LOGIN_CONFIRM_TTL_SEC = 900  # сколько времени веб может забрать JWT после /start
 # (окно = TTL кода: юзер в боте может сидеть дольше пары минут)
 
 

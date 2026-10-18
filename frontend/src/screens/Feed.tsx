@@ -633,23 +633,23 @@ export function FeedScreen() {
         )}
       </div>
 
+      {!loading && error && items.length === 0 && (
+        <ErrorState description="Не удалось загрузить ленту" onRetry={retry} />
+      )}
+
+      {!loading && !error && items.length === 0 && (
+        <EmptyState
+          title="Ничего не найдено"
+          description="Попробуйте изменить фильтры"
+        />
+      )}
+
       <div className="feed-grid">
         {items.map((l) => (
           <ListingCard key={l.id} listing={l} />
         ))}
 
         {loading && <SkeletonList count={4} />}
-
-        {!loading && error && items.length === 0 && (
-          <ErrorState description="Не удалось загрузить ленту" onRetry={retry} />
-        )}
-
-        {!loading && !error && items.length === 0 && (
-          <EmptyState
-            title="Ничего не найдено"
-            description="Попробуйте изменить фильтры"
-          />
-        )}
       </div>
 
       {/* Сентинел бесконечного скролла */}

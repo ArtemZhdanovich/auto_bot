@@ -45,7 +45,7 @@ async def test_link_built_from_bot_username(tg_client, fake_redis, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["url"].startswith("https://t.me/my_auto_bot?start=login_")
-    assert body["expires_in"] == 600
+    assert body["expires_in"] == 900
     # код сохранён в redis как pending
     code = body["code"]
     assert json.loads(fake_redis.data[f"tglogin:{code}"])["status"] == "pending"

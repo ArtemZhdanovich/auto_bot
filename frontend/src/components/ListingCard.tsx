@@ -46,6 +46,20 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
       : 0;
   const gone = listing.is_active === false;
 
+  /** Все характеристики лота, что есть в БД (0016/0017): пустые — не показываем. */
+  const specItems = (
+    [
+      ["Пробег", listing.mileage_km ? `${listing.mileage_km.toLocaleString("ru")} км` : ""],
+      ["Объём", listing.engine_volume ? `${listing.engine_volume.toFixed(1)} л` : ""],
+      ["Топливо", fuelLabel(listing.fuel) ?? ""],
+      ["КПП", transmissionLabel(listing.transmission) ?? ""],
+      ["Кузов", bodyLabel(listing.body_type) ?? ""],
+      ["Привод", driveLabel(listing.drive) ?? ""],
+      ["Цвет", colorLabel(listing.color) ?? ""],
+      ["VIN", listing.vin ?? ""],
+    ] as [string, string][]
+  ).filter(([, v]) => v !== "");
+
   const onOpen = useCallback(() => {
     haptic();
     navigate(`/listing/${listing.id}`);
@@ -135,29 +149,19 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
         <div className="listing-card__price">
           {chain.local ?? chain.original ?? "—"}
         </div>
-        {/* Спек-строка (как на avtokorea.by): топливо · КПП · кузов · привод */}
-        {(fuelLabel(listing.fuel) ||
-          transmissionLabel(listing.transmission) ||
-          bodyLabel(listing.body_type) ||
-          driveLabel(listing.drive)) && (
-          <div className="listing-card__specs">
-            {[
-              fuelLabel(listing.fuel) && `⛽ ${fuelLabel(listing.fuel)}`,
-              listing.engine_volume && `🔋 ${listing.engine_volume.toFixed(1)}`,
-              transmissionLabel(listing.transmission) &&
-                `⚙️ ${transmissionLabel(listing.transmission)}`,
-              bodyLabel(listing.body_type) && `🚙 ${bodyLabel(listing.body_type)}`,
-              driveLabel(listing.drive) && `🔧 ${driveLabel(listing.drive)}`,
-              colorLabel(listing.color) && `🎨 ${colorLabel(listing.color)}`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+        {/* Спек-сетка (как на avtokorea.by): все данные лота, что есть в БД.
+            Пустые поля не рисуем — сетка схлопывается. */}
+        {specItems.length > 0 && (
+          <div className="listing-card__spec-grid">
+            {specItems.map(([label, value]) => (
+              <div key={label} className="listing-card__spec">
+                <span className="listing-card__spec-label">{label}</span>
+                <span className="listing-card__spec-value">{value}</span>
+              </div>
+            ))}
           </div>
         )}
         <div className="listing-card__meta">
-          {listing.mileage_km
-            ? `${listing.mileage_km.toLocaleString("ru")} км · `
-            : ""}
           {sourceCountry(listing.source)}
           {" · "}
           {listing.parsed_at && new Date(listing.parsed_at).toLocaleDateString("ru")}

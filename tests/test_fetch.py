@@ -337,6 +337,31 @@ class _FakeHttp:
         }
 
 
+class _FakeKcarHttp:
+    """Стаб HttpClient: detail-of-ng payload kcar без реальных запросов."""
+
+    last_url: str = ""
+
+    def __init__(self, **kw) -> None:
+        pass
+
+    async def get_json(self, url: str, **kw):
+        _FakeKcarHttp.last_url = url
+        return {
+            "data": {
+                "rvo": {
+                    "carctgr": "대형차",  # → sedan (BODY_MAP знает корейские категории)
+                    "fuelTypecdNm": "가솔린",  # → petrol
+                    "trnsmsncdNm": "오토",  # → automatic
+                    "engdispmnt": 3342,  # → 3.3 л
+                    "extrColorNm": "은회색",  # без мапа — как есть
+                    "drvgYnNm": "후륜",  # → rwd (DRIVE_MAP, корейский)
+                    "vin": "KMHGB41ABBU110600",
+                }
+            }
+        }
+
+
 @pytest.mark.asyncio
 async def test_enrich_fills_specs_from_detail(monkeypatch):
     """enrich_listing_specs: кузов/топливо/КПП/объём/цвет из detail encar."""
@@ -374,8 +399,78 @@ async def test_enrich_fills_specs_from_detail(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_enrich_skips_complete_and_non_encar(monkeypatch):
-    """Не-enrich: kcar-источник и уже заполненный encar-лот — без запросов."""
+async def test_enrich_kcar_fills_specs_and_vin(monkeypatch):
+    """enrich_listing_specs (kcar): объём/привод/цвет/VIN из detail-of-ng."""
+    import app.adapters.common.http as http_mod
+    from types import SimpleNamespace
+
+    from app.services.fetch import enrich_listing_specs
+
+    monkeypatch.setattr(http_mod, "HttpClient", _FakeKcarHttp)
+    listing = SimpleNamespace(
+        id=43,
+        source="kcar",
+        source_id="61405190",
+        body_type=None,
+        fuel=None,
+        transmission=None,
+        engine_volume=None,
+        color=None,
+        drive=None,
+        vin=None,
+    )
+    committed = []
+
+    class _Session:
+        async def commit(self):
+            committed.append(True)
+
+    changed = await enrich_listing_specs(_Session(), listing)
+    assert changed is True
+    assert listing.engine_volume == 3.3  # 3342 см³ → литры
+    assert listing.drive == "rwd"  # 후륜
+    assert listing.fuel == "petrol"  # 가솔린
+    assert listing.transmission == "automatic"  # 오토
+    assert listing.vin == "KMHGB41ABBU110600"
+    assert listing.body_type == "sedan"  # 대형차 → sedan (BODY_MAP)
+    assert committed == [True]
+    assert "car-info-detail-of-ng" in _FakeKcarHttp.last_url
+    assert "i_sCarCd=EC61405190" in _FakeKcarHttp.last_url
+
+
+@pytest.mark.asyncio
+async def test_enrich_kcar_without_rvo_is_noop(monkeypatch):
+    """kcar: пустой rvo («차량정보가 없습니다») — не ошибка, ничего не пишем."""
+    import app.adapters.common.http as http_mod
+    from types import SimpleNamespace
+
+    from app.services.fetch import enrich_listing_specs
+
+    class _EmptyHttp:
+        def __init__(self, **kw) -> None:
+            pass
+
+        async def get_json(self, url: str, **kw):
+            return {"data": {"rvo": None, "message": "차량정보가 없습니다."}}
+
+    monkeypatch.setattr(http_mod, "HttpClient", _EmptyHttp)
+    listing = SimpleNamespace(
+        id=44, source="kcar", source_id="1", body_type=None, fuel=None,
+        transmission=None, engine_volume=None, color=None, drive=None, vin=None,
+    )
+    committed = []
+
+    class _Session:
+        async def commit(self):
+            committed.append(True)
+
+    assert await enrich_listing_specs(_Session(), listing) is False
+    assert committed == []
+
+
+@pytest.mark.asyncio
+async def test_enrich_skips_complete_and_unknown_source(monkeypatch):
+    """Не-enrich: неизвестный источник и уже заполненный encar-лот — без запросов."""
     import app.adapters.common.http as http_mod
     from types import SimpleNamespace
 
@@ -397,14 +492,20 @@ async def test_enrich_skips_complete_and_non_encar(monkeypatch):
         async def commit(self):
             pass
 
-    kcar = SimpleNamespace(source="kcar", source_id="1", body_type=None, fuel=None,
-                           transmission=None, engine_volume=None, color=None)
-    assert await enrich_listing_specs(_Session(), kcar) is False
+    che = SimpleNamespace(source="che168", source_id="1", body_type=None, fuel=None,
+                          transmission=None, engine_volume=None, color=None)
+    assert await enrich_listing_specs(_Session(), che) is False
 
     full = SimpleNamespace(source="encar", source_id="2", body_type="sedan",
                            fuel="petrol", transmission="automatic",
                            engine_volume=2.0, color="blue")
     assert await enrich_listing_specs(_Session(), full) is False
+
+    full_kcar = SimpleNamespace(source="kcar", source_id="3", body_type="SUV",
+                                fuel="petrol", transmission="automatic",
+                                engine_volume=2.0, color="blue",
+                                drive="awd", vin="KMHXX")
+    assert await enrich_listing_specs(_Session(), full_kcar) is False
     assert calls == []
 
 

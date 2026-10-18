@@ -20,8 +20,10 @@ from app.ai.tools import (
 )
 from app.schemas.criteria import SearchCriteria
 from app.schemas.dialog import DialogState, Message
+from app.services.ai_quota import quota_allow, quota_consume
+from app.services.analytics import EVENT_AI_SEARCH, track
 from app.services.dialog import DialogStore, answer_faq, match_faq_topic, new_state
-from app.services.search import preview_listings
+from app.services.search import search_with_relaxation
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,10 @@ class ToolContext:
     redis: Redis
     finalize: Callable[[SearchCriteria], Awaitable[list[str]]] | None = None
     rag: RAGClient | None = None
+    # Квота AI-поиска (free: 3/день, pro: 200, business: None = ∞).
+    # Списывается ЗА ВЫДАЧУ РЕЗУЛЬТАТА (preview с вариантами / finalize),
+    # не за сообщения — иначе демо-юзер не может пообщаться (п. 8.7).
+    quota_limit: int | None = None
 
 
 @dataclass
@@ -153,15 +159,46 @@ async def _execute_tool(
             apply_patch(state, patch)
             criteria = state.criteria
         limit = int(args.get("limit", 3))
-        items = await preview_listings(ctx.session, criteria, limit=limit)
+        # «Мягкий» поиск: пусто по точным критериям → ослабляем второстепенное
+        # (цвет → пробег → спеки → годы → цена) и показываем близкие варианты,
+        # а не отписываемся заготовкой (фидбек: «не должен быть завязан»).
+        items, relaxed = await search_with_relaxation(ctx.session, criteria, limit=limit)
         if not items:
-            return ToolOutcome(text="Пока ничего не нашлось по этим критериям.")
+            return ToolOutcome(
+                text=(
+                    "Пока ничего не нашлось по этим критериям. Могу ослабить часть "
+                    "параметров или запустить полный поиск по источникам — новые "
+                    "варианты пришлю уведомлением. Что ослабим?"
+                )
+            )
         bullets = "\n".join(
             f"• {i.make or '?'} {i.model or ''} {i.year or ''}, "
             f"{i.price or '?'} {i.currency or ''}, {i.mileage_km or '?'} км"
             for i in items
         )
-        return ToolOutcome(text=f"Вот что есть сейчас:\n{bullets}")
+        if relaxed:
+            note = (
+                f"Точных совпадений нет, ослабил: {', '.join(relaxed)}. "
+                f"Вот близкие варианты:\n{bullets}"
+            )
+        else:
+            note = f"Вот что есть сейчас:\n{bullets}"
+        # Квота: списываем только за выданные варианты (не за сообщения).
+        if not await quota_allow(ctx.redis, state.user_id, ctx.quota_limit):
+            return ToolOutcome(
+                text=(
+                    "Лимит AI-поисков на сегодня исчерпан. Сообщения остаются "
+                    "бесплатными — могу уточнять критерии. Безлимит и моментальные "
+                    "уведомления — в Pro (кнопка «Подписка»)."
+                )
+            )
+        await track(
+            ctx.session, state.user_id, EVENT_AI_SEARCH,
+            {"kind": "preview", "relaxed": bool(relaxed), "count": len(items)},
+        )
+        if ctx.quota_limit is not None:
+            await quota_consume(ctx.redis, state.user_id)
+        return ToolOutcome(text=note)
 
     if tc.name == "calc_delivery":
         from app.services.delivery import calc_delivery, format_breakdown
@@ -179,9 +216,20 @@ async def _execute_tool(
         patch = args.get("criteria")
         if isinstance(patch, dict):
             apply_patch(state, patch)
+        # Полный поиск — тоже «выдача результата», расходует ту же квоту.
+        if not await quota_allow(ctx.redis, state.user_id, ctx.quota_limit):
+            return ToolOutcome(
+                text=(
+                    "Лимит AI-поисков на сегодня исчерпан — полный поиск не запущен. "
+                    "Безлимит — в Pro (кнопка «Подписка»)."
+                )
+            )
         state.status = "searching"
         if ctx.finalize:
             await ctx.finalize(state.criteria)
+        if ctx.quota_limit is not None:
+            await quota_consume(ctx.redis, state.user_id)
+        await track(ctx.session, state.user_id, EVENT_AI_SEARCH, {"kind": "finalize"})
         logger.info("tool_finalize_search: user_id=%s", state.user_id)
         return ToolOutcome(
             text="Запускаю поиск по источникам. Пришлю уведомления о новых вариантах.",
@@ -205,6 +253,19 @@ def _to_reply(state: DialogState, text: str, options: list[str]) -> AgentReply:
     )
 
 
+def _is_confirmation(text: str) -> bool:
+    """Короткое согласие/проде́йствие («всё», «давай», «ок») — не новая инфа."""
+    low = text.strip().lower().rstrip("!.?")
+    if len(low) > 24:
+        return False
+    confirmations = (
+        "всё", "все", "да", "ага", "угу", "ок", "окей", "хорошо", "ладно",
+        "давай", "поехали", "погнали", "запускай", "искать", "ищи", "ну да",
+        "верно", "точно", "именно", "всё так", "всё верно", "давай искать",
+    )
+    return any(low == c or low.startswith(c + " ") for c in confirmations)
+
+
 async def run_agent(
     user_id: int,
     text: str,
@@ -215,6 +276,7 @@ async def run_agent(
     finalize: Callable[[SearchCriteria], Awaitable[list[str]]] | None = None,
     store: DialogStore | None = None,
     rag: RAGClient | None = None,
+    quota_limit: int | None = None,
 ) -> AgentReply:
     """Один ход диалога (п. 7.2). При ошибке LLM — DialogError → кнопки (п. 7.9)."""
     from app.core.config import get_settings
@@ -238,8 +300,15 @@ async def run_agent(
     state.messages.append(Message(role="user", content=text))
     state.turn_count += 1
 
-    # 3. ранний выход: все критичные поля есть — не тратим LLM (п. 7.7.6)
-    if has_critical_fields(state.criteria) and state.status == "collecting":
+    # 3. ранний выход: все критичные поля есть И пользователь просто соглашается —
+    #    не тратим LLM (п. 7.7.6). Любое содержательное сообщение («плохо ищешь»,
+    #    «а есть подешевле?») идёт в LLM: агент должен править критерии и
+    #    перевыполнять поиск, а не отвечать заготовкой (фидбек юзера).
+    if (
+        has_critical_fields(state.criteria)
+        and state.status == "collecting"
+        and _is_confirmation(text)
+    ):
         state.status = "ready"
         await store.save(state)
         return _to_reply(
@@ -261,7 +330,9 @@ async def run_agent(
         from app.ai.rag_client import rag_client_from_settings
 
         rag = rag_client_from_settings(redis)
-    ctx = ToolContext(session=session, redis=redis, finalize=finalize, rag=rag)
+    ctx = ToolContext(
+        session=session, redis=redis, finalize=finalize, rag=rag, quota_limit=quota_limit
+    )
     reply_text: str | None = result.text
     options: list[str] = []
     for tc in result.tool_calls:

@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives.padding import PKCS7
 
 from app.adapters.base import BaseApiAdapter
 from app.adapters.common.normalize import (
+    normalize_engine_volume,
     normalize_fuel,
     normalize_make,
     normalize_transmission,
@@ -250,6 +251,9 @@ class KCarApiAdapter(BaseApiAdapter):
             body_type=raw.get("carctgrNm") or None,
             fuel=normalize_fuel(raw.get("fuelNm")),
             transmission=normalize_transmission(raw.get("trnsmsnNm")),
+            # engdispmnt обычно пуст в списке (заполнен в detail-of-ng,
+            # см. enrich_listing_specs) — берём если есть.
+            engine_volume=normalize_engine_volume(raw.get("engdispmnt")),
             color=raw.get("extrColorNm") or None,
             location=raw.get("cntrRgnNm") or None,
             seller_type="dealer",  # kcar — сеть собственных центров (직영)

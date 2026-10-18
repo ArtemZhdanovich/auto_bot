@@ -123,3 +123,28 @@ def test_faq_matching_requires_question():
     assert match_faq_topic("про доставку расскажи") == "delivery_kr_vladivostok"
     # не вопрос → FAQ не мешает сбору критериев
     assert match_faq_topic("Хочу палисайд до 45000") is None
+
+
+# ---------- цвет: нормализация патча + enum в tool-схеме ----------
+
+
+def test_apply_patch_color_normalized():
+    """«чёрный»/«чёрная» → канон 'black', как в listings (фикс «цвета не находит»)."""
+    state = new_state(1)
+    applied = apply_patch(state, {"color": "чёрный"})
+    assert applied == ["color"]
+    assert state.criteria.color == "black"
+
+
+def test_apply_patch_color_variants():
+    state = new_state(1)
+    apply_patch(state, {"color": "серебристый"})
+    assert state.criteria.color == "silver"
+    apply_patch(state, {"color": "синяя"})
+    assert state.criteria.color == "синяя"  # «синяя» нет в словаре → как есть
+
+
+def test_color_enum_in_tool_schema():
+    """LLM видит справочник цветов прямо в схеме update_criteria."""
+    tool = next(t for t in TOOLS if t["name"] == "update_criteria")
+    assert tool["parameters"]["properties"]["color"]["enum"] == FIELD_OPTIONS["color"]

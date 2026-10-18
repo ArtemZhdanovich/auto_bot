@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.core.deps import CurrentUserDep, SessionDep
 from app.core.deps_internal import get_redis
 from app.services.dialog import DialogStore, finalize_dialog, reset_dialog
+from app.services.subscription import tier_config
 from redis.asyncio import Redis
 
 router = APIRouter(prefix="/api/ai", tags=["ai-search"])
@@ -52,6 +53,8 @@ async def ai_message(
             redis=redis,
             llm=llm,
             finalize=lambda c: _enqueue_fetch(session, c),
+            # квота списывается за выдачу результата, не за сообщение
+            quota_limit=tier_config(user).ai_daily_limit,
         )
     finally:
         await llm.aclose()

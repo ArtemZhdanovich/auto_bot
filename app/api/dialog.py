@@ -15,7 +15,9 @@ from app.db.models import Source
 from app.db.session import get_session
 from app.queue import enqueue_task
 from app.schemas.criteria import SearchCriteria
+from app.db.models import User
 from app.services.analytics import EVENT_DIALOG_MESSAGE, track
+from app.services.subscription import tier_config
 from app.services.dialog import (
     DialogStore,
     archive_session,
@@ -100,6 +102,11 @@ async def dialog_message(
             status.HTTP_503_SERVICE_UNAVAILABLE, f"LLM unavailable: {exc}"
         ) from exc
     try:
+        # Квота тарифа: списывается ЗА ВЫДАЧУ РЕЗУЛЬТАТА внутри агента
+        # (preview с вариантами / finalize), не за сообщение — иначе
+        # демо-юзер не может пообщаться (фидбек «1 сообщение ≠ 1 поиск»).
+        user = await session.get(User, body.user_id)
+        quota_limit = tier_config(user).ai_daily_limit if user else 3
         reply = await run_agent(
             body.user_id,
             body.text,
@@ -107,6 +114,7 @@ async def dialog_message(
             redis=redis,
             llm=llm,
             finalize=lambda c: _enqueue_fetch(session, c),
+            quota_limit=quota_limit,
         )
     finally:
         await llm.aclose()

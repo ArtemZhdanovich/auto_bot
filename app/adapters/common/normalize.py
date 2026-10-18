@@ -50,9 +50,10 @@ TRANSMISSION_MAP = {
 }
 
 DRIVE_MAP = {
-    "fwd": "fwd", "передний": "fwd",
-    "rwd": "rwd", "задний": "rwd",
+    "fwd": "fwd", "передний": "fwd", "전륜": "fwd", "전륜구동": "fwd",
+    "rwd": "rwd", "задний": "rwd", "후륜": "rwd", "후륜구동": "rwd",
     "awd": "awd", "4wd": "awd", "4x4": "awd", "полный": "awd",
+    "4륜": "awd", "사륜": "awd", "사륜구동": "awd",
 }
 
 MAKE_MAP = {

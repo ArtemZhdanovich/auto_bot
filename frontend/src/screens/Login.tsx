@@ -15,7 +15,7 @@ interface Props {
 }
 
 const TG_POLL_INTERVAL_MS = 2500;
-const TG_POLL_MAX_TRIES = 240; // ~10 минут (= TTL логин-кода на бэке)
+const TG_POLL_MAX_TRIES = 360; // ~15 минут (= TTL логин-кода на бэке)
 
 export function LoginScreen({ onAuthed }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");

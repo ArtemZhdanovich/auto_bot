@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.adapters.common.normalize import (
     normalize_body,
+    normalize_color,
     normalize_drive,
     normalize_fuel,
     normalize_seller_type,
@@ -37,16 +38,21 @@ FIELD_OPTIONS: dict[str, list[str]] = {
     "fuel": ["бензин", "дизель", "гибрид", "электро", "газ"],
     "transmission": ["автомат", "механика", "вариатор", "робот"],
     "drive": ["передний", "задний", "полный"],
+    "color": [
+        "чёрный", "белый", "серебристый", "серый", "синий", "красный",
+        "коричневый", "зелёный", "бежевый", "жёлтый", "оранжевый", "золотой",
+    ],
     "seller_type": ["частник", "дилер", "аукцион"],
 }
 
-# Нормализация значений патча: LLM пишет «бензин»/«седан» — в критерии
-# кладём канон (petrol/sedan), как в listings.
+# Нормализация значений патча: LLM пишет «бензин»/«седан»/«чёрный» — в критерии
+# кладём канон (petrol/sedan/black), как в listings.
 _PATCH_NORMALIZERS: dict[str, Any] = {
     "body_type": normalize_body,
     "fuel": normalize_fuel,
     "transmission": normalize_transmission,
     "drive": normalize_drive,
+    "color": normalize_color,
     "seller_type": normalize_seller_type,
 }
 

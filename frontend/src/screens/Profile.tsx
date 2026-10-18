@@ -204,7 +204,7 @@ export function ProfileScreen() {
         </div>
         {sub && (
           <div className="sub-limits">
-            {sub.max_filters ?? "∞"} уведомлений · {sub.ai_daily_limit ?? "∞"} AI-сообщений/день
+            {sub.max_filters ?? "∞"} уведомлений · {sub.ai_daily_limit ?? "∞"} AI-поисков/день
             · instant: {sub.instant ? "да" : "нет"}
           </div>
         )}

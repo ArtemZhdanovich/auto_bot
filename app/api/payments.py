@@ -37,7 +37,7 @@ TELEGRAM_API = "https://api.telegram.org"
 
 TIER_TITLES = {"pro": "AutoPick Pro", "business": "AutoPick Business"}
 TIER_DESCRIPTIONS = {
-    "pro": "20 фильтров, 200 AI-сообщений/день, instant-уведомления, price drop",
+    "pro": "20 фильтров, 200 AI-поисков/день, instant-уведомления, price drop",
     "business": "Без лимитов, API, CRM-интеграция, приоритетная поддержка",
 }
 
