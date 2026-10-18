@@ -85,6 +85,11 @@ export interface Listing {
   /** Перевод тайтла (PLAN.md, фаза 5): оригинал с источника + перевод (NLLB) */
   title_raw: string | null;
   title_ru: string | null;
+  source_language?: string | null;
+  /** Полная хронология (карточка) */
+  updated_at?: string | null;
+  last_seen_at?: string | null;
+  price_changed_at?: string | null;
 }
 
 export interface ListingList {

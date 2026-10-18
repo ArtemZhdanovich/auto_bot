@@ -13,6 +13,10 @@ dependencies = [
     "dishka>=1.2.0",
     "qdrant-client>=1.10.0",
     "sentence-transformers>=2.7.0",
+    # Прямая зависимость + tool.uv.sources ниже: без этого torch остаётся
+    # транзитивным (sources действуют только на прямые deps) и тянется с PyPI
+    # вместе с ~3-5 ГБ nvidia-*-колёс.
+    "torch>=2.2",
     "unstructured[md]>=0.15.0",
     "markdown>=3.5.2",
     "python-magic>=0.4.27",
@@ -34,6 +38,16 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# torch только CPU: инференс e5-small укладывается в CPU, а CUDA-сборка тянет
+# ~3-5 ГБ nvidia-* колёс (медленный билд + лишний RSS в контейнере).
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["rag_core", "rag_worker", "rag_api"]

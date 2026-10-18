@@ -82,6 +82,13 @@ services:
       APP_BASE_URL: http://backend:8000
       # FSM-хранилище бота — Redis; .env может держать localhost (запуск по процессам)
       REDIS_URL: redis://redis:6379/0
+    # Long-polling без HTTP-порта: liveness по heartbeat-файлу
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.services.heartbeat", "bot"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       backend: { condition: service_healthy, required: false }   # профиль mono
       gateway: { condition: service_healthy, required: false }   # профиль micro (alias backend)
@@ -96,6 +103,12 @@ services:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.services.heartbeat", "fetch"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -110,6 +123,12 @@ services:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.services.heartbeat", "send"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -125,6 +144,13 @@ services:
       - "8443:443"          # HTTPS (self-signed) — для web_app-кнопки и браузера
     environment:
       NG_HOST_IP: ${LAN_IP:-127.0.0.1}   # LAN-IP хоста → SAN сертификата
+    healthcheck:
+      # nginx:alpine — busybox wget
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       backend: { condition: service_healthy, required: false }   # профиль mono
       gateway: { condition: service_healthy, required: false }   # профиль micro (alias backend)
@@ -273,14 +299,34 @@ services:
   # ---------- RAG-микросервис (ядро из rag_service) ----------
   qdrant:
     image: qdrant/qdrant:latest
+    # Постоянный скрининг объяв растит коллекции — лимит не даёт qdrant'у
+    # выесть память у postgres/backend на общем узле.
+    mem_limit: 2g
+    memswap_limit: 2g
+    # wget/curl в образе нет — TCP-проба /readyz порта через bash
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':<>/dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     ports:
       - "6333:6333"
     volumes:
       - qdrant_storage:/qdrant/storage
 
   minio:
-    image: minio/minio:latest
+    # minio/minio удалён из Docker Hub (2025) — рабочий образ bitnamilegacy;
+    # при желании заменяется через MINIO_IMAGE в .env
+    image: ${MINIO_IMAGE:-bitnamilegacy/minio:latest}
     command: server /data --console-address ":9001"
+    healthcheck:
+      # TCP-проба API-порта (mc в legacy-образе не гарантирован)
+      test: ["CMD-SHELL", "bash -c ':<>/dev/tcp/127.0.0.1/9000' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -335,6 +381,10 @@ services:
       REDIS_URL: redis://redis:6379/1
       METRICS_PORT: "8101"
       WORKER_QUEUES: "all"
+    # Воркер держит embedding-модель (e5-small) + шифрованные чанки в памяти —
+    # фиксированный потолок вместо «сколько дадут».
+    mem_limit: 1500m
+    memswap_limit: 1500m
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -358,6 +408,12 @@ services:
       SERVICE_USER_ID: auto_bot
       ASK_TIMEOUT_SEC: "30"
       PORT: "8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     ports:
       - "8100:8100"
     depends_on:
@@ -365,15 +421,26 @@ services:
       rag_worker: { condition: service_healthy }
     restart: unless-stopped
 
+  # rag_migrate / rag_migrate_alembic — one-shot джобы (restart: "no"),
+  # healthcheck не применим: контейнер завершается с кодом 0 по дизайну.
+
   # ---------- Перевод тайтлов (PLAN.md, фаза 5; services/translate) ----------
   # Optional-сервис: бэкенд включается TRANSLATE_ENABLED=true; упал →
   # UI показывает оригинальные тайтлы (fallback обязателен).
+  # NLLB на CPU при постоянных батчах накапливает RSS (кэши слоёв) — поэтому
+  # тройная защита: чанкинг + gc в коде, RSS-сторож (самовыход → рестарт),
+  # жёсткий mem_limit (иначе OOM-killer может убить соседние контейнеры).
   translate:
     build: ./services/translate
     command: ["translate-api"]
     environment:
       API_TOKEN: ${TRANSLATE_API_TOKEN:-}
       TRANSLATE_MODEL: ${TRANSLATE_MODEL:-facebook/nllb-200-distilled-600M}
+      OMP_NUM_THREADS: "2"
+      TOKENIZERS_PARALLELISM: "false"
+      TRANSLATE_MAX_RSS_MB: "2600"
+    mem_limit: 3g
+    memswap_limit: 3g
     ports:
       - "8200:8200"
     restart: unless-stopped

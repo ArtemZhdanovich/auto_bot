@@ -6,7 +6,9 @@
 повторные заголовки («현대 그랜저», «奔驰 E级») не должны доходить до модели.
 """
 
+import gc
 import logging
+import os
 import re
 import threading
 
@@ -20,6 +22,9 @@ _CJK = re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _CYRILLIC = re.compile("[\u0400-\u04ff]")
 
 _CACHE_MAX = 50_000
+# Макс. текстов за один прогон модели: постоянные большие батчи — главный
+# источник роста KV-кэша/RSS у NLLB на CPU (фидбек «утечки памяти»).
+_CHUNK = int(os.getenv("TRANSLATE_CHUNK", "16"))
 
 
 def detect_lang(text: str) -> str:
@@ -87,18 +92,23 @@ class NLLBTranslator:
                     groups.setdefault(lang, []).append((i, stripped))
 
         for lang, items in groups.items():
-            outputs = self._pipe(
-                [t for _, t in items],
-                src_lang=lang,
-                tgt_lang=target_lang,
-                max_new_tokens=128,
-            )
-            for (i, stripped), out in zip(items, outputs):
-                translated = (out.get("translation_text") or "").strip() or None
-                results[i] = translated
-                if translated:
-                    with self._lock:
-                        if len(self._cache) >= _CACHE_MAX:
-                            self._cache.clear()  # простой reset вместо LRU-вытеснения
-                        self._cache[(lang, stripped)] = translated
+            # Чанками: 64 текста за прогон держат в памяти большой KV-кэш,
+            # который transformers на CPU не всегда возвращает системе.
+            for start in range(0, len(items), _CHUNK):
+                chunk = items[start : start + _CHUNK]
+                outputs = self._pipe(
+                    [t for _, t in chunk],
+                    src_lang=lang,
+                    tgt_lang=target_lang,
+                    max_new_tokens=128,
+                )
+                for (i, stripped), out in zip(chunk, outputs):
+                    translated = (out.get("translation_text") or "").strip() or None
+                    results[i] = translated
+                    if translated:
+                        with self._lock:
+                            if len(self._cache) >= _CACHE_MAX:
+                                self._cache.clear()  # простой reset вместо LRU-вытеснения
+                            self._cache[(lang, stripped)] = translated
+                gc.collect()  # вернуть активационную память после каждого чанка
         return results

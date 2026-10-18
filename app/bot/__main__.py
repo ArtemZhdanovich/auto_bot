@@ -99,7 +99,14 @@ async def main() -> None:
                 settings.miniapp_url,
             )
 
-    await dp.start_polling(bot)
+    # Heartbeat для healthcheck (polling без HTTP-порта)
+    from app.services.heartbeat import start_heartbeat
+
+    heartbeat = await start_heartbeat("bot")
+    try:
+        await dp.start_polling(bot)
+    finally:
+        heartbeat.cancel()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,52 @@
 
 
+## 65. Инфра: healthcheck всем контейнерам + OOM-защита translate + лок ParserDoctor + PDP «все данные» (2026-10-17)
+
+- **Запуск рантайма (перевод + RAG + постоянный скрининг):** подняты qdrant,
+  minio, translate, rag_migrate/rag_worker/rag_api рядом с backend/bot/miniapp.
+- **Утечки памяти NLLB (фидбек «следите за контейнером translate»):** тройная
+  защита — (1) чанкинг батчей (TRANSLATE_CHUNK=16) + `gc.collect()` после чанка
+  в `nllb.py`; (2) RSS-сторож `_rss_watchdog` в `main.py` (раз в 60с меряет
+  VmRSS, при > TRANSLATE_MAX_RSS_MB=2600 делает `os._exit(1)` → рестарт с
+  прогревом ~30с, бэкенд тем временем fallback'ом отдаёт оригинальные тайтлы);
+  (3) жёсткий `mem_limit: 3g` / `memswap_limit: 3g` в compose (иначе oom-killer
+  может убить соседей). Плюс `OMP_NUM_THREADS=2`, `TOKENIZERS_PARALLELISM=false`.
+- **ParserDoctor: лок на источник (фидбек «не жечь LLM-токены дублями»):**
+  к cooldown 6ч добавлен running-лок `doctor:running:{src}` (TTL 30 мин,
+  ставится перед LLM-запросом, снимается в finally; падение процесса чистит
+  TTL). Параллельный воркер получает `already_running` и второй GLM-запрос
+  не шлёт. `redis=None` теперь логируется предупреждением. Тело ремонта
+  вынесено в `_repair_with_llm`. Тесты +2 (already_running блокирует LLM,
+  лок снимается после ремонта, cooldown остаётся).
+- **Healthcheck у каждого контейнера:** добавлены недостающие — bot,
+  worker_fetch, worker_send (long-polling/консюмеры без HTTP-порта → новый
+  `app/services/heartbeat.py`: фоновая задача пишет heartbeat-файл каждые 15с,
+  `python -m app.services.heartbeat <name>` в healthcheck считает живым файл
+  не старше 90с — зависший event loop → unhealthy), qdrant и minio
+  (TCP-проба через bash /dev/tcp — wget/curl в образах нет), miniapp (nginx
+  busybox wget), rag_api (`/health`). one-shot rag_migrate* — healthcheck не
+  применим (exit 0 по дизайну).
+- **RAM-лимиты:** qdrant 2g, rag_worker 1500m (embedding + шифрованные чанки),
+  translate 3g — «сколько дадут» заменено фиксированными потолками.
+- **PDP «все данные, что есть»:** `ListingOut` + updated_at/last_seen_at/
+  price_changed_at (source_language уже был); карточка Listing.tsx — блок
+  «Характеристики» (кузов/год/объём/топливо/КПП/привод/пробег/цвет/VIN,
+  каждая строка с пояснением `info-row__hint`, пустые не рендерим) и блок
+  «Данные объявления» (статус «в продаже/снято», источник+ID, в базе с,
+  обновлено источником, цена менялась, последняя проверка); название с
+  источника — заголовком, оригинал + язык под переводом. CSS: `.info-row--stacked`,
+  `.info-row__main/__hint`, `.spec-group__title`.
+- **Докерфайлы:** rag — `COPY pyproject.toml uv.lock` (uv.lock не копировался —
+  билд падал), torch переведён на CPU-индекс (`[[tool.uv.index]] pytorch-cpu` +
+  `tool.uv.sources` + torch как прямая deps: иначе тянулись ~3-5ГБ nvidia-*),
+  uv.lock перегенерирован (nvidia-пакетов 0); translate/rag — retry-циклы
+  (5 попыток) + BuildKit cache-маунты pip/uv (сеть рвёт большие колёса).
+  **MinIO:** образ `minio/minio` удалён из Docker Hub (2025) — compose
+  `MINIO_IMAGE` (по умолчанию `bitnamilegacy/minio:latest`); qdrant:latest
+  скачан.
+- **Проверки:** сьют 618 passed (+4: heartbeat ×2, doctor-лок ×2), vitest
+  88/88, tsc чист, ruff чист. `docker compose config` валиден.
+
 ## 64. Квота AI «за выдачу результата» вместо «за сообщение» (2026-10-17)
 
 - **Фидбек юзера:** «сейчас нормируется 1 сообщение как 1 AI-поиск — на демо

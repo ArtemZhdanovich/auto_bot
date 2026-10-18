@@ -156,6 +156,39 @@ async def test_cooldown_skips_llm():
     assert llm.calls == []
 
 
+async def test_running_lock_blocks_parallel_repair():
+    """Второй воркер не запускает LLM, пока ремонт источника уже идёт.
+
+    Длинный CoT-запрос к GLM занимает минуты — без лока параллельный цикл
+    парсинга (пустая выдача → _fire_doctor) сжигает второй LLM-запрос.
+    """
+    llm = make_llm(json_of(NEW_SELECTORS))
+    redis = FakeRedis()
+    # Лок «ремонт уже идёт» выставил другой воркер (cooldown ещё свободен)
+    await redis.set("doctor:running:che168", "1", nx=True, ex=1800)
+    session = make_session("auto")
+    result = await repair_parser(
+        "che168", make_adapter(NEW_LAYOUT), session=session, redis=redis, llm=llm
+    )
+    assert result["status"] == "already_running"
+    assert llm.calls == []
+    assert session.committed is False
+
+
+async def test_running_lock_released_after_repair():
+    """Успешный ремонт снимает running-лок: следующий цикл может чинить снова."""
+    llm = make_llm(json_of(NEW_SELECTORS))
+    redis = FakeRedis()
+    session = make_session("auto")
+    result = await repair_parser(
+        "che168", make_adapter(NEW_LAYOUT), session=session, redis=redis, llm=llm
+    )
+    assert result["status"] == "repaired"
+    assert await redis.get("doctor:running:che168") is None
+    # cooldown при этом остаётся — защита от шторма ремонтов
+    assert await redis.get("doctor:che168") == "1"
+
+
 async def test_invalid_proposal_rejected():
     # LLM предлагает селекторы, которые на живом HTML не находят карточек
     bad = {k: "div.nonexistent" for k in NEW_SELECTORS}

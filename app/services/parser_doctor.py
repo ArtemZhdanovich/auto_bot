@@ -48,6 +48,11 @@ MIN_PRICE_RATE = 0.5   # доля карточек с ценой
 HTML_LIMIT = 15_000    # сколько HTML показываем LLM
 MIN_HTML_LEN = 300     # короче — заглушка/антибот, а не список объявлений
 COOLDOWN_SEC = 6 * 3600
+# Лок «ремонт уже идёт»: длинный CoT-запрос к LLM (GLM 4.6) занимает минуты;
+# без него параллельный воркер (повторный fetch с пустой выдачей) успевает
+# запустить второй цикл и сжечь второй LLM-запрос. TTL с запасом больше
+# максимального таймаута LLM; снимается в finally, падение процесса чистит TTL.
+REPAIR_LOCK_SEC = 30 * 60
 
 # Маркеры антибота/капчи в HTML (сравнение в нижнем регистре):
 # chinese — che168/авито-подобные WAF-заглушки, латиница — общие случаи
@@ -193,6 +198,41 @@ async def _repair(
         got = await redis.set(f"doctor:{source_name}", "1", nx=True, ex=COOLDOWN_SEC)
         if not got:
             return {"source": source_name, "status": "cooldown"}
+        running = await redis.set(
+            f"doctor:running:{source_name}", "1", nx=True, ex=REPAIR_LOCK_SEC
+        )
+        if not running:
+            # Ремонт этого источника уже идёт в другом воркере — второй
+            # LLM-запрос не нужен (фидбек: «не жечь токены дублями»).
+            logger.info("parser_doctor_already_running: %s", source_name)
+            return {"source": source_name, "status": "already_running"}
+    else:  # pragma: no cover — в воркере redis всегда есть
+        logger.warning("parser_doctor_no_redis_no_lock: %s", source_name)
+
+    try:
+        return await _repair_with_llm(
+            source_name, adapter, registry, session, redis, llm,
+            old_selectors, html, config, mode, source,
+        )
+    finally:
+        if redis is not None:
+            await redis.delete(f"doctor:running:{source_name}")
+
+
+async def _repair_with_llm(
+    source_name: str,
+    adapter: Any,
+    registry: Any,
+    session: AsyncSession,
+    redis: Redis | None,
+    llm: Any,
+    old_selectors: dict[str, Any],
+    html: str,
+    config: dict[str, Any],
+    mode: str,
+    source: Source,
+) -> dict[str, Any]:
+    """LLM-ремонт: селекторы → живая проверка → применить/предложить."""
 
     # 1) HTML уже получен на шаге триажа
 

@@ -693,6 +693,34 @@ main {
   border-bottom: none;
   opacity: 0.75;
 }
+/* Карточка объявления: спек-строка с пояснением (лейбл + hint слева,
+   значение справа) и заголовок группы характеристик. */
+.info-row--stacked {
+  align-items: flex-start;
+}
+.info-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.info-row__hint {
+  color: var(--text-secondary);
+  font-size: var(--font-xs, 12px);
+  font-weight: 400;
+  opacity: 0.85;
+}
+.spec-group__title {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.spec-group__title:first-of-type {
+  margin-top: var(--space-2);
+}
 .sub-tier {
   display: flex;
   align-items: baseline;

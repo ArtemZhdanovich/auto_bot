@@ -108,6 +108,64 @@ export function ListingScreen() {
   const usd = toUsd(listing.price, listing.currency);
   const chain = priceChain(listing.price, listing.currency, getRegion());
 
+  // Все характеристики, что есть по объявлению: значение + пояснение.
+  // Рендерим только заполненные («все данные, которые у нас есть»), порядок —
+  // от самых важных к деталям.
+  const specs: { label: string; value: string; hint: string }[] = [
+    listing.body_type && {
+      label: "Кузов",
+      value: listing.body_type,
+      hint: "тип автомобиля: седан, кроссовер, внедорожник…",
+    },
+    listing.year && {
+      label: "Год выпуска",
+      value: String(listing.year),
+      hint: "модельный год по данным источника",
+    },
+    listing.engine_volume != null && {
+      label: "Двигатель",
+      value: `${listing.engine_volume} л`,
+      hint: "рабочий объём, литры",
+    },
+    listing.fuel && {
+      label: "Топливо",
+      value: listing.fuel,
+      hint: "бензин, дизель, гибрид, электро…",
+    },
+    listing.transmission && {
+      label: "КПП",
+      value: listing.transmission,
+      hint: "автомат, механика, вариатор, робот",
+    },
+    listing.drive && {
+      label: "Привод",
+      value: listing.drive,
+      hint: "передний, задний, полный (4WD)",
+    },
+    listing.mileage_km != null && {
+      label: "Пробег",
+      value: `${listing.mileage_km.toLocaleString("ru")} км`,
+      hint: "показание одометра",
+    },
+    listing.color && {
+      label: "Цвет",
+      value: listing.color,
+      hint: "цвет кузова по данным источника",
+    },
+    listing.vin && {
+      label: "VIN",
+      value: listing.vin,
+      hint: "идентификационный номер — по нему проверяют историю",
+    },
+  ].filter((s): s is { label: string; value: string; hint: string } => Boolean(s));
+
+  const fmtDate = (iso: string | null | undefined) =>
+    iso ? new Date(iso).toLocaleDateString("ru") : null;
+  const seenFirst = fmtDate(listing.first_seen_at);
+  const seenLast = fmtDate(listing.last_seen_at);
+  const updatedAt = fmtDate(listing.updated_at);
+  const priceChanged = fmtDate(listing.price_changed_at);
+
   return (
     <div className="listing-page">
       {/* Назад — всегда под рукой, поверх галереи (не только внизу страницы) */}
@@ -139,48 +197,91 @@ export function ListingScreen() {
               <span className="info-row__value">{chain.original}</span>
             </div>
           )}
-          <div className="info-row">
-            <span className="info-row__label">Год</span>
-            <span className="info-row__value">{listing.year ?? "—"}</span>
-          </div>
-          <div className="info-row">
-            <span className="info-row__label">Пробег</span>
-            <span className="info-row__value">
-              {listing.mileage_km ? `${listing.mileage_km.toLocaleString("ru")} км` : "—"}
-            </span>
-          </div>
           {usd != null && (listing.currency ?? "").toUpperCase() !== "USD" && (
             <div className="info-row">
               <span className="info-row__label">По курсу (оценка)</span>
               <span className="info-row__value">≈ {usd.toLocaleString("ru")} $</span>
             </div>
           )}
-          <div className="info-row">
-            <span className="info-row__label">VIN</span>
-            <span className="info-row__value">{listing.vin ?? "не указан"}</span>
+
+          {/* Все характеристики с пояснениями: пустые не показываем */}
+          {specs.length > 0 && (
+            <>
+              <h4 className="spec-group__title">Характеристики</h4>
+              {specs.map((s) => (
+                <div className="info-row info-row--stacked" key={s.label}>
+                  <div className="info-row__main">
+                    <span className="info-row__label">{s.label}</span>
+                    <span className="info-row__hint">{s.hint}</span>
+                  </div>
+                  <span className="info-row__value">{s.value}</span>
+                </div>
+              ))}
+            </>
+          )}
+
+          <h4 className="spec-group__title">Данные объявления</h4>
+          <div className="info-row info-row--stacked">
+            <div className="info-row__main">
+              <span className="info-row__label">Статус</span>
+              <span className="info-row__hint">проверяем источник по расписанию</span>
+            </div>
+            <span className="info-row__value">
+              {listing.is_active ? "В продаже" : "Снято с продажи"}
+            </span>
           </div>
           <div className="info-row">
             <span className="info-row__label">Источник</span>
-            <span className="info-row__value">{listing.source}</span>
-          </div>
-          <div className="info-row">
-            <span className="info-row__label">Обновлено</span>
             <span className="info-row__value">
-              {new Date(listing.parsed_at).toLocaleDateString("ru")}
+              {listing.source} · ID {listing.source_id}
             </span>
           </div>
+          {seenFirst && (
+            <div className="info-row">
+              <span className="info-row__label">В базе с</span>
+              <span className="info-row__value">{seenFirst}</span>
+            </div>
+          )}
+          {updatedAt && updatedAt !== seenFirst && (
+            <div className="info-row">
+              <span className="info-row__label">Обновлено источником</span>
+              <span className="info-row__value">{updatedAt}</span>
+            </div>
+          )}
+          {priceChanged && (
+            <div className="info-row">
+              <span className="info-row__label">Цена менялась</span>
+              <span className="info-row__value">{priceChanged}</span>
+            </div>
+          )}
+          {seenLast && (
+            <div className="info-row">
+              <span className="info-row__label">Последняя проверка</span>
+              <span className="info-row__value">{seenLast}</span>
+            </div>
+          )}
         </section>
 
       </div>
 
       <div className="listing-page__side">
-      {/* Название с источника (PLAN.md, фаза 5): перевод, иначе оригинал */}
+      {/* Название с источника (PLAN.md, фаза 5): перевод, иначе оригинал;
+          если перевод и оригинал различаются — показываем оба */}
       {(listing.title_ru ?? listing.title_raw) && (
         <section className="panel">
-          <div className="info-row">
-            <span className="info-row__label">Название с источника</span>
-            <span className="info-row__value">{listing.title_ru ?? listing.title_raw}</span>
-          </div>
+          <h3>{listing.title_ru ?? listing.title_raw}</h3>
+          {listing.title_ru && listing.title_raw &&
+            listing.title_ru !== listing.title_raw && (
+            <div className="info-row info-row--stacked">
+              <div className="info-row__main">
+                <span className="info-row__label">Оригинал</span>
+                <span className="info-row__hint">
+                  авто-перевод (NLLB), язык источника: {listing.source_language ?? "—"}
+                </span>
+              </div>
+              <span className="info-row__value">{listing.title_raw}</span>
+            </div>
+          )}
         </section>
       )}
 

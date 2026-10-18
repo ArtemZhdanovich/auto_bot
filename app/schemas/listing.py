@@ -105,6 +105,10 @@ class ListingOut(BaseModel):
     first_seen_at: Optional[datetime] = None
     first_price: Optional[float] = None
     price_history: Optional[list[PricePointOut]] = None
+    # Полная хронология для карточки: «все данные, что есть» (PDP).
+    updated_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+    price_changed_at: Optional[datetime] = None
 
     # Перевод тайтла (PLAN.md, фаза 5): оригинал с источника + перевод (NLLB)
     title_raw: Optional[str] = None

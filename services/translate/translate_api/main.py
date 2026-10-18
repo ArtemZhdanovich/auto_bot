@@ -24,15 +24,59 @@ from translate_api.nllb import NLLBTranslator
 MODEL_NAME = os.getenv("TRANSLATE_MODEL", "facebook/nllb-200-distilled-600M")
 API_TOKEN = os.getenv("API_TOKEN", "")
 WARMUP = os.getenv("TRANSLATE_WARMUP", "1").lower() not in {"0", "false", "no"}
+# Сторож памяти: NLLB на CPU при постоянных батчах накапливает RSS (кэши
+# слоёв transformers не возвращаются системе). При превышении порога процесс
+# завершается — docker restart: unless-stopped поднимает его заново с прогревом
+# (~30с), бэкенд в это время переводит fallback'ом на оригинальные тайтлы.
+# Плюс жёсткий mem_limit в docker-compose — двойная страховка от OOM-kill узла.
+MAX_RSS_MB = int(os.getenv("TRANSLATE_MAX_RSS_MB", "2800"))
+_RSS_CHECK_SEC = 60
 
 translator = NLLBTranslator(MODEL_NAME)
+
+
+def _rss_mb() -> int | None:
+    """Текущий RSS процесса в МБ (Linux-контейнер); None = не смогли измерить."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    try:
+        import resource  # noqa: PLC0415
+
+        return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) // 1024
+    except Exception:  # noqa: BLE001 — без метрики сторож просто молчит
+        return None
+
+
+async def _rss_watchdog() -> None:
+    import asyncio  # noqa: PLC0415
+
+    while True:
+        await asyncio.sleep(_RSS_CHECK_SEC)
+        rss = _rss_mb()
+        if rss is not None and rss > MAX_RSS_MB:
+            import logging  # noqa: PLC0415
+
+            logging.getLogger(__name__).critical(
+                "translate_rss_limit_exceeded: %sMB > %sMB — restart for clean memory",
+                rss, MAX_RSS_MB,
+            )
+            os._exit(1)  # without cleanup: docker will restart
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     if WARMUP:
         await anyio.to_thread.run_sync(translator.warmup)
+    import asyncio  # noqa: PLC0415
+
+    task = asyncio.create_task(_rss_watchdog())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="translate-service", lifespan=_lifespan)

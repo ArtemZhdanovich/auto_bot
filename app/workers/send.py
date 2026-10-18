@@ -447,6 +447,10 @@ async def main() -> None:
     settings = get_settings()
     ctx: dict[str, Any] = {}
     await startup(ctx)
+    # Heartbeat для healthcheck (консюмер без HTTP-порта)
+    from app.services.heartbeat import start_heartbeat
+
+    await start_heartbeat("send")
     worker = TaskWorker(
         amqp_url=settings.rabbitmq_url,
         bindings={QUEUE_SEND: list(HANDLERS)},
