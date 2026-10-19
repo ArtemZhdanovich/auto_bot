@@ -127,7 +127,8 @@ class Settings(BaseSettings):
     translate_enabled: bool = False  # feature flag
     translate_service_url: str = ""  # напр. http://translate:8200
     translate_api_token: str | None = None  # Bearer; = API_TOKEN сервиса
-    translate_timeout_sec: float = 30.0  # NLLB на CPU: батч может идти долго
+    translate_timeout_sec: float = 180.0  # NLLB на CPU: инференс сериализован локом,
+    # чанк может ждать своей очереди за парой параллельных HTTP-запросов
     translate_batch_size: int = 32
     translate_cache_ttl_sec: int = 60 * 60 * 24 * 30  # tr:{tgt}:{src}:{sha1}, 30 дней
     translate_cb_fail_threshold: int = 3  # circuit breaker: N ошибок подряд

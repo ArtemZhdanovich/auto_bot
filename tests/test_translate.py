@@ -8,9 +8,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import pytest
 
 import app.workers.fetch as fetch_mod
 from app.services.translate_client import TranslateClient
+from app.services.translate_glossary import apply_glossary
 from tests.conftest import FakeRedis, FakeSession
 
 
@@ -25,6 +27,40 @@ def _client(
         transport=transport,
         **kw,
     )
+
+
+# ---------- Глоссарий ----------
+
+
+def test_glossary_brands_replaced_not_translated():
+    # 현대 = «современный», 기아 = «голод» — NLLB переводил их нарицательно
+    assert apply_glossary("현대 그랜저 IG") == "Hyundai Грандёр IG"
+    assert apply_glossary("기아 카니발") == "Kia Карнивал"
+
+
+def test_glossary_user_example():
+    # Кейс из прод-фидбека: «Современный Сантапе ... вдохновение»
+    out = apply_glossary("Hyundai 싼타페 TM 인스퍼레이션")
+    assert out == "Hyundai Санта-Фе TM Inspiration"
+
+
+def test_glossary_multiword_before_single():
+    # «더 뉴» — многословный ключ, не должен распасться
+    assert apply_glossary("기아 더 뉴 카니발 4세대") == "Kia The New Карнивал 4 поколение"
+
+
+def test_glossary_latin_passthrough():
+    assert apply_glossary("Hyundai Santa Fe TM, 2020") == "Hyundai Santa Fe TM, 2020"
+
+
+def test_glossary_no_false_positive_inside_word():
+    # 신형 → «новая модель», несловарный hangul остаётся для NLLB
+    assert apply_glossary("기아 신형 모델") == "Kia новая модель 모델"
+
+
+def test_glossary_empty_and_non_korean():
+    assert apply_glossary("") == ""
+    assert apply_glossary("BMW X5 3.0d") == "BMW X5 3.0d"
 
 
 # ---------- TranslateClient ----------
@@ -157,7 +193,8 @@ async def test_translate_listings_task_updates_db(monkeypatch):
     result = await fetch_mod.translate_listings({"translate": stub}, "encar", [7])
 
     assert result == {"translated": 1}
-    assert stub.calls == [["현대 그랜저"]]
+    # В translate уходит глоссарий-обработанный текст (현대 → Hyundai)
+    assert stub.calls == [["Hyundai Грандёр"]]
     assert session.committed is True
     params = session.executed_params[0]
     assert params == [{"b_id": 7, "b_ru": "Хёндэ Грандёр"}]
@@ -177,9 +214,11 @@ async def test_translate_listings_keeps_null_on_failure(monkeypatch):
     monkeypatch.setattr(fetch_mod, "session_factory", lambda: _SessionCtx(session))
     stub = StubTranslateClient([None])  # сервис недоступен → fallback
 
-    result = await fetch_mod.translate_listings({"translate": stub}, "encar", [7])
+    # 0 из N при непустых тайтлах = ошибка: задача кидает исключение,
+    # чтобы воркер отретраил её (attempt 3/3), а не «успешно» пропустил.
+    with pytest.raises(RuntimeError, match="translate_all_failed"):
+        await fetch_mod.translate_listings({"translate": stub}, "encar", [7])
 
-    assert result == {"translated": 0}
     assert session.executed_params == []  # UPDATE не выполнялся
     assert session.committed is False
 

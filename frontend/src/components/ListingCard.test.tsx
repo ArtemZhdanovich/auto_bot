@@ -10,7 +10,11 @@ import type { Listing } from "../api/types";
 const { promptShow } = vi.hoisted(() => ({ promptShow: vi.fn() }));
 
 vi.mock("../api/client", () => ({ api: vi.fn() }));
-vi.mock("../api/auth", () => ({ haptic: vi.fn(), isGuest: vi.fn(() => false) }));
+vi.mock("../api/auth", () => ({
+  haptic: vi.fn(),
+  isGuest: vi.fn(() => false),
+  getWebApp: vi.fn(() => null),
+}));
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ show: vi.fn() }) }));
 vi.mock("../ui/LoginPrompt", () => ({ useLoginPrompt: () => ({ show: promptShow }) }));
 
@@ -137,5 +141,35 @@ describe("ListingCard", () => {
     });
     expect(api).toHaveBeenCalledWith("/listings/1/favorite", { method: "POST" });
     expect(promptShow).not.toHaveBeenCalled();
+  });
+
+  it("клик по источнику открывает ссылку через openExternal, не проваливаясь в карточку", async () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderCard(base);
+    fireEvent.click(document.querySelector(".listing-card__source") as HTMLAnchorElement);
+    // вне Telegram: fallback на window.open
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://example.com/1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    openSpy.mockRestore();
+  });
+
+  it("в Telegram-контексте источники открываются через WebApp.openLink", async () => {
+    const { getWebApp } = await import("../api/auth");
+    const openLink = vi.fn();
+    vi.mocked(getWebApp).mockReturnValue({
+      initData: "x",
+      ready: vi.fn(),
+      expand: vi.fn(),
+      openLink,
+    });
+    renderCard(base);
+    fireEvent.click(document.querySelector(".listing-card__source") as HTMLAnchorElement);
+    expect(openLink).toHaveBeenCalledWith(
+      "https://example.com/1",
+      { try_instant_view: false },
+    );
   });
 });

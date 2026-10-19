@@ -24,6 +24,7 @@ from app.db.session import session_factory
 from app.queue import QUEUE_FETCH, CronSpec, IntervalSpec, TaskWorker, enqueue_task
 from app.schemas.criteria import SearchCriteria
 from app.services.cron import cron_matches
+from app.services.translate_glossary import apply_glossary
 from app.services.fetch import mark_stale, save_listings
 from app.services.source_health import record_error, record_success, should_skip_source
 from app.services.storage import storage_from_settings
@@ -213,13 +214,22 @@ async def enqueue_translate(
     ctx: dict[str, Any], source_name: str, listing_ids: list[int]
 ) -> bool:
     """Перевод тайтлов (фаза 5) — не критичен для fetch: упал enqueue →
-    title_ru останется NULL, UI покажет оригинал."""
-    try:
-        await enqueue_task("translate_listings", source_name, listing_ids)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("enqueue_translate_failed: %s", exc)
-        return False
+    title_ru останется NULL, UI покажет оригинал.
+
+    Идёсы дробятся на чанки: job_timeout очереди 120s, а CPU-инференс NLLB
+    большую пачку не укладывает → задача умирала по TimeoutError, не записав
+    ничего. Чанк 16: kcar-тайтлы длинные (~2-4 c/лот) — 32 вылезали за 120s.
+    """
+    chunk_size = min(16, max(8, get_settings().translate_batch_size))
+    ok = True
+    for start in range(0, len(listing_ids), chunk_size):
+        chunk = listing_ids[start : start + chunk_size]
+        try:
+            await enqueue_task("translate_listings", source_name, chunk)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("enqueue_translate_failed: %s", exc)
+            ok = False
+    return ok
 
 
 async def translate_listings(
@@ -250,15 +260,20 @@ async def translate_listings(
         for start in range(0, len(rows), settings.translate_batch_size):
             chunk = rows[start : start + settings.translate_batch_size]
             translated = await client.translate(
-                [row.title_raw for row in chunk], source_lang=source_lang
+                # Глоссарий до NLLB: бренды/модели hangul-ом («현대», «싼타페»)
+                # иначе модель переводит как нарицательные («современный», «голод»).
+                [apply_glossary(row.title_raw) for row in chunk],
+                source_lang=source_lang,
             )
             for row, ru in zip(chunk, translated):
                 if ru:
                     translations[row.id] = ru
         if translations:
+            # Core-таблица вместо ORM-маппера: bulk UPDATE по PK с доп. WHERE
+            # в ORM требует sync-семантики и PK-ключей в params — Core проще.
             stmt = (
-                update(Listing)
-                .where(Listing.id == bindparam("b_id"))
+                update(Listing.__table__)
+                .where(Listing.__table__.c.id == bindparam("b_id"))
                 .values(
                     title_ru=bindparam("b_ru"),
                     source_language=source_lang,
@@ -274,6 +289,12 @@ async def translate_listings(
         "translate_done: source=%s requested=%d translated=%d",
         source_name, len(listing_ids), len(translations),
     )
+    if not translations:
+        # 0 из N при непустых тайтлах = сеть/DNS/сервис флапнули: кидаем,
+        # чтобы воркер отретраил задачу (attempt 3/3), а не «успешно» пропустил.
+        raise RuntimeError(
+            f"translate_all_failed: source={source_name} n={len(listing_ids)}"
+        )
     return {"translated": len(translations)}
 
 

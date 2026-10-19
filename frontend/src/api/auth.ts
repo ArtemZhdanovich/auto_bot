@@ -13,11 +13,15 @@ interface WebAppUser {
 
 interface TelegramWebApp {
   initData: string;
-  initDataUnsafe?: { user?: WebAppUser };
+  initDataUnsafe?: { user?: WebAppUser; start_param?: string };
   ready: () => void;
   expand: () => void;
   themeParams?: Record<string, string>;
   HapticFeedback?: { impactOccurred: (s: string) => void };
+  /** Открыть внешнюю ссылку из миниаппа (target="_blank"/window.open заблокированы WebView). */
+  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
+  /** Увести пользователя в выбор чата inline-режима бота (кнопка «Поделиться»). */
+  switchInlineQuery?: (query: string, chooseChatTypes?: string[]) => void;
 }
 
 declare global {

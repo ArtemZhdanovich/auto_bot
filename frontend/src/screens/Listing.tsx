@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Heart, ExternalLink, Truck } from "lucide-react";
+import { Heart, ExternalLink, Truck, Share2 } from "lucide-react";
 
 import { api } from "../api/client";
 import { haptic, isGuest } from "../api/auth";
+import { openExternal, shareListing } from "../lib/external";
 import { useToast } from "../ui/Toast";
 import { useLoginPrompt } from "../ui/LoginPrompt";
 import { SkeletonCard } from "../ui/Skeleton";
@@ -449,7 +450,7 @@ export function ListingScreen() {
         className="btn btn--primary btn--block"
         onClick={() => {
           haptic();
-          window.open(listing.url, "_blank");
+          openExternal(listing.url);
         }}
       >
         <ExternalLink size={18} />
@@ -466,6 +467,20 @@ export function ListingScreen() {
       >
         <Truck size={18} />
         Доставка и растаможка
+      </button>
+      {/* Поделиться: inline-режим бота → карточка лота в любом чате
+          (запрос `listing:<id>`, бот отвечает карточкой со ссылкой в вебапп) */}
+      <button
+        className="btn btn--block"
+        onClick={() => {
+          haptic();
+          if (!shareListing(listing.id)) {
+            toast.show("Поделиться можно из Telegram", { error: true });
+          }
+        }}
+      >
+        <Share2 size={18} />
+        Поделиться
       </button>
       <button className="btn btn--block" onClick={() => void toggleFavorite()}>
         <Heart
@@ -494,6 +509,18 @@ export function ListingScreen() {
             color={favorited ? "var(--accent)" : "currentColor"}
           />
         </button>
+        <button
+          className="listing-cta-bar__fav"
+          aria-label="Поделиться"
+          onClick={() => {
+            haptic();
+            if (!shareListing(listing.id)) {
+              toast.show("Поделиться можно из Telegram", { error: true });
+            }
+          }}
+        >
+          <Share2 size={22} />
+        </button>
         <div className="listing-cta-bar__price">
           {chain.usd ?? chain.original ?? "—"}
         </div>
@@ -501,7 +528,7 @@ export function ListingScreen() {
           className="listing-cta-bar__btn"
           onClick={() => {
             haptic();
-            window.open(listing.url, "_blank");
+            openExternal(listing.url);
           }}
         >
           Открыть у источника

@@ -441,6 +441,9 @@ services:
     environment:
       API_TOKEN: ${TRANSLATE_API_TOKEN:-}
       TRANSLATE_MODEL: ${TRANSLATE_MODEL:-facebook/nllb-200-distilled-600M}
+      # xet-протокол HF зависал на 0 байт (медленный канал) — обычный HTTP
+      HF_HUB_DISABLE_XET: "1"
+      HF_HUB_ENABLE_HF_TRANSFER: "0"
       OMP_NUM_THREADS: "2"
       TOKENIZERS_PARALLELISM: "false"
       # Порог должен быть ВЫШЕ легитимного пика модель+инференс (~2.9ГБ на

@@ -6,6 +6,7 @@ import { Heart, ImageOff } from "lucide-react";
 
 import { api } from "../api/client";
 import { haptic, isGuest } from "../api/auth";
+import { openExternal } from "../lib/external";
 import { getRegion, priceChain } from "../lib/fx";
 import {
   bodyLabel,
@@ -166,13 +167,19 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
           {" · "}
           {listing.parsed_at && new Date(listing.parsed_at).toLocaleDateString("ru")}
         </div>
-        {/* Ссылка на исходное объявление — «источник и сайт» на карточке */}
+        {/* Ссылка на исходное объявление — «источник и сайт» на карточке.
+            Клик через openExternal: target="_blank" заблокирован в Telegram WebView */}
         <a
           className="listing-card__source"
           href={listing.url}
           target="_blank"
           rel="noreferrer noopener"
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            haptic();
+            openExternal(listing.url);
+          }}
         >
           {listing.source === "encar"
             ? "encar.com ↗"

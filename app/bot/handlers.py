@@ -10,6 +10,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
     LabeledPrice,
     Message,
     PreCheckoutQuery,
@@ -293,6 +296,90 @@ def build_listing_kb(url: str) -> InlineKeyboardMarkup:
     if url:
         rows.append([InlineKeyboardButton(text="🔗 Открыть у источника", url=url)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------- Inline-режим: «Поделиться» из миниаппа ----------
+
+# Запрос из WebApp.switchInlineQuery: "listing:<id>" (и старые варианты)
+_LISTING_INLINE_QUERY = re.compile(r"^listing[_:\-\s]?(\d+)$", re.IGNORECASE)
+
+
+def build_share_kb(listing_id: int, url: str, bot_username: str) -> InlineKeyboardMarkup:
+    """Кнопки inline-карточки лота.
+
+    «Открыть в приложении» — deep link миниаппа t.me/<bot>?startapp=listing_<id>:
+    по нему StartParamRedirect во фронте открывает карточку лота. web_app-кнопка
+    здесь не используется: она открыла бы миниапп без параметра лота.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    username = (bot_username or "").strip().lstrip("@")
+    if username:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📱 Открыть в приложении",
+                    url=f"https://t.me/{username}?startapp=listing_{listing_id}",
+                )
+            ]
+        )
+    if url:
+        rows.append([InlineKeyboardButton(text="🔗 Открыть у источника", url=url)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_share_article(listing: dict, bot_username: str) -> InlineQueryResultArticle:
+    """Inline-результат: карточка лота для отправки в любой чат (ТЗ «Поделиться»)."""
+    listing_id = int(listing.get("id") or 0)
+    title = (
+        " ".join(x for x in [listing.get("make"), listing.get("model")] if x)
+        or "Автомобиль"
+    )
+    if listing.get("year"):
+        title = f"{title}, {listing['year']}"
+    caption = build_listing_caption(listing)
+    kwargs: dict = {
+        "id": f"listing_{listing_id}",
+        "title": title[:256],
+        "description": (caption[:256] if caption else None),
+        "input_message_content": InputTextMessageContent(
+            message_text=caption, parse_mode="HTML", disable_web_page_preview=False
+        ),
+        "reply_markup": build_share_kb(
+            listing_id, listing.get("url") or "", bot_username
+        ),
+    }
+    # Thumb Telegram принимает только JPEG (эмбеды картинок из источника webp —
+    # их не подсовываем, у карточки без thumb будет стандартная буквенная).
+    thumb = next(
+        (
+            u
+            for u in (listing.get("images") or [])
+            if u.split("?")[0].lower().endswith((".jpg", ".jpeg"))
+        ),
+        None,
+    )
+    if thumb:
+        # aiogram 3.13: поле переименовано в thumbnail_url (thumb_url молча теряется)
+        kwargs["thumbnail_url"] = thumb
+    return InlineQueryResultArticle(**kwargs)
+
+
+@router.inline_query()
+async def inline_listing_share(query: InlineQuery) -> None:
+    """Ответ на switchInlineQuery("listing:<id>") из миниаппа: карточка лота."""
+    results: list[InlineQueryResultArticle] = []
+    m = _LISTING_INLINE_QUERY.match((query.query or "").strip())
+    if m:
+        listing = await backend.get_listing(int(m.group(1)))
+        if listing:
+            from app.core.config import get_settings
+
+            username = (get_settings().bot_username or "").lstrip("@") or (
+                query.bot.username if query.bot else ""
+            )
+            results.append(build_share_article(listing, username))
+    # Пустой/чужой запрос — просто ничего (без предупреждений в чате)
+    await query.answer(results, cache_time=15, is_personal=True)
 
 
 async def handle_deep_link(message: Message, args: str) -> bool:

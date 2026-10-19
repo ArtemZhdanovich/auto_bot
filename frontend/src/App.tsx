@@ -15,7 +15,7 @@ export function tgAppearance(): "light" | "dark" {
   return cs === "dark" ? "dark" : "light";
 }
 
-import { authorize, guestLogin, isGuest, clearGuest } from "./api/auth";
+import { authorize, guestLogin, isGuest, clearGuest, getWebApp } from "./api/auth";
 import { api, getAccessToken } from "./api/client";
 import { LoginScreen } from "./screens/Login";
 import { FeedScreen } from "./screens/Feed";
@@ -99,6 +99,21 @@ function NavBar({ desktop }: { desktop: boolean }) {
       ))}
     </Tabbar>
   );
+}
+
+/**
+ * Deep-link из карточки в чате: t.me/<bot>?startapp=listing_<id>
+ * → открываем лот в вебаппе. Только внутри BrowserRouter (нужен useNavigate).
+ */
+function StartParamRedirect() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const sp = getWebApp()?.initDataUnsafe?.start_param;
+    if (!sp) return;
+    const m = /^listing[_-]?(\d+)$/.exec(sp);
+    if (m) navigate(`/listing/${m[1]}`, { replace: true });
+  }, [navigate]);
+  return null;
 }
 
 /** Реакция на ширину окна для mobile/desktop переключения. */
@@ -210,6 +225,7 @@ function MiniApp() {
       <AppRoot appearance={tgAppearance()}>
         <div className={isDesktop ? "app-shell app-shell--desktop" : "app-shell"}>
           <BrowserRouter>
+            <StartParamRedirect />
             {isDesktop && <NavBar desktop />}
             {guest && !bannerHidden && (
               <div className="guest-banner">

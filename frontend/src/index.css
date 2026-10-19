@@ -386,11 +386,10 @@ main {
    Sticky CTA-бар карточки объявления (мобайл): цена + действие
    ============================================================ */
 .listing-cta-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  /* над таббаром; отступ учитывает жест-зону iPhone */
-  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  /* sticky, а не fixed: бар в потоке страницы — физически не может
+     перекрыть таббар/контент; липнет к низу вьюпорта над таббаром */
+  position: sticky;
+  bottom: calc(var(--tabbar-h, 56px) + env(safe-area-inset-bottom, 0px));
   z-index: 100;
   display: flex;
   align-items: center;
@@ -445,20 +444,17 @@ main {
 
 /* Кнопка «Назад» поверх галереи карточки объявления */
 .listing-back {
-  position: absolute;
-  top: calc(var(--space-3) + 8px);
-  left: var(--space-4);
-  z-index: 20;
+  /* В потоке страницы (раньше absolute поверх галереи — перекрывал контент) */
+  align-self: flex-start;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 40px;
   height: 40px;
-  border: none;
+  border: 1px solid var(--border);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(4px);
-  color: #111;
+  background: var(--bg-secondary);
+  color: var(--text);
   font-size: 26px;
   line-height: 1;
   box-shadow: var(--shadow-sm);
@@ -2085,13 +2081,12 @@ main {
 
 /* --- Карточка объявления: ПК = 2 колонки (галерея+инфо | действия) --- */
 .listing-page {
-  position: relative; /* якорь для кнопки «Назад» поверх галереи */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-4);
-  /* резерв под sticky CTA-бар + таббар (мобайл), чтобы «Назад» не перекрывался */
-  padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  /* sticky CTA-бар в потоке — резерв под него больше не нужен */
   max-width: 760px;
   margin: 0 auto;
 }

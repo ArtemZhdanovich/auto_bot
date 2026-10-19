@@ -1679,3 +1679,149 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 - **Правило на будущее:** поднимать строго один профиль
   (`--profile mono` ИЛИ `--profile micro`); если нужен micro — погасить mono
   и прописать микросервисам REDIS_URL через compose environment.
+
+## 2026-10-18: launch: RSS-порог translate, hf_cache, fp16, DNS/137-инцидент, парсеры
+
+### translate: kill-loop по RSS → порог + память + fp16
+- **Симптом:** 30 рестартов translate за 3 часа; вечная перекачка NLLB с HF.
+- **Причина 1:** RSS-сторож `TRANSLATE_MAX_RSS_MB=2600` был НИЖЕ легитимного
+  пика модель+инференс (~2.9ГБ fp32) → kill после каждой загрузки модели.
+  Фикс: `TRANSLATE_MAX_RSS_MB=2950`, `mem_limit/memswap_limit: 3500m`.
+- **Причина 2 (главная):** на хосте всего **5.8ГБ RAM** (WSL2 VM) — translate
+  fp32 + qdrant(2g) + rag_worker(1.5g) не сходятся в бюджет → контейнеры
+  получали 137/SIGKILL (в т.ч. весь стек разом ~18:00). Фикс: NLLB грузится
+  в **float16** (`torch_dtype=torch.float16` в nllb.py) — весов вдвое меньше
+  (~1.2ГБ), инференс на CPU всё равно считается во fp32, качество то же.
+- **Перекачка весов:** добавлен volume `hf_cache:/srv/.hf` (top-level volumes)
+  + `HF_HUB_DISABLE_XET=1` (xet-протокол HF зависал на 0 байт через
+  us.aws.cdn.hf.co — обычный HTTP-CDN работает стабильно).
+- **Dockerfile translate:** retry-цикл ×5 + `--mount=type=cache,pip` +
+  `PIP_RETRIES=10/TIMEOUT=300`; transformers пин `<5` (v5 убрал pipeline
+  «translation»); `translate_client_from_settings`: `max_retries=4`
+  (Docker-embedded DNS флапает после массовых пересозданий).
+- **Корневой Dockerfile** переведён на ту же схему (cache-маунт + retry ×5):
+  зависимости больше не перекачиваются при пересборке из-за изменения кода.
+
+### DNS/сеть Docker Desktop
+- Встроенный DNS периодически отдаёт `Temporary failure in name resolution`
+  на внешние хосты (us.aws.cdn.hf.co) → зависшие закачки, обрывы pip, билдов.
+  Правило: любые сетевые операции в контейнерах/билдах — с ретраями; при
+  каскадных 137 — перезапуск Docker Desktop.
+- **Инцидент «вебапп не открывается»:** gateway (micro) имел алиас `backend`
+  → DNS round-robin с mono-backend → 502. Погашен `docker compose stop
+  gateway`; правило: строго один профиль (`--profile mono` сейчас).
+
+### Парсеры не работали
+- У encar/kcar в БД был пустой `schedule_cron` → планировщик их не тикал.
+  Проставлено `*/30 * * * *` — после этого encar спарсил 50 лотов.
+
+### Инфра фиксы запуска
+- miniapp healthcheck на `127.0.0.1` (localhost→::1, nginx IPv4-only);
+- minio на `bitnamilegacy` + разовый chown 1001:1001 volume;
+- `migrations/env.py` → `rag_core.infrastructure.repositories`;
+- рантайм-стейдж rag: COPY rag_core/rag_worker/rag_api;
+- `.env`: `RAG_LLM_PROVIDER=glm`, `TRANSLATE_ENABLED=true`,
+  `TRANSLATE_SERVICE_URL=http://translate:8200`.
+
+### Статус
+- Стек `--profile mono` поднят (gateway погашен осознанно); translate —
+  первая закачка NLLB в hf_cache volume идёт, далее смоук и очередь
+  translate_listings. Смоуки миграций/перевода до fp16 — 200; pytest 618 green.
+- Выводы: (1) порог RSS-сторожа обязан быть выше пика модель+инференс;
+  (2) fp16 для CPU-инференса — способ уложить LLM в 6ГБ VM;
+  (3) кэш-маунты в Dockerfile обязательны на плохом канале;
+  (4) опционально — `HF_TOKEN` в .env для быстрых зеркал.
+
+### Перевод тайтлов в проде (translate_listings)
+- Первые прогоны падали: (1) 147 лотов одной задачей не влезали в
+  `job_timeout=120` очереди → `enqueue_translate` теперь дробит на чанки по
+  `translate_batch_size` (32); (2) bulk UPDATE с доп. WHERE в ORM падал
+  (`InvalidRequestError`) → переведён на Core-апдейт `update(Listing.__table__)`.
+- Итог: **encar 147/147 translated, pending=0** ('제네시스 GV60' →
+  'Генезис GV60'); смоук fetch encar вручную — новые лоты перевелись
+  автоматически (fetch→translate конвейер жив, cron */30 в БД).
+- NLLB в fp16: RSS translate ~1.9ГБ (было ~2.9ГБ), рестартов 0.
+
+## 2026-10-18 (вечер): картинки encar + UI-фиксы PDP, парсер по cron
+- **Картинки не открывались**: encar-адаптер делал `str(dict)` для элементов
+  `Photos` → URL вида `https://ci.encar.com/%7B'type':…%7D`. Фикс адаптера
+  (разворачиваем `location`); 185/185 существующих записей починены из их же
+  URL-ов (unquote + literal_eval). HEAD-проверка: 200 image/webp. kcar — ок.
+- **«Назад» перекрывал контент**: `.listing-back` absolute поверх галереи →
+  переведён в поток страницы (align-self: flex-start).
+- **CTA-бар перекрывал таббар**: `.listing-cta-bar` fixed c bottom 64px →
+  `position: sticky; bottom: calc(var(--tabbar-h) + safe-area)` — в потоке,
+  физически не перекрывает навигацию; резерв 150px у .listing-page убран.
+  miniapp пересобран; vitest 88/88, tsc 0.
+- **cron-планировщик**: `cron_matches` проверен на '*/30 * * * *' — корректен;
+  добавлена поддержка шортката '*/n' (одно поле) в app/services/cron.py.
+  Тики 20:00/19:30 попадали в окна пересоздания worker_fetch — контрольный
+  тик 20:30 UTC подтверждён логом `schedule_fetch_due` (см. далее).
+
+## 2026-10-19: починен планировщик парсера (asyncio.Event.wait bug)
+- **Парсер не тикал по cron**: TaskWorker._interval_loop/_cron_loop/_monitor_loop
+  вызывали `self._stop.wait(timeout=…)` — у asyncio.Event НЕТ параметра
+  timeout (это API threading.Event) → TypeError → таска умирала молча
+  (create_task без ретрива), interval_job_done никогда не логировался.
+  Фикс: helper `_sleep_until_stop(timeout)` на asyncio.wait_for.
+- **Подтверждено продой**: `interval_job_done: schedule_fetch_due` каждую
+  минуту; в 04:00 UTC `schedule_fetch_due: scheduled=2` → encar `new=15`,
+  kcar пошёл; `cron_job_done: stale_check_job` в 04:00. За ночь 185→809
+  encar, 203 kcar — парсер+перевод работают постоянно.
+- kcar-батчи 32 в 22:36 вернули 0 переводов (разовый сбой на warmup
+  translate) — перевыставлены; далее 32/32 ок. 200 kcar-тайтлов дозакрыты.
+- Тесты: 616 passed + 2 FAILED tests/test_security_initdata.py — падают и на
+  чистом HEAD (существующая регрессия, не из этой сессии; проверить отдельно).
+
+## 2026-10-19 (позже): translate-ретраи + глоссарий hangul-тайтлов + openLink миниаппа
+
+### Ссылки «источник» не работали из миниаппа
+- Причина: Telegram WebView блокирует `<a target="_blank">` и `window.open()` —
+  в коде не было ни одного `Telegram.WebApp.openLink()`.
+- Фикс: `openExternal()` (frontend/src/lib/external.ts): telegram-контекст →
+  `WebApp.openLink(url, {try_instant_view:false})`, браузер → `window.open`.
+  Задействовано в ListingCard (ссылка-источник) и Listing.tsx (2 CTA-кнопки).
+  `TelegramWebApp` дополнен `openLink` (api/auth.ts).
+- Формат URL проверен живьём: kcar 200 OK; encar `fem.encar.com/car/detail/{id}` —
+  актуальный мобильный веб-хвост (SPA-шелл; полный рендер только с корейских IP —
+  ограничение энкара, не ссылки). `car.encar.com/cars/car/{id}` 404 даже с US IP.
+- vitest 90/90 (+2 теста openExternal), tsc 0; miniapp пересобран.
+
+### Кринжовые переводы: глоссарий перед NLLB
+- Причина: NLLB переводит hangul-бренды как нарицательные: 현대→«Современный»,
+  기아→«Голод», 폭스바겐→«Фоксбаген», 인스퍼레이션 (trim Inspiration)→«вдохновение».
+- Фикс: `app/services/translate_glossary.py` — словарь hangul→канон
+  (бренды латиницей, модели в русской транслитерации, термины/комплектации),
+  longest-match замена с hangul-границами; применяется в `translate_listings`
+  к тексту перед `client.translate` (title_raw в БД не меняется).
+- Частоты сняты с базы: 현대 422, 기아 295, 그랜저 109, 싼타페 74, 인스퍼레이션 8 …
+- Примеры после: `기아 더 뉴 K7`→«Kia The New K7», `기아 카니발 4세대`→
+  «Kia Карнивал 4 поколение», `현대 팰리세이드`→«Hyundai Palisade».
+- Ретранслируются ВСЕ лоты (1172+, задача идемпотентна); кэш translate-клиента
+  ключуется исходным текстом — старые записи не совпадают, пересчёт чистый.
+- Также: `translate_timeout_sec` 30→180 (инференс сериализован локом от
+  «Already borrowed» в tokenizers; 3 параллельных чанка могли не влезть в 30 с);
+  0/N переводов теперь RuntimeError → воркер ретраит задачу (attempt 3/3) —
+  DNS-флапы и таймауты больше не «успешно» теряют батчи.
+- Тесты: test_translate.py 16/16 (6 новых на глоссарий); ruff ok.
+
+## 2026-10-20: «Поделиться» лотом из миниаппа (inline-режим бота)
+
+- Кнопка «Поделиться» на PDP (CTA-блок + иконка в sticky-баре): вызывает
+  `WebApp.switchInlineQuery("listing:<id>")` → выбор чата → бот отвечает
+  карточкой. Хелпер `shareListing()` (lib/external.ts); вне Telegram/без
+  inline — тост «Поделиться можно из Telegram».
+- Бот: `@router.inline_query()` в handlers.py — парсит `listing:<id>`,
+  карточка = `build_listing_caption` + кнопки `build_share_kb`: «📱 Открыть
+  в приложении» (`https://t.me/<bot>?startapp=listing_<id>`) + «🔗 Открыть
+  у источника». Thumb — только JPEG (webp источника пропускаем).
+- Фронт: `StartParamRedirect` (App.tsx) читает `initDataUnsafe.start_param`
+  `listing_<id>` → `navigate(/listing/<id>)` — карточка из чата открывается
+  в лот вебаппа. (Бот-хендлер `/start listing_{id}` работал и раньше.)
+- Ловушка aiogram 3.13: `thumb_url` в InlineQueryResultArticle молча
+  игнорируется — только `thumbnail_url` (иначе миниатюра не уходит).
+- Тесты: test_bot_inline_share.py 8/8 (карточка, кнопки, regex, пустой
+  запрос, missing listing); vitest 93/93 (+3: shareListing/openLink), tsc 0;
+  ruff ok. bot/miniapp пересобраны, polling запущен.
+- Ручной шаг: inline-режим бота должен быть включён в BotFather (`/setinline`),
+  иначе switchInlineQuery из вебаппа ничего не откроет.

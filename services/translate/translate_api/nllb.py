@@ -46,19 +46,33 @@ class NLLBTranslator:
         self._pipe = None
         self._cache: dict[tuple[str, str], str] = {}
         self._lock = threading.Lock()
+        # tokenizers (Rust) не потокобезопасны: параллельные вызовы pipeline
+        # из нескольких request-потоков падают «RuntimeError: Already borrowed».
+        # Инференс сериализуем, кэш-поиск может идти параллельно.
+        self._infer_lock = threading.Lock()
 
     @property
     def loaded(self) -> bool:
         return self._pipe is not None
 
     def load(self) -> None:
-        """Загрузка модели (тяжёлый импорт transformers — лениво)."""
+        """Загрузка модели (тяжёлый импорт transformers — лениво).
+
+        float16: весов вдвое меньше (~1.2ГБ vs ~2.4ГБ fp32) — на хосте с 6ГБ RAM
+        иначе не сходится бюджет с qdrant/rag; инференс на CPU всё равно
+        выполняется во float32, качество то же.
+        """
         if self._pipe is not None:
             return
+        import torch  # noqa: PLC0415
         from transformers import pipeline  # noqa: PLC0415
 
-        logger.info("loading_nllb: %s", self.model_name)
-        self._pipe = pipeline("translation", model=self.model_name)  # CPU по умолчанию
+        logger.info("loading_nllb: %s (fp16)", self.model_name)
+        self._pipe = pipeline(
+            "translation",
+            model=self.model_name,
+            torch_dtype=torch.float16,  # CPU по умолчанию
+        )
         logger.info("nllb_loaded")
 
     def warmup(self) -> None:
@@ -94,21 +108,22 @@ class NLLBTranslator:
         for lang, items in groups.items():
             # Чанками: 64 текста за прогон держат в памяти большой KV-кэш,
             # который transformers на CPU не всегда возвращает системе.
-            for start in range(0, len(items), _CHUNK):
-                chunk = items[start : start + _CHUNK]
-                outputs = self._pipe(
-                    [t for _, t in chunk],
-                    src_lang=lang,
-                    tgt_lang=target_lang,
-                    max_new_tokens=128,
-                )
-                for (i, stripped), out in zip(chunk, outputs):
-                    translated = (out.get("translation_text") or "").strip() or None
-                    results[i] = translated
-                    if translated:
-                        with self._lock:
-                            if len(self._cache) >= _CACHE_MAX:
-                                self._cache.clear()  # простой reset вместо LRU-вытеснения
-                            self._cache[(lang, stripped)] = translated
-                gc.collect()  # вернуть активационную память после каждого чанка
+            with self._infer_lock:  # tokenizers: «Already borrowed» без лока
+                for start in range(0, len(items), _CHUNK):
+                    chunk = items[start : start + _CHUNK]
+                    outputs = self._pipe(
+                        [t for _, t in chunk],
+                        src_lang=lang,
+                        tgt_lang=target_lang,
+                        max_new_tokens=128,
+                    )
+                    for (i, stripped), out in zip(chunk, outputs):
+                        translated = (out.get("translation_text") or "").strip() or None
+                        results[i] = translated
+                        if translated:
+                            with self._lock:
+                                if len(self._cache) >= _CACHE_MAX:
+                                    self._cache.clear()  # простой reset вместо LRU-вытеснения
+                                self._cache[(lang, stripped)] = translated
+                    gc.collect()  # вернуть активационную память после каждого чанка
         return results

@@ -268,10 +268,14 @@ class EncarApiAdapter(BaseApiAdapter):
         price_man = raw.get("Price")
         price = Decimal(str(price_man)) * 10_000 if price_man is not None else None
 
-        photos = [
-            f"{self._photo_prefix}/{str(p).lstrip('/')}"
-            for p in (raw.get("Photos") or ([raw["Photo"]] if raw.get("Photo") else []))
-        ]
+        # Photos — список dict {'type','location',...}; раньше str(dict) давал
+        # мусорные URLs (…/%7B'type':…%7D) и фото не открывались. Разворачиваем
+        # location; строковые пути (старый контракт) — как раньше.
+        photos = []
+        for p in raw.get("Photos") or ([raw["Photo"]] if raw.get("Photo") else []):
+            path = p.get("location") if isinstance(p, dict) else p
+            if path:
+                photos.append(f"{self._photo_prefix}/{str(path).lstrip('/')}")
 
         # FormYear — строка года ('2022'), Year — YYYYMM (202208.0) в новом
         # контракте. Приоритет FormYear; из YYYYMM достаём год.

@@ -47,9 +47,16 @@ def _cron_dow(dt: datetime) -> int:
 
 
 def cron_matches(expr: str, dt: datetime) -> bool:
-    """Совпадает ли cron-выражение с моментом dt (UTC, точность до минуты)."""
+    """Совпадает ли cron-выражение с моментом dt (UTC, точность до минуты).
+
+    Шорткат: одно поле `*/n` (например `*/30`) = каждые n минут от начала часа
+    — частая запись в sources.schedule_cron; разворачивается в `*[/n] * * * *`.
+    """
     try:
         fields = expr.split()
+        if len(fields) == 1 and fields[0].startswith("*/"):
+            int(fields[0][2:])  # валидность шага проверит _parse_field
+            fields = [fields[0], "*", "*", "*", "*"]
         if len(fields) != 5:
             raise ValueError(f"expected 5 fields, got {len(fields)}")
         minute, hour, dom, month, dow = (

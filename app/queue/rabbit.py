@@ -258,6 +258,19 @@ class TaskWorker:
 
     # --- cron ---------------------------------------------------------------
 
+    async def _sleep_until_stop(self, timeout: float) -> bool:
+        """True — stop установлен (выходим), False — истёк timeout.
+
+        asyncio.Event.wait(), в отличие от threading, не принимает timeout —
+        прямой вызов .wait(timeout=…) кидал TypeError и молча убивал таски
+        cron/interval/monitor планировщика (create_task без ретрива).
+        """
+        try:
+            await asyncio.wait_for(self._stop.wait(), timeout=max(timeout, 0.1))
+        except asyncio.TimeoutError:
+            return False
+        return True
+
     async def _cron_loop(self) -> None:
         from datetime import datetime, timedelta, timezone
 
@@ -277,7 +290,7 @@ class TaskWorker:
                 continue
             target, spec = next_run
             delay = (target - now).total_seconds()
-            if await self._stop.wait(timeout=max(delay, 0.1)):
+            if await self._sleep_until_stop(max(delay, 0.1)):
                 return
             # лок от дублей, если воркеров несколько
             lock_key = f"cron:{spec.name}:{target.strftime('%Y%m%d%H%M')}"
@@ -300,7 +313,7 @@ class TaskWorker:
 
         threshold = get_settings().dlq_alert_threshold
         while not self._stop.is_set():
-            if await self._stop.wait(timeout=interval):
+            if await self._sleep_until_stop(interval):
                 return
             try:
                 assert self._connection is not None
@@ -323,7 +336,7 @@ class TaskWorker:
         from datetime import datetime, timezone
 
         while not self._stop.is_set():
-            if await self._stop.wait(timeout=max(spec.every_sec, 1)):
+            if await self._sleep_until_stop(max(spec.every_sec, 1)):
                 return
             slot = int(datetime.now(timezone.utc).timestamp()) // spec.every_sec
             lock_key = f"interval:{spec.name}:{slot}"
