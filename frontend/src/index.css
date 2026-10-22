@@ -2113,6 +2113,12 @@ main {
     max-width: 1200px;
     padding: var(--space-5);
   }
+  /* Кнопка «Назад» — первый ребёнок .listing-page: без этого правила она
+     занимает грид-ячейку (1,1), main с галереей уезжает в узкую правую
+     колонку, а side — в широкую левую (раскладка «вывернута») */
+  .listing-back {
+    grid-column: 1 / -1;
+  }
   .listing-page__side {
     position: sticky;
     top: var(--space-4);

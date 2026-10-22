@@ -374,7 +374,10 @@ class Settings(BaseSettings):
         return self
 
     # --- Микросервисы (профиль micro; gateway маршрутизирует /api/*) ---
-    gateway_timeout_sec: float = Field(default=15.0, gt=0)
+    # 150с: POST /api/listings/{id}/analysis гоняет LLM до 120с
+    # (app/transport/bot/client.py — тот же лимит) — дефолт 15с рвал
+    # долгие разборы: «анализ не всегда в тайминги попадает».
+    gateway_timeout_sec: float = Field(default=150.0, gt=0)
     svc_identity_url: str = "http://localhost:8101"
     svc_catalog_url: str = "http://localhost:8102"
     svc_billing_url: str = "http://localhost:8103"

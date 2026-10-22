@@ -48,6 +48,27 @@
   правила в ROUTE_RULES → «no route for /api/bot/...».
 - **Фикс:** `analysis.router` + `analysis.bot_router` смонтированы в
   catalog (общий префикс /api/listings, полный DI-контейнер общий —
+## 72. Анализ: gateway рвал запросы через 15с; ПК: грид карточки «вывернут» кнопкой «Назад» (2026-10-22)
+
+- **«Не всегда в тайминги попадаем»** — `gateway_timeout_sec` имел
+  дефолт **15с**, а LLM-разбор длится до 120с (лимит bot-клиента).
+  Быстрый ответ LLM успевал, долгий — рвался gateway-ем (httpx
+  ReadTimeout). Дефолт → **150с**, gateway пересобран. (В .env
+  переопределений не было.)
+- **ПК-вёрстка страницы карточки «вывернута»** — найдено замерами
+  playwright (1280×900): первый ребёнок `.listing-page` — кнопка
+  «Назад» — в гриде (min-width:1024, `grid-template-columns: 1.6fr 1fr`)
+  занимала ячейку (1,1); main с галереей уезжал в правую узкую колонку
+  (418px), side — в левую широкую (670px). Ровно «уход вправо первой
+  части карточки с картинками». Фикс: `.listing-back { grid-column:
+  1 / -1 }` в том же media-блоке. После: main 670px слева, side 418px
+  справа, кнопка отдельной строкой.
+- **Метод:** headless chromium (playwright в tmp, npmmirror-зеркало) —
+  скриншоты + программные замеры rect всех элементов, sticking-поиск
+  (right>viewport / left<0). Лента: переполнения нет; экран
+  «Уведомления»: sticking пуст. 93/93 фронт-тестов зелёные.
+
+
   create_domain_service/make_container); в ROUTE_RULES добавлено
   `RouteRule("/api/bot", "catalog")`. Тесты routing: +2 кейса (52/52).
 - **Проверка:** web без токена 404→401 «Missing bearer token»;
