@@ -3,7 +3,7 @@
 import asyncio
 import time
 
-from app.services.heartbeat import heartbeat_path, is_alive, start_heartbeat
+from app.infrastructure.runtime.heartbeat import heartbeat_path, is_alive, start_heartbeat
 
 
 async def test_is_alive_false_without_file():

@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-import app.workers.send as send_mod
-from app.db.models import Listing, SentLog, UserFilter
-from app.services.notify import notified_key, read_digest
+import app.infrastructure.workers.send as send_mod
+from app.infrastructure.db.models import Listing, SentLog, UserFilter
+from app.infrastructure.services.notify import notified_key, read_digest
 from tests.conftest import FakeRedis, FakeSession
 
 

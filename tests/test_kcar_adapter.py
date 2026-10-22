@@ -8,10 +8,10 @@ import pytest
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.padding import PKCS7
 
-from app.adapters.common.http import FetchError, HttpClient
-from app.adapters.common.normalize import normalize_make
-from app.adapters.kcar import KCAR_MAKE_NAMES, KCarApiAdapter, _encrypt_params
-from app.schemas.criteria import SearchCriteria
+from app.infrastructure.sources.common.http import FetchError, HttpClient
+from app.infrastructure.sources.common.normalize import normalize_make
+from app.infrastructure.sources.kcar import KCAR_MAKE_NAMES, KCarApiAdapter, _encrypt_params
+from app.domain.search.criteria import SearchCriteria
 
 SAMPLE_ITEM = {
     "carCd": "EC61405190",
@@ -105,7 +105,7 @@ async def test_fetch_maps_to_unified_listing():
     assert item.seller_type == "dealer"  # kcar — сеть 직영-центров
     assert [str(i) for i in item.images] == [SAMPLE_ITEM["lsizeImgPath"]]
     assert item.raw == SAMPLE_ITEM  # raw_payload сохраняется (ТЗ п. 6.1)
-    assert result.source_meta == {"total": 8857, "fetched": 1}
+    assert result.source_meta == {"total": 8857, "fetched": 1, "truncated": True}
     await adapter.close()
 
 
@@ -148,14 +148,17 @@ async def test_build_params_filters():
     await adapter.close()
 
 
-async def test_build_params_unmapped_filters_skipped():
-    """Непереводимые марка/модель/топливо не превращаются в пустые фильтры."""
+async def test_build_params_unmapped_make_raises():
+    """Неизвестная марка — явная ошибка, а не запрос без фильтра.
+
+    Продуктовое решение: молча отбросить `make` нельзя — вернутся машины
+    других марок, и пользователь получит неверную выдачу. Поэтому парсер
+    падает с `FetchError`, а вызывающий код решает, что делать.
+    """
     adapter, requests = make_adapter([])
-    await adapter.fetch(SearchCriteria(make="ZAZ", model="Tavria", fuel="hybrid"))
-    params = _decrypt_params(json.loads(requests[0].content)["enc"])
-    assert "wr_in_mnuftr_nm" not in params
-    assert "wr_in_model_nm" not in params
-    assert "wr_in_fuel_cd" not in params  # код не подтверждён — не шлём
+    with pytest.raises(FetchError, match="not supported"):
+        await adapter.fetch(SearchCriteria(make="ZAZ", model="Tavria"))
+    assert requests == []
     await adapter.close()
 
 

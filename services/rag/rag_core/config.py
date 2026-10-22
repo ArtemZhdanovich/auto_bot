@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     minio_secure: bool = False
     # Post-quantum at-rest encryption for stored documents (ML-KEM-768 +
     # X25519 hybrid, AES-256-GCM). Keys are hex raw bytes; generate with
-    # ``app.core.pq_crypto.generate_keypair()`` (public ~2432 hex chars).
+    # ``app.infrastructure.security.pq_crypto.generate_keypair()`` (public ~2432 hex chars).
     encrypt_documents: bool = False
     pq_encryption_public_key: str | None = None
     pq_encryption_private_key: str | None = None

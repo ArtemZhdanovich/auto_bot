@@ -10,9 +10,9 @@ from typing import Any
 import httpx
 import pytest
 
-import app.workers.fetch as fetch_mod
-from app.services.translate_client import TranslateClient
-from app.services.translate_glossary import apply_glossary
+import app.infrastructure.workers.fetch as fetch_mod
+from app.infrastructure.services.translate_client import TranslateClient
+from app.domain.translation.glossary import apply_glossary
 from tests.conftest import FakeRedis, FakeSession
 
 

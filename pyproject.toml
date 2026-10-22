@@ -20,6 +20,9 @@ dependencies = [
     "aio-pika>=10.1.1",
     "cryptography>=45",
     "aioboto3>=13.2",
+    "dishka>=1.10.1",
+    "dishka-faststream>=0.7.0",
+    "faststream>=0.7.7",
 ]
 
 [dependency-groups]

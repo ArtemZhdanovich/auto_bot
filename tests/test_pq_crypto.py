@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core import pq_crypto as pq
+from app.infrastructure.security import pq_crypto as pq
 
 
 @pytest.fixture(scope="module")
@@ -14,7 +14,8 @@ def test_keypair_sizes(keypair):
     pub, priv = keypair
     # ML-KEM-768 public (1184) + X25519 (32); seed (64) + X25519 (32)
     assert len(bytes.fromhex(pub)) == pq._PQ_PUBLIC_SIZE + 32
-    assert len(bytes.fromhex(priv)) == pq._PQ_SEED_SIZE + 32
+    # version (1B) + seed (64B) + X25519 (32B)
+    assert len(bytes.fromhex(priv)) == 1 + pq._PQ_SEED_SIZE + 32
 
 
 def test_roundtrip(keypair):

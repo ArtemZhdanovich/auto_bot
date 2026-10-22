@@ -2,12 +2,12 @@
 
 import pytest
 
-from app.db.models import AnalyticsEvent, Payment, User
-from app.core.deps_internal import internal_token
-from app.services import analytics
-from app.services.analytics import track
-from app.services.users import upsert_user
-from conftest import FakeSession
+from app.infrastructure.db.models import AnalyticsEvent, Payment, User
+from app.transport.http.deps.internal import internal_token
+from app.infrastructure.services import analytics
+from app.infrastructure.services.analytics import track
+from app.infrastructure.services.users import upsert_user
+from conftest import FakeSession, install_test_container
 
 
 class _BrokenSession(FakeSession):
@@ -61,10 +61,9 @@ async def test_upsert_user_existing_no_event(fake_session):
 @pytest.mark.asyncio
 async def test_payment_success_tracks_activation(fake_session):
     """Оплата → subscription_activated с tier/days/stars (идемпотентно)."""
-    from app.main import app
+    from app.main_api import app
     from httpx import ASGITransport, AsyncClient
-    from app.db.session import get_session
-
+    
     payment = Payment(
         id=10,
         user_id=9,
@@ -79,7 +78,8 @@ async def test_payment_success_tracks_activation(fake_session):
     fake_session.add(user)
 
     headers = {"X-Internal-Token": internal_token()}
-    app.dependency_overrides[get_session] = lambda: fake_session
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=fake_session)
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -90,7 +90,8 @@ async def test_payment_success_tracks_activation(fake_session):
                 headers=headers,
             )
     finally:
-        app.dependency_overrides.clear()
+        app.state.dishka_container = _prev
+        await _container.close()
     assert resp.status_code == 200
     events = [x for x in fake_session.added if isinstance(x, AnalyticsEvent)]
     assert len(events) == 1
@@ -98,7 +99,8 @@ async def test_payment_success_tracks_activation(fake_session):
     assert events[0].props == {"tier": "pro", "days": 30, "stars": 100.0}
 
     # идемпотентность: повторный success — события не добавляет
-    app.dependency_overrides[get_session] = lambda: fake_session
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=fake_session)
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -109,5 +111,6 @@ async def test_payment_success_tracks_activation(fake_session):
                 headers=headers,
             )
     finally:
-        app.dependency_overrides.clear()
+        app.state.dishka_container = _prev
+        await _container.close()
     assert len([x for x in fake_session.added if isinstance(x, AnalyticsEvent)]) == 1

@@ -12,7 +12,7 @@ import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.config import get_settings
+from app.config import get_settings
 from services.gateway.main import create_app
 
 TEST_URLS: dict[str, str] = {

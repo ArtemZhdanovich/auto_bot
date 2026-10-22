@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.price_analysis import (
+from app.infrastructure.services.price_analysis import (
     QuotaExceeded,
     _stats,
     _verdict_from_stats,
@@ -142,7 +142,7 @@ def test_run_analysis_llm_down_stats_fallback():
 
 
 def test_run_analysis_quota_free_exceeded(monkeypatch):
-    from app.services import price_analysis as pa
+    from app.infrastructure.services import price_analysis as pa
 
     async def fake_quota(session, user_id, listing_id):
         return 0
@@ -154,7 +154,7 @@ def test_run_analysis_quota_free_exceeded(monkeypatch):
 
 
 def test_run_analysis_quota_paid_tier_skips(monkeypatch):
-    from app.services import price_analysis as pa
+    from app.infrastructure.services import price_analysis as pa
 
     async def fake_quota(session, user_id, listing_id):
         raise AssertionError("pro не должен проверять квоту")

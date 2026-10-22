@@ -3,7 +3,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
+from app.main_api import app
 
 
 @pytest.fixture
@@ -103,15 +103,29 @@ async def test_compare_sorted_by_total(http):
 
 
 @pytest.mark.asyncio
-async def test_compare_skips_bad_items_and_falls_back_title(http):
+async def test_compare_rejects_bad_items(http):
+    """Битый item (нет price_usd) → 422 на входе, а не молча выпадает.
+
+    Контракт CompareItem совпадает с DeliveryIn: цена обязательна.
+    """
     resp = await http.post(
         "/api/calc/compare",
         json={
             "items": [
-                {"engine_cc": 2000, "year": 2022},  # нет цены → пропустить
-                {"price_usd": 9000, "year": 2018},  # без title → автотайтл
+                {"engine_cc": 2000, "year": 2022},  # нет цены
+                {"price_usd": 9000, "year": 2018},
             ]
         },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_compare_autotitle_when_missing(http):
+    """Без title — автотайтл «<год> г. · <объём> см³»."""
+    resp = await http.post(
+        "/api/calc/compare",
+        json={"items": [{"price_usd": 9000, "engine_cc": 2000, "year": 2018}]},
     )
     assert resp.status_code == 200
     items = resp.json()["items"]

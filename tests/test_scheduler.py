@@ -2,9 +2,9 @@
 
 import pytest
 
-import app.workers.fetch as fetch_mod
-from app.db.models import Source
-from app.queue import IntervalSpec
+import app.infrastructure.workers.fetch as fetch_mod
+from app.infrastructure.db.models import Source
+from app.infrastructure.messaging.legacy_worker import IntervalSpec
 from conftest import FakeRedis, FakeSession
 
 

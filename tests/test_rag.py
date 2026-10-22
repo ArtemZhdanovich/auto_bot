@@ -5,10 +5,10 @@ import json
 import httpx
 import pytest
 
-from app.ai.agent import run_agent
-from app.ai.llm_client import LLMResult, MockLLMClient, ToolCall
-from app.ai.rag_client import RAGClient, RAGUnavailable
-from app.schemas.rag import RAGAnswer, RAGSource
+from app.infrastructure.ai.agent import run_agent
+from app.infrastructure.ai.llm_client import LLMResult, MockLLMClient, ToolCall
+from app.infrastructure.ai.rag_client import RAGClient, RAGUnavailable
+from app.application.dto.rag import RAGAnswer, RAGSource
 
 from conftest import FakeRedis
 
@@ -115,7 +115,8 @@ async def test_ask_http_error_does_not_retry():
 
 
 async def test_circuit_breaker_opens_after_threshold():
-    client, requests = make_client(lambda request: httpx.Response(500))
+    # max_retries=0: проверяем именно breaker, а не политику ретраев.
+    client, requests = make_client(lambda request: httpx.Response(500), max_retries=0)
     for i in range(5):
         with pytest.raises(RAGUnavailable):
             await client.ask(f"вопрос-{i}")  # разные вопросы — мимо кэша
@@ -222,3 +223,160 @@ async def test_answer_question_without_rag_uses_llm_answer(fake_redis: FakeRedis
         25, "Palisade 2022, растаможка интересует", session=fake_session, redis=fake_redis, llm=llm, rag=None
     )
     assert reply.text == "Ответ без RAG"
+
+
+
+# tests/ai/test_rag_client.py
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from pydantic import SecretStr
+
+from app.infrastructure.ai.rag_client import (
+    _secret_or_none, rag_client_from_settings,
+)
+
+
+def test_secret_or_none_unwraps():
+    assert _secret_or_none(SecretStr("x")) == "x"
+    assert _secret_or_none("plain") == "plain"
+    assert _secret_or_none(None) is None
+    assert _secret_or_none(SecretStr("")) is None
+
+
+def test_headers_do_not_contain_secret_mask():
+    """Регрессия: SecretStr не должен давать 'Bearer **********'."""
+    c = RAGClient(base_url="http://x", api_token=SecretStr("real-token"))
+    headers = c._headers()
+    assert headers["Authorization"] == "Bearer real-token"
+    assert "**********" not in headers["Authorization"]
+
+
+@pytest.mark.asyncio
+async def test_ask_does_not_retry_4xx():
+    """401 — клиентская ошибка, не ретраим и breaker не трогаем."""
+    calls = {"n": 0}
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(401)
+    c = RAGClient(
+        base_url="http://x", max_retries=3,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(RAGUnavailable, match="401"):
+        await c.ask("q")
+    assert calls["n"] == 1
+    # Breaker не должен открыться от 4xx
+    assert c._consecutive_failures == 0
+    assert c._open_until == 0.0
+
+
+@pytest.mark.asyncio
+async def test_ask_retries_5xx_and_opens_breaker():
+    def handler(request):
+        return httpx.Response(503)
+    c = RAGClient(
+        base_url="http://x", max_retries=1,
+        fail_threshold=2, cooldown_sec=10,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(RAGUnavailable):
+        await c.ask("q")  # 2 попытки → 1 failure (после всех ретраев)
+    # После 1-го ask: 1 failure
+    with pytest.raises(RAGUnavailable):
+        await c.ask("q")  # ещё 1 failure → breaker открыт
+    # Теперь breaker должен быть открыт
+    assert c._breaker_open()
+
+
+@pytest.mark.asyncio
+async def test_ask_confidence_none_does_not_crash(caplog):
+    """confidence=None не должен ронять логгер."""
+    def handler(request):
+        return httpx.Response(200, json={
+            "answer": "x", "confidence": None, "sources": [],
+        })
+    c = RAGClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    with caplog.at_level("INFO"):
+        answer = await c.ask("q")
+    assert answer.confidence is None
+    assert "confidence=n/a" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_ask_invalid_json_returns_rag_unavailable():
+    """2xx с HTML → RAGUnavailable, не JSONDecodeError."""
+    def handler(request):
+        return httpx.Response(200, text="<html>error</html>")
+    c = RAGClient(
+        base_url="http://x", max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(RAGUnavailable, match="rag_bad_response"):
+        await c.ask("q")
+
+
+def test_cache_key_non_serializable_returns_none():
+    from datetime import datetime
+    c = RAGClient(base_url="http://x")
+    assert c._cache_key("q", {"when": datetime.now()}) is None
+
+
+def test_base_url_whitespace_disabled():
+    """'   ' → enabled=False, не '  /api/v1/ask'."""
+    c = RAGClient(base_url="   ")
+    assert c.enabled is False
+    assert c.base_url == ""
+
+
+@pytest.mark.asyncio
+async def test_ingest_too_large_raises(tmp_path):
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"x" * 100)
+    c = RAGClient(base_url="http://x", max_ingest_bytes=10)
+    with pytest.raises(RAGUnavailable, match="too_large"):
+        await c.ingest(big, {})
+
+
+@pytest.mark.asyncio
+async def test_ingest_file_not_found(tmp_path):
+    c = RAGClient(base_url="http://x")
+    with pytest.raises(RAGUnavailable, match="file_error"):
+        await c.ingest(tmp_path / "missing.bin", {})
+
+
+def test_rag_client_from_settings_passes_breaker_config():
+    """fail_threshold и cooldown_sec должны браться из Settings."""
+    with patch("app.config.get_settings") as mock:
+        mock.return_value = MagicMock(
+            rag_service_url="http://x",
+            rag_api_token=SecretStr("t"),
+            rag_enabled=True,
+            rag_timeout_sec=5,
+            rag_cache_ttl_sec=3600,
+            rag_cb_fail_threshold=10,
+            rag_cb_cooldown_sec=600,
+        )
+        c = rag_client_from_settings()
+    assert c._fail_threshold == 10
+    assert c._cooldown_sec == 600
+
+
+@pytest.mark.asyncio
+async def test_cached_answer_latency_zeroed():
+    """При кэш-хите latency_ms=0, а не оригинальная."""
+    redis = AsyncMock()
+    c = RAGClient(base_url="http://x", redis=redis)
+    # 1-й вызов — сеть
+    def handler(request):
+        return httpx.Response(200, json={
+            "answer": "x", "confidence": 0.9, "sources": [],
+        })
+    c._transport = httpx.MockTransport(handler)
+    first = await c.ask("q")
+    # MockTransport быстрый: int(ms) может дать 0 — важен не знак, а кэш.
+    assert first.latency_ms >= 0
+    # 2-й вызов — из кэша (эмулируем ответ redis)
+    redis.get = AsyncMock(return_value=first.model_dump_json().encode())
+    cached = await c.ask("q")
+    assert cached.cached is True
+    assert cached.latency_ms == 0  # не оригинальная

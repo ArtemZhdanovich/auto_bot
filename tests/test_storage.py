@@ -5,29 +5,32 @@ Fallback обязателен: S3 недоступен → объявления 
 """
 
 from datetime import datetime, timezone
+import json
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
-import app.workers.fetch as fetch_mod
-from app.api import admin as admin_mod
-from app.core.deps_internal import internal_token
-from app.services.fetch import compute_content_hash, save_listings
-from app.services.storage import S3Storage, build_raw_key
+import app.infrastructure.workers.fetch as fetch_mod
+from app.transport.http.routers import admin as admin_mod
+from app.infrastructure.services.fetch import compute_content_hash, save_listings
+from app.infrastructure.services.storage import S3Storage, build_raw_key
 from tests.conftest import FakeSession
 from tests.test_fetch import NEW_ROW, UpsertSession, _item, _row
 
 
 class StubStorage:
+    """Заглушка `ObjectStoragePort` (S3Storage.put): пишет тела в память."""
+
     def __init__(self, fail: bool = False, enabled: bool = True) -> None:
         self.enabled = enabled
         self.fail = fail
         self.puts: list[tuple[str, dict, dict]] = []
 
-    async def put_raw(self, key, payload, metadata):
-        self.puts.append((key, payload, metadata))
-        return not self.fail
+    async def put(self, key, body, content_type, metadata=None):
+        if self.fail:
+            raise RuntimeError(f"s3_put_failed: {key}")
+        self.puts.append((key, json.loads(body), metadata or {}))
 
 
 # ---------- ключ объекта ----------
@@ -54,10 +57,12 @@ async def test_new_listing_uploaded_and_raw_key_saved():
     content_hash = compute_content_hash(item)
     assert key == build_raw_key("encar", 7, content_hash, when=item.parsed_at)
     assert payload["source"] == "encar"
-    assert "raw" in payload and "dedup_keys" in payload
+    assert "raw" in payload
+    # dedup-ключи лежат во внутренней секции payload (контракт S3-объекта)
+    assert payload["_internal"]["dedup_keys"]
     assert meta == {
         "source": "encar",
-        "listing_id": 7,  # put_raw переводит значения метаданных в str
+        "listing_id": 7,  # порт получает сырые значения, str делает S3Storage
         "content_hash": content_hash,
         "fetched_at": item.parsed_at,
     }
@@ -186,6 +191,9 @@ class _FakeS3:
     def __init__(self, head_error: Exception | None) -> None:
         self.head_error = head_error
         self.created = False
+        self.puts: list[dict] = []
+        self.deleted: list[str] = []
+        self.presign_args: dict | None = None
 
     async def __aenter__(self) -> "_FakeS3":
         return self
@@ -199,6 +207,16 @@ class _FakeS3:
 
     async def create_bucket(self, Bucket: str) -> None:
         self.created = True
+
+    async def put_object(self, **kwargs) -> None:
+        self.puts.append(kwargs)
+
+    async def delete_object(self, **kwargs) -> None:
+        self.deleted.append(kwargs["Key"])
+
+    async def generate_presigned_url(self, op: str, Params: dict, ExpiresIn: int) -> str:
+        self.presign_args = {"op": op, "params": Params, "expires_in": ExpiresIn}
+        return f"http://minio.test/{Params['Key']}?sig=1"
 
 
 @pytest.mark.parametrize("head_error,expect_create", [(None, False), (_S3Error("404"), True)])
@@ -225,29 +243,116 @@ def monkeypatch_s3(storage: S3Storage, fake: _FakeS3) -> None:
     storage._make_client = lambda: fake  # noqa: SLF001
 
 
+# ---------- ObjectStoragePort: put / presign_get / delete ----------
+
+
+async def test_put_sends_content_type_and_string_metadata():
+    storage = S3Storage(endpoint_url="http://localhost:9000")
+    fake = _FakeS3(None)
+    monkeypatch_s3(storage, fake)
+    when = datetime(2026, 10, 11, tzinfo=timezone.utc)
+
+    await storage.put(
+        "raw/encar/2026/10/7_abc.json",
+        b'{"a": 1}',
+        "application/json",
+        metadata={"listing_id": 7, "fetched_at": when},
+    )
+
+    assert fake.puts[0] == {
+        "Bucket": "raw-payloads",
+        "Key": "raw/encar/2026/10/7_abc.json",
+        "Body": b'{"a": 1}',
+        "ContentType": "application/json",
+        "Metadata": {"listing_id": "7", "fetched_at": str(when)},
+    }
+
+
+async def test_put_failure_raises_for_caller_fallback():
+    class _Broken(_FakeS3):
+        async def put_object(self, **kwargs) -> None:
+            raise _S3Error("500")
+
+    storage = S3Storage(endpoint_url="http://localhost:9000")
+    monkeypatch_s3(storage, _Broken(None))
+
+    with pytest.raises(RuntimeError, match="s3_put_failed"):
+        await storage.put("raw/x.json", b"{}", "application/json")
+
+
+async def test_presign_get_and_delete_use_s3_api():
+    storage = S3Storage(endpoint_url="http://localhost:9000", bucket="audit")
+    fake = _FakeS3(None)
+    monkeypatch_s3(storage, fake)
+
+    url = await storage.presign_get("raw/encar/2026/10/7_abc.json", ttl_sec=600)
+    await storage.delete("raw/encar/2026/10/7_abc.json")
+
+    assert url.endswith("?sig=1")
+    assert fake.presign_args == {
+        "op": "get_object",
+        "params": {"Bucket": "audit", "Key": "raw/encar/2026/10/7_abc.json"},
+        "expires_in": 600,
+    }
+    assert fake.deleted == ["raw/encar/2026/10/7_abc.json"]
+
+
+async def test_presign_get_failure_raises():
+    class _Broken(_FakeS3):
+        async def generate_presigned_url(self, op, Params, ExpiresIn):
+            raise _S3Error("500")
+
+    storage = S3Storage(endpoint_url="http://localhost:9000")
+    monkeypatch_s3(storage, _Broken(None))
+
+    with pytest.raises(RuntimeError, match="s3_presign_failed"):
+        await storage.presign_get("raw/x.json", ttl_sec=60)
+
+
 # ---------- админ-endpoint: presigned URL ----------
 
 
-async def test_admin_raw_returns_presigned_url(monkeypatch):
+async def test_admin_raw_returns_presigned_url():
+    """Сценарий presign-ит сырой payload (сборка — через контейнер)."""
+    from app.application.admin.use_cases import GetListingRawPayload
+    from app.infrastructure.db.repositories.admin_sources import (
+        SqlAlchemyAdminSourcesRepository,
+    )
+
     session = FakeSession()
-    session.set_result([SimpleNamespace(raw_key="raw/encar/2026/10/7_abc.json")])
+    session.set_result(["raw/encar/2026/10/7_abc.json"])
 
     class _S:
-        async def presign_raw(self, key: str, ttl: int) -> str:
+        async def presign_raw(self, key, ttl):
             assert key == "raw/encar/2026/10/7_abc.json"
+            assert ttl > 0
             return f"http://minio.test/{key}?sig=1"
 
-    monkeypatch.setattr(admin_mod, "storage_from_settings", lambda: _S())
-    r = await admin_mod.admin_listing_raw(7, session, internal_token())
+    use_case = GetListingRawPayload(
+        SqlAlchemyAdminSourcesRepository(session), _S(), ttl_sec=900
+    )
+    # токен проверяется на уровне роутера — сценарию он не передаётся
+    r = await admin_mod.admin_listing_raw(use_case=use_case, listing_id=7)
     assert r["key"] == "raw/encar/2026/10/7_abc.json"
     assert r["url"].endswith("?sig=1")
     assert r["expires_in"] > 0
 
 
-async def test_admin_raw_404_without_raw_key(monkeypatch):
-    session = FakeSession()
-    session.set_result([SimpleNamespace(raw_key=None)])
+async def test_admin_raw_404_without_raw_key():
+    """raw_key = NULL → RawPayloadNotFound (роутер маппит в 404)."""
+    from app.application.admin.use_cases import GetListingRawPayload
+    from app.infrastructure.db.repositories.admin_sources import (
+        SqlAlchemyAdminSourcesRepository,
+    )
 
-    with pytest.raises(HTTPException) as exc:
-        await admin_mod.admin_listing_raw(7, session, internal_token())
-    assert exc.value.status_code == 404
+    session = FakeSession()
+    session.set_result([None])
+
+    use_case = GetListingRawPayload(
+        SqlAlchemyAdminSourcesRepository(session),
+        storage=None,
+        ttl_sec=900,
+    )
+
+    with pytest.raises(Exception, match="raw payload"):
+        await use_case.execute(7)

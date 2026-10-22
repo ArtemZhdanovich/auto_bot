@@ -5,9 +5,24 @@ from decimal import Decimal
 
 import pytest
 
-from app.schemas.listing import UnifiedListing
-from app.services.fetch import compute_content_hash, mark_stale, save_listings
+from app.domain.listings.unified import UnifiedListing
+from app.infrastructure.services.fetch import compute_content_hash, mark_stale, save_listings
 from tests.conftest import FakeRedis
+
+
+class _EvalRedis(FakeRedis):
+    """FakeRedis + `eval()` для Lua-скрипта claim из dedup.py (только claim)."""
+
+    async def eval(self, script: str, numkeys: int, *args):
+        keys = [str(k) for k in args[:numkeys]]
+        if any(k in self.data for k in keys):
+            return 0
+        ttl = int(args[numkeys]) if len(args) > numkeys else None
+        for key in keys:
+            self.data[key] = "1"
+            if ttl:
+                self.ttls[key] = ttl
+        return 1
 
 
 def _item(**kw) -> UnifiedListing:
@@ -230,7 +245,7 @@ async def test_reactivation_with_price_change_writes_point():
 
 
 async def test_cross_source_dup_checked_before_upsert():
-    redis = FakeRedis()
+    redis = _EvalRedis()
     first = UpsertSession([NEW_ROW])
     await save_listings(first, redis, [_item()])
 
@@ -286,7 +301,7 @@ async def test_mark_stale_without_cb_sources_no_not_in():
 
 
 async def test_stale_check_job_enqueues_gone(monkeypatch):
-    import app.workers.fetch as fetch_mod
+    import app.infrastructure.workers.fetch as fetch_mod
 
     class _Session:
         async def __aenter__(self):
@@ -365,10 +380,10 @@ class _FakeKcarHttp:
 @pytest.mark.asyncio
 async def test_enrich_fills_specs_from_detail(monkeypatch):
     """enrich_listing_specs: кузов/топливо/КПП/объём/цвет из detail encar."""
-    import app.adapters.common.http as http_mod
+    import app.infrastructure.sources.common.http as http_mod
     from types import SimpleNamespace
 
-    from app.services.fetch import enrich_listing_specs
+    from app.infrastructure.services.fetch import enrich_listing_specs
 
     monkeypatch.setattr(http_mod, "HttpClient", _FakeHttp)
     listing = SimpleNamespace(
@@ -401,10 +416,10 @@ async def test_enrich_fills_specs_from_detail(monkeypatch):
 @pytest.mark.asyncio
 async def test_enrich_kcar_fills_specs_and_vin(monkeypatch):
     """enrich_listing_specs (kcar): объём/привод/цвет/VIN из detail-of-ng."""
-    import app.adapters.common.http as http_mod
+    import app.infrastructure.sources.common.http as http_mod
     from types import SimpleNamespace
 
-    from app.services.fetch import enrich_listing_specs
+    from app.infrastructure.services.fetch import enrich_listing_specs
 
     monkeypatch.setattr(http_mod, "HttpClient", _FakeKcarHttp)
     listing = SimpleNamespace(
@@ -441,10 +456,10 @@ async def test_enrich_kcar_fills_specs_and_vin(monkeypatch):
 @pytest.mark.asyncio
 async def test_enrich_kcar_without_rvo_is_noop(monkeypatch):
     """kcar: пустой rvo («차량정보가 없습니다») — не ошибка, ничего не пишем."""
-    import app.adapters.common.http as http_mod
+    import app.infrastructure.sources.common.http as http_mod
     from types import SimpleNamespace
 
-    from app.services.fetch import enrich_listing_specs
+    from app.infrastructure.services.fetch import enrich_listing_specs
 
     class _EmptyHttp:
         def __init__(self, **kw) -> None:
@@ -471,10 +486,10 @@ async def test_enrich_kcar_without_rvo_is_noop(monkeypatch):
 @pytest.mark.asyncio
 async def test_enrich_skips_complete_and_unknown_source(monkeypatch):
     """Не-enrich: неизвестный источник и уже заполненный encar-лот — без запросов."""
-    import app.adapters.common.http as http_mod
+    import app.infrastructure.sources.common.http as http_mod
     from types import SimpleNamespace
 
-    from app.services.fetch import enrich_listing_specs
+    from app.infrastructure.services.fetch import enrich_listing_specs
 
     calls: list[str] = []
 
@@ -513,10 +528,10 @@ async def test_enrich_skips_complete_and_unknown_source(monkeypatch):
 async def test_enrich_silences_http_errors(monkeypatch):
     """Недоступный encar не роняет enrichment — просто False."""
 
-    import app.adapters.common.http as http_mod
+    import app.infrastructure.sources.common.http as http_mod
     from types import SimpleNamespace
 
-    from app.services.fetch import enrich_listing_specs
+    from app.infrastructure.services.fetch import enrich_listing_specs
 
     class _BrokenHttp:
         def __init__(self, **kw) -> None:

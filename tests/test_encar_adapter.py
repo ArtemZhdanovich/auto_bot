@@ -9,9 +9,9 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from app.adapters.common.http import HttpClient
-from app.adapters.encar import EncarApiAdapter
-from app.schemas.criteria import SearchCriteria
+from app.infrastructure.sources.common.http import FetchError, HttpClient
+from app.infrastructure.sources.encar import EncarApiAdapter
+from app.domain.search.criteria import SearchCriteria
 
 SAMPLE_ITEM = {
     "Id": "361895918",
@@ -151,12 +151,16 @@ async def test_build_q_usd_currency_converted():
     await adapter.close()
 
 
-async def test_build_q_skips_unknown_make_and_model():
-    """Неизвестные марка/модель не ломают запрос (фильтр просто опускается)."""
+async def test_build_q_rejects_unknown_make():
+    """Неизвестная марка — явная ошибка, а не запрос без фильтра.
+
+    Молчаливый сброс вернул бы машины других марок; лучше не отдавать
+    пользователю неверную выдачу.
+    """
     adapter, requests = make_adapter([])
-    await adapter.fetch(SearchCriteria(make="Lada", model="Vesta"))
-    q = _params_of(requests[0])["q"][0]
-    assert q == "(And.Hidden.N.)"
+    with pytest.raises(FetchError, match="not supported"):
+        await adapter.fetch(SearchCriteria(make="Lada", model="Vesta"))
+    assert requests == []
     await adapter.close()
 
 
@@ -167,8 +171,8 @@ async def test_healthcheck_true_on_count_and_results():
 
 
 async def test_healthcheck_true_on_count_only():
-    # 200 с Count и пустым SearchResults — контракт «Count без sr».
-    adapter, _ = make_adapter([_payload([], total=192000)])
+    # Контракт «только счётчик»: Count есть, ключа SearchResults нет.
+    adapter, _ = make_adapter([{"Count": 192000}])
     assert await adapter.healthcheck() is True
     await adapter.close()
 
@@ -199,7 +203,7 @@ async def test_fetch_raises_fetch_error_on_http_error():
         source_name="encar",
         http_client=HttpClient(transport=httpx.MockTransport(handler), timeout=10),
     )
-    from app.adapters.common.http import FetchError
+    from app.infrastructure.sources.common.http import FetchError
 
     with pytest.raises(FetchError):
         await adapter.fetch(SearchCriteria())

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.admin_audit import log_admin_action
+from app.infrastructure.services.admin_audit import log_admin_action
 from conftest import FakeSession
 
 

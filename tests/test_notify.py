@@ -6,9 +6,9 @@ from decimal import Decimal
 
 import pytest
 
-from app.db.models import Listing
-from app.schemas.criteria import SearchCriteria
-from app.services.notify import (
+from app.infrastructure.db.models import Listing
+from app.domain.search.criteria import SearchCriteria
+from app.infrastructure.services.notify import (
     buffer_for_digest,
     clear_digest,
     format_listing_card,
@@ -178,7 +178,7 @@ def test_format_card_without_title_field_keeps_make_model():
     assert "<b>Hyundai Palisade 2022</b>" in card
 
 async def test_mark_sent_with_kind(fake_redis, fake_session):
-    from app.services.notify import event_audience
+    from app.infrastructure.services.notify import event_audience
 
     await mark_sent(fake_session, fake_redis, 100, 5, kind="price_drop")
     assert await fake_redis.get(notified_key(100, 5, "price_drop")) == "1"

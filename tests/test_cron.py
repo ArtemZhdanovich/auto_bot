@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from app.services.cron import cron_matches
+from app.domain.scheduling.cron import cron_matches
 
 
 def _dt(minute: int, hour: int, day: int = 15, month: int = 6) -> datetime:

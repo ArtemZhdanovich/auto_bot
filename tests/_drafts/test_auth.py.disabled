@@ -1,0 +1,237 @@
+# tests/api/test_auth.py
+
+def test_login_code_bound_to_session(client, redis, monkeypatch):
+    """GET /telegram/link/{code} без cookie state → 401."""
+    r = client.post("/api/auth/telegram/link")
+    assert r.status_code == 200
+    code = r.json()["code"]
+    # без cookie — не отдаём даже статус
+    r2 = client.get(f"/api/auth/telegram/link/{code}")
+    assert r2.status_code == 401
+
+
+def test_login_code_with_wrong_cookie_rejected(client, redis):
+    r = client.post("/api/auth/telegram/link")
+    code = r.json()["code"]
+    client.cookies.set("tglogin_state", "wrong-state")
+    r2 = client.get(f"/api/auth/telegram/link/{code}")
+    assert r2.status_code == 401
+
+
+def test_login_code_with_matching_cookie_pending(client, redis):
+    r = client.post("/api/auth/telegram/link")  # cookie ставится автоматически
+    code = r.json()["code"]
+    r2 = client.get(f"/api/auth/telegram/link/{code}")
+    assert r2.status_code == 200
+    assert r2.json()["status"] == "pending"
+
+
+def test_login_code_confirm_keeps_state_hash(client, redis):
+    """confirm не должен затирать state_hash, иначе GET не сможет проверить cookie."""
+    r = client.post("/api/auth/telegram/link")
+    code = r.json()["code"]
+    client.post(
+        "/api/auth/telegram/link/confirm",
+        json={"code": code, "telegram_id": 111},
+        headers={"X-Internal-Token": "test-internal"},
+    )
+    r2 = client.get(f"/api/auth/telegram/link/{code}")
+    assert r2.status_code == 200
+    assert "access_token" in r2.json()
+
+
+def test_login_code_one_time(client, redis):
+    """Повторный GET после успешного claim → expired."""
+    r = client.post("/api/auth/telegram/link")
+    code = r.json()["code"]
+    client.post(
+        "/api/auth/telegram/link/confirm",
+        json={"code": code, "telegram_id": 111},
+        headers={"X-Internal-Token": "test-internal"},
+    )
+    r1 = client.get(f"/api/auth/telegram/link/{code}")
+    assert "access_token" in r1.json()
+    r2 = client.get(f"/api/auth/telegram/link/{code}")
+    assert r2.json()["status"] == "expired"
+
+
+def test_telegram_initdata_rejects_inactive_user(client, session, monkeypatch):
+    """auth_telegram должен возвращать 403, если пользователь деактивирован."""
+    # ... создаём inactive User, подменяем validate_init_data ...
+
+
+def test_refresh_sub_none_returns_401(client, monkeypatch):
+    """payload["sub"] = None → 401, а не 500."""
+    # ... подменяем decode_token, возвращающий {"type": "refresh", "sub": None} ...
+    r = client.post("/api/auth/refresh", json={"refresh_token": "x"})
+    assert r.status_code == 401
+
+
+def test_email_max_length(client):
+    long_email = "a" * 300 + "@b.co"
+    r = client.post("/api/auth/login", json={"email": long_email, "password": "x" * 8})
+    assert r.status_code == 422
+
+
+def test_password_hash_bounded_iterations():
+    """Хеш с iterations вне [100k, 1M] → False, не DoS."""
+    from app.api.auth import _verify_password
+    bad = "pbkdf2_sha256$999999999$00$00"
+    assert _verify_password("x", bad) is False
+
+# tests/api/test_auth.py
+
+# --- UX-фикс: контекст инициатора -----------------------------------
+
+@pytest.mark.asyncio
+async def test_link_captures_initiator_context(client, fake_redis):
+    """POST /link фиксирует IP/UA инициатора в Redis."""
+    r = await client.post(
+        "/api/auth/telegram/link",
+        headers={"User-Agent": "TestBrowser/1.0"},
+    )
+    code = r.json()["code"]
+    raw = await fake_redis.get(f"tglogin:{code}")
+    data = json.loads(raw)
+    assert data["initiator_ua"] == "TestBrowser/1.0"
+    assert data["initiator_ip"] is not None  # TestClient IP
+    assert "created_at" in data
+
+
+@pytest.mark.asyncio
+async def test_context_endpoint_requires_internal_token(client):
+    r = await client.post("/api/auth/telegram/link")
+    code = r.json()["code"]
+    r2 = await client.get(f"/api/auth/telegram/link/{code}/context")
+    assert r2.status_code == 401  # без X-Internal-Token
+
+
+@pytest.mark.asyncio
+async def test_context_endpoint_returns_initiator(
+    client, internal_token, fake_redis,
+):
+    r = await client.post(
+        "/api/auth/telegram/link",
+        headers={"User-Agent": "AttackerBrowser/2.0"},
+    )
+    code = r.json()["code"]
+    r2 = await client.get(
+        f"/api/auth/telegram/link/{code}/context",
+        headers={"X-Internal-Token": internal_token},
+    )
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["initiator_ua"] == "AttackerBrowser/2.0"
+    assert body["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_context_endpoint_404_for_expired(
+    client, internal_token, fake_redis,
+):
+    r = await client.get(
+        "/api/auth/telegram/link/nonexistent123/context",
+        headers={"X-Internal-Token": internal_token},
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cancel_invalidates_code(client, internal_token, fake_redis):
+    """Жертва нажала «Отмена» — атакующий не получит JWT."""
+    r = await client.post("/api/auth/telegram/link")
+    code = r.json()["code"]
+    cookie = r.cookies.get("tglogin_state")
+
+    # «Жертва» подтвердила через бота — но затем нажала «Отмена»
+    await client.post(
+        "/api/auth/telegram/link/confirm",
+        json={"code": code, "telegram_id": 999},
+        headers={"X-Internal-Token": internal_token},
+    )
+    r2 = await client.delete(
+        f"/api/auth/telegram/link/{code}",
+        headers={"X-Internal-Token": internal_token},
+    )
+    assert r2.status_code == 200
+
+    # Атакующий (со своим cookie) поллит — должен получить expired
+    r3 = await client.get(
+        f"/api/auth/telegram/link/{code}",
+        cookies={"tglogin_state": cookie},
+    )
+    assert r3.json() == {"status": "expired"}
+
+
+# --- UX-фикс: state-cookie всё ещё работает -------------------------
+
+@pytest.mark.asyncio
+async def test_login_code_requires_matching_cookie(client, fake_redis):
+    r = await client.post("/api/auth/telegram/link")
+    code = r.json()["code"]
+    # Без cookie → 401 (не отдаём даже статус)
+    r2 = await client.get(f"/api/auth/telegram/link/{code}")
+    assert r2.status_code == 401
+    # С неправильной cookie → 401
+    r3 = await client.get(
+        f"/api/auth/telegram/link/{code}",
+        cookies={"tglogin_state": "wrong"},
+    )
+    assert r3.status_code == 401
+
+
+# --- UX-фикс: audit log ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_confirm_logs_acknowledgement(
+    client, internal_token, caplog, fake_redis,
+):
+    r = await client.post("/api/auth/telegram/link")
+    code = r.json()["code"]
+    with caplog.at_level("INFO"):
+        await client.post(
+            "/api/auth/telegram/link/confirm",
+            json={
+                "code": code, "telegram_id": 123,
+                "user_acknowledged_at": int(time.time()),
+            },
+            headers={"X-Internal-Token": internal_token},
+        )
+    assert "telegram_login_confirmed" in caplog.text
+    assert "telegram_id=123" in caplog.text
+
+
+# --- Существующие тесты ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_register_concurrent_same_email_returns_409(client):
+    body = {"email": "race@example.com", "password": "password123"}
+    results = await asyncio.gather(
+        client.post("/api/auth/register", json=body),
+        client.post("/api/auth/register", json=body),
+        return_exceptions=True,
+    )
+    statuses = sorted(r.status_code for r in results if hasattr(r, "status_code"))
+    assert statuses == [201, 409]
+
+
+@pytest.mark.asyncio
+async def test_login_timing_uniform_for_missing_vs_present(client, session):
+    """PBKDF2 выполняется и при отсутствии пользователя (timing-safe)."""
+    import time
+    t1 = time.perf_counter()
+    await client.post("/api/auth/login", json={"email": "none@x.com", "password": "p"})
+    d1 = time.perf_counter() - t1
+    assert d1 > 0.05, f"expected >50ms (PBKDF2), got {d1:.3f}s"
+
+
+@pytest.mark.asyncio
+async def test_guest_login_uses_dummy_hash(client, session):
+    """Гость (email=None) не находится в /login — но PBKDF2 всё равно."""
+    # Создать гостя с email (теоретически)
+    # ...
+    import time
+    t1 = time.perf_counter()
+    await client.post("/api/auth/login", json={"email": "guest@x.com", "password": "p"})
+    d1 = time.perf_counter() - t1
+    assert d1 > 0.05  # dummy-verify сработал

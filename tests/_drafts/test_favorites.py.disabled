@@ -1,0 +1,111 @@
+# tests/api/test_favorites.py
+
+# --- list_favorites: пагинация ------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_favorites_paginated(client, auth_headers, many_favorites):
+    """Пагинация: limit/offset работают, max 100."""
+    r = await client.get("/api/favorites?limit=10&offset=0", headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) <= 10
+
+
+@pytest.mark.asyncio
+async def test_list_favorites_limit_capped(client, auth_headers):
+    r = await client.get("/api/favorites?limit=1000", headers=auth_headers)
+    assert r.status_code == 422  # le=100
+
+
+@pytest.mark.asyncio
+async def test_list_favorites_first_price_uses_distinct_on(
+    client, auth_headers, favorites_with_history,
+):
+    """История цен: возвращается только первая точка по каждому листингу."""
+    r = await client.get("/api/favorites", headers=auth_headers)
+    items = r.json()
+    # У каждого — first_price из самой ранней записи
+    assert all("first_price" in item for item in items)
+
+
+@pytest.mark.asyncio
+async def test_list_favorites_broken_listing_skipped(
+    client, auth_headers, monkeypatch, favorites_with_broken,
+):
+    """Одно битое объявление не роняет весь список."""
+    # monkeypatch ListingOut.model_validate на бросить исключение для одного id
+    # ... r = await client.get("/api/favorites", ...)
+    # assert r.status_code == 200  (не 500)
+
+
+# --- toggle: race condition ---------------------------------------
+
+@pytest.mark.asyncio
+async def test_toggle_concurrent_no_duplicates(client, auth_headers, session):
+    """Двойной toggle → в БД одна запись, не 500."""
+    import asyncio
+    r1, r2 = await asyncio.gather(
+        client.post("/api/listings/1/favorite", headers=auth_headers),
+        client.post("/api/listings/1/favorite", headers=auth_headers),
+        return_exceptions=True,
+    )
+    # Оба 200 (или один 200, второй race → 200 с актуальным состоянием)
+    assert all(hasattr(r, "status_code") and r.status_code == 200 for r in (r1, r2))
+    # В БД — ровно одна запись
+    from sqlalchemy import select, func
+    from app.db.models import Favorite
+    count = (await session.execute(
+        select(func.count()).select_from(Favorite).where(Favorite.listing_id == 1)
+    )).scalar()
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_toggle_returns_actual_state(client, auth_headers):
+    r = await client.post("/api/listings/1/favorite", headers=auth_headers)
+    assert r.json() == {"favorited": True}
+    r = await client.post("/api/listings/1/favorite", headers=auth_headers)
+    assert r.json() == {"favorited": False}
+
+
+@pytest.mark.asyncio
+async def test_toggle_listing_not_found(client, auth_headers):
+    r = await client.post("/api/listings/999999/favorite", headers=auth_headers)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_toggle_listing_id_must_be_positive(client, auth_headers):
+    r = await client.post("/api/listings/0/favorite", headers=auth_headers)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_toggle_inactive_user_forbidden(client, auth_headers, inactive_user):
+    r = await client.post("/api/listings/1/favorite", headers=auth_headers)
+    assert r.status_code == 403
+
+
+# --- is_favorite -------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_is_favorite_404_for_missing_listing(client, auth_headers):
+    r = await client.get("/api/favorites/999999", headers=auth_headers)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_is_favorite_returns_status(client, auth_headers):
+    await client.post("/api/listings/1/favorite", headers=auth_headers)
+    r = await client.get("/api/favorites/1", headers=auth_headers)
+    assert r.json() == {"favorited": True}
+
+
+# --- remove_favorite ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_remove_idempotent(client, auth_headers):
+    """Удаление несуществующего — 204 (не 404)."""
+    r = await client.delete("/api/listings/1/favorite", headers=auth_headers)
+    assert r.status_code == 204
+    r = await client.delete("/api/listings/1/favorite", headers=auth_headers)
+    assert r.status_code == 204

@@ -2,10 +2,10 @@
 
 import pytest
 
-from app.ai.agent import DialogError, run_agent
-from app.ai.llm_client import LLMError, LLMResult, MockLLMClient, ToolCall
-from app.schemas.criteria import SearchCriteria
-from app.services.dialog import DialogStore, new_state
+from app.infrastructure.ai.agent import DialogError, run_agent
+from app.infrastructure.ai.llm_client import LLMError, LLMResult, MockLLMClient, ToolCall
+from app.domain.search.criteria import SearchCriteria
+from app.infrastructure.services.dialog import DialogStore, new_state
 
 from conftest import FakeRedis
 
@@ -169,7 +169,7 @@ async def test_clarification_options_from_catalog(fake_redis: FakeRedis, fake_se
         )
     )
     reply = await run_agent(9, "хочу кроссовер", session=fake_session, redis=fake_redis, llm=llm)
-    from app.ai.tools import FIELD_OPTIONS
+    from app.infrastructure.ai.tools import FIELD_OPTIONS
 
     assert reply.options == FIELD_OPTIONS["body_type"]
     assert "кроссовер" not in reply.options and "лимузин" not in reply.options
@@ -200,8 +200,8 @@ async def test_clarification_options_from_catalog(fake_redis: FakeRedis, fake_se
 @pytest.mark.asyncio
 async def test_calc_delivery_tool_returns_breakdown(fake_redis: FakeRedis, fake_session):
     """Агент считает смету инструментом, а не выдумывает цифры (п. 7.3)."""
-    from app.ai.agent import ToolContext, _execute_tool
-    from app.services.dialog import new_state
+    from app.infrastructure.ai.agent import ToolContext, _execute_tool
+    from app.infrastructure.services.dialog import new_state
 
     state = new_state(11)
     ctx = ToolContext(session=fake_session, redis=fake_redis)
@@ -224,8 +224,8 @@ async def test_calc_delivery_tool_returns_breakdown(fake_redis: FakeRedis, fake_
 @pytest.mark.asyncio
 async def test_calc_delivery_tool_bad_args(fake_redis: FakeRedis, fake_session):
     """Без цены/года — вежливая просьба уточнить, без расчёта и без падения."""
-    from app.ai.agent import ToolContext, _execute_tool
-    from app.services.dialog import new_state
+    from app.infrastructure.ai.agent import ToolContext, _execute_tool
+    from app.infrastructure.services.dialog import new_state
 
     state = new_state(12)
     ctx = ToolContext(session=fake_session, redis=fake_redis)
@@ -239,7 +239,7 @@ async def test_calc_delivery_tool_bad_args(fake_redis: FakeRedis, fake_session):
 
 def test_calc_delivery_tool_in_tools_schema():
     """Tool объявлен в схеме для LLM: year обязателен, engine_cc опционален."""
-    from app.ai.tools import TOOLS
+    from app.infrastructure.ai.tools import TOOLS
 
     tool = next(t for t in TOOLS if t["name"] == "calc_delivery")
     props = tool["parameters"]["properties"]
@@ -252,7 +252,7 @@ def test_calc_delivery_tool_in_tools_schema():
 
 
 def test_is_confirmation():
-    from app.ai.agent import _is_confirmation
+    from app.infrastructure.ai.agent import _is_confirmation
 
     assert _is_confirmation("всё")
     assert _is_confirmation("Давай!")
@@ -287,7 +287,7 @@ async def test_criticism_reaches_llm_not_template(fake_redis: FakeRedis, fake_se
 @pytest.mark.asyncio
 async def test_preview_relaxes_secondary_filters(fake_redis: FakeRedis, fake_session):
     """"Пусто по точным критериям → ослабляем (цвет) и показываем близкие варианты."""
-    from app.db.models import Listing
+    from app.infrastructure.db.models import Listing
 
     hit = Listing(
         id=1, source="encar", source_id="1", url="u", make="Kia",
@@ -334,7 +334,7 @@ async def test_preview_nothing_found_suggests_relax(fake_redis: FakeRedis, fake_
 
 
 def _hit() -> "object":
-    from app.db.models import Listing
+    from app.infrastructure.db.models import Listing
 
     return Listing(
         id=9, source="encar", source_id="9", url="u", make="Kia",
@@ -345,7 +345,7 @@ def _hit() -> "object":
 @pytest.mark.asyncio
 async def test_quota_consumed_on_result_not_messages(fake_redis: FakeRedis, fake_session):
     """Сообщения/уточнения бесплатны; квота тратится только на выданные варианты."""
-    from app.services.ai_quota import quota_used
+    from app.infrastructure.services.ai_quota import quota_used
 
     fake_session.set_results([[_hit()]])
     llm = _llm(
@@ -369,7 +369,7 @@ async def test_quota_consumed_on_result_not_messages(fake_redis: FakeRedis, fake
 
 @pytest.mark.asyncio
 async def test_finalize_consumes_quota(fake_redis: FakeRedis, fake_session):
-    from app.services.ai_quota import quota_used
+    from app.infrastructure.services.ai_quota import quota_used
 
     llm = _llm(
         LLMResult(
@@ -393,7 +393,7 @@ async def test_finalize_consumes_quota(fake_redis: FakeRedis, fake_session):
 @pytest.mark.asyncio
 async def test_quota_none_is_unlimited(fake_redis: FakeRedis, fake_session):
     """Business (quota_limit=None) — не блокируется и не считается."""
-    from app.services.ai_quota import quota_used
+    from app.infrastructure.services.ai_quota import quota_used
 
     fake_session.set_results([[_hit()]])
     llm = _llm(

@@ -7,12 +7,12 @@ SQL не исполняется (FakeSession) — проверяются агр�
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 
-from app.api import admin as admin_mod
-from app.core.deps_internal import internal_token
-from app.services import funnels
-from tests.conftest import FakeSession
+from app.transport.http.routers import admin as admin_mod
+from app.main_api import app
+from app.infrastructure.services import funnels
+from tests.conftest import FakeSession, install_test_container
 
 
 # ---------- воронка ----------
@@ -96,15 +96,81 @@ async def test_retention_empty():
 # ---------- admin-эндпоинты ----------
 
 
+@pytest.fixture
+async def http_no_db(fake_session: FakeSession):
+    """ASGI-клиент без БД: `get_session` → FakeSession.
+
+    Нужен только для проверки прав на уровне роутера (до запросов в БД).
+    """
+
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=fake_session)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as http:
+            yield http
+    finally:
+        app.state.dishka_container = _prev
+        await _container.close()
+
+
 async def test_admin_funnel_endpoint():
     session = FakeSession()
     session.set_result([SimpleNamespace(name="search_completed", users=10)])
-    r = await admin_mod.analytics_funnel(session, internal_token(), days=14)
+    from app.application.admin.use_cases import GetFunnel
+    from app.application.analytics.use_cases import FunnelDashboard
+    from app.infrastructure.db.repositories.funnels import (
+        SqlAlchemyFunnelRepository,
+    )
+
+    use_case = GetFunnel(FunnelDashboard(SqlAlchemyFunnelRepository(session)))
+    r = await admin_mod.analytics_funnel(use_case=use_case, days=14)
     assert r["days"] == 14
     assert r["stages"][0]["users"] == 10
 
 
-async def test_admin_retention_endpoint_requires_token():
-    with pytest.raises(HTTPException) as exc:
-        await admin_mod.analytics_retention(FakeSession(), None, days=30)
-    assert exc.value.status_code == 401
+async def test_admin_funnel_route_requires_internal_token(http_no_db):
+    """Токен проверяется роутером, а не сервисной функцией."""
+    resp = await http_no_db.get("/api/admin/analytics/funnel?days=14")
+    assert resp.status_code == 401
+
+
+async def test_admin_funnel_route_with_token(http_no_db, fake_session, internal_token):
+    fake_session.set_result([SimpleNamespace(name="search_completed", users=10)])
+
+    resp = await http_no_db.get(
+        "/api/admin/analytics/funnel?days=14",
+        headers={"X-Internal-Token": internal_token},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["stages"][0]["users"] == 10
+
+
+async def test_admin_retention_endpoint_returns_cohorts():
+    from datetime import date
+
+    session = FakeSession()
+    session.set_result(
+        [SimpleNamespace(day=date(2026, 10, 10), cohort=4, d1=1, d7=0)]
+    )
+
+    from app.application.admin.use_cases import GetRetention
+    from app.application.analytics.use_cases import RetentionDashboard
+    from app.infrastructure.db.repositories.funnels import (
+        SqlAlchemyFunnelRepository,
+    )
+
+    use_case = GetRetention(
+        RetentionDashboard(SqlAlchemyFunnelRepository(session))
+    )
+    r = await admin_mod.analytics_retention(use_case=use_case, days=30)
+
+    assert r["days"] == 30
+    assert r["cohorts"][0]["cohort"] == 4
+
+
+async def test_admin_retention_route_requires_internal_token(http_no_db):
+    resp = await http_no_db.get("/api/admin/analytics/retention")
+    assert resp.status_code == 401

@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-import app.bot.handlers as h
+import app.transport.bot.handlers as h
 
 
 def _listing(**over):
@@ -82,7 +82,7 @@ async def test_inline_handler_answers_card(monkeypatch):
 
     monkeypatch.setattr(h.backend, "get_listing", fake_get_listing)
     monkeypatch.setattr(
-        "app.core.config.get_settings",
+        "app.config.get_settings",
         lambda: SimpleNamespace(bot_username="ftadasd_bot"),
     )
 

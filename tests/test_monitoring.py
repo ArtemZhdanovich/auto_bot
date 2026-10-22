@@ -3,15 +3,15 @@
 import asyncio
 
 import pytest
+from pydantic import SecretStr
 
-from app.ai.rag_client import RAGClient
-from app.core.config import get_settings
-from app.core.deps_internal import internal_token
-from app.db.models import SourceHealth
-from app.db.session import get_session
-from app.main import app
-from app.services import alerting, source_health
-from conftest import FakeRedis
+from app.infrastructure.ai.rag_client import RAGClient
+from app.config import get_settings
+from app.transport.http.deps.internal import internal_token
+from app.infrastructure.db.models import SourceHealth
+from app.main_api import app
+from app.infrastructure.services import alerting, source_health
+from conftest import FakeRedis, install_test_container
 
 
 @pytest.fixture
@@ -19,19 +19,23 @@ def alert_env(monkeypatch):
     """Настройки для алертов + стабы Telegram/Redis; возвращает список отправок."""
     settings = get_settings()
     monkeypatch.setattr(settings, "alerts_enabled", True)
-    monkeypatch.setattr(settings, "bot_token", "test-token")
+    monkeypatch.setattr(settings, "bot_token", SecretStr("test-token"))
     monkeypatch.setattr(settings, "admin_chat_id", 111)
     monkeypatch.setattr(settings, "manager_chat_id", None)
     redis = FakeRedis()
     sent: list[str] = []
+
+    class _FakeNotifier:
+        def __init__(self, bot_token: str) -> None:
+            self.bot_token = bot_token
+
+        async def send_text(self, chat_id: int, text: str) -> bool:
+            sent.append(text)
+            return True
+
     monkeypatch.setattr(alerting, "_get_redis", lambda: redis)
     monkeypatch.setattr(alerting, "_redis", None)
-
-    async def _fake_send(bot_token: str, chat_id: int, text: str) -> bool:
-        sent.append(text)
-        return True
-
-    monkeypatch.setattr(alerting, "_send_telegram", _fake_send)
+    monkeypatch.setattr(alerting, "TelegramNotifier", _FakeNotifier)
     return {"sent": sent, "redis": redis}
 
 
@@ -104,12 +108,12 @@ async def test_rag_cb_alert(monkeypatch, alert_env):
         alerts.append(text)
         return True
 
-    import app.ai.rag_client as rag_mod
+    import app.infrastructure.ai.rag_client as rag_mod
 
     monkeypatch.setattr(rag_mod, "send_alert", _recorder)
     client = RAGClient(base_url="http://rag", api_token=None, enabled=False)
     for _ in range(5):
-        client._record_failure(fail_threshold=5, cooldown=300)
+        client._record_failure_with(threshold=5, cooldown=300)
         await asyncio.sleep(0)
     assert len(alerts) == 1 and "RAG" in alerts[0]
 
@@ -124,9 +128,9 @@ async def test_health_detailed(monkeypatch):
 
     from httpx import ASGITransport, AsyncClient
 
-    monkeypatch.setattr("app.main._check_db", _ok)
-    monkeypatch.setattr("app.main._check_redis", _ok)
-    monkeypatch.setattr("app.main._check_rabbit", _fail)
+    monkeypatch.setattr("app.main_api._check_db", _ok)
+    monkeypatch.setattr("app.main_api._check_redis", _ok)
+    monkeypatch.setattr("app.main_api._check_rabbit", _fail)
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -136,7 +140,7 @@ async def test_health_detailed(monkeypatch):
     body = resp.json()
     assert body["components"] == {"postgres": True, "redis": True, "rabbitmq": False}
 
-    monkeypatch.setattr("app.main._check_db", _fail)  # БД критична → 503
+    monkeypatch.setattr("app.main_api._check_db", _fail)  # БД критична → 503
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as http:
@@ -148,14 +152,16 @@ async def test_health_detailed(monkeypatch):
 async def test_metrics_requires_internal_token(fake_session):
     from httpx import ASGITransport, AsyncClient
 
-    app.dependency_overrides[get_session] = lambda: fake_session
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=fake_session)
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as http:
             resp = await http.get("/metrics")
     finally:
-        app.dependency_overrides.clear()
+        app.state.dishka_container = _prev
+        await _container.close()
     assert resp.status_code == 401
 
 
@@ -164,20 +170,25 @@ async def test_metrics_smoke(fake_session):
     from httpx import ASGITransport, AsyncClient
 
     HEADERS = {"X-Internal-Token": internal_token()}
-    app.dependency_overrides[get_session] = lambda: fake_session
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=fake_session)
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as http:
             resp = await http.get("/metrics", headers=HEADERS)
     finally:
-        app.dependency_overrides.clear()
+        app.state.dishka_container = _prev
+        await _container.close()
     assert resp.status_code == 200
     body = resp.json()
     assert set(body) == {
+        "generated_at",
         "users",
         "filters",
         "listings",
+        "leads",
+        "price_analyses",
         "notifications_sent_24h",
         "sources",
         "events_24h",
@@ -200,6 +211,40 @@ async def test_alert_escalation(alert_env):
     await r.delete("alert:esc")
     assert await alerting.send_alert("x4", dedup_key="esc") is True
     assert r.ttls["alert:esc"] == 7200  # cap 2 ч
+
+
+@pytest.mark.asyncio
+async def test_alert_fail_open_when_dedup_store_is_down(monkeypatch):
+    """Redis недоступен → алерт всё равно уходит (лучше дубль, чем тишина)."""
+    sent: list[str] = []
+
+    class _Notifier:
+        async def send_text(self, chat_id: int, text: str) -> bool:
+            sent.append(text)
+            return True
+
+    class _BrokenCache:
+        async def get(self, key: str):
+            raise ConnectionError("redis down")
+
+        async def set_if_absent(self, key: str, value: str, ttl_sec: int) -> bool:
+            raise ConnectionError("redis down")
+
+        async def set(self, key: str, value: str, ttl_sec: int | None = None) -> None:
+            raise ConnectionError("redis down")
+
+    from app.application.alerts.use_cases import send_alert as send_alert_use_case
+
+    ok = await send_alert_use_case(
+        "redis лежит",
+        notifier=_Notifier(),
+        chat_id=1,
+        cache=_BrokenCache(),
+        dedup_key="fail-open",
+    )
+
+    assert ok is True
+    assert sent == ["redis лежит"]
 
 
 @pytest.mark.asyncio

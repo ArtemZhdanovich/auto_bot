@@ -7,7 +7,7 @@
 
 from fastapi import FastAPI
 
-from app.api import leads, partners
+from app.transport.http.routers import leads, partners
 from services._base import create_domain_service
 
 SERVICE_NAME = "partners"

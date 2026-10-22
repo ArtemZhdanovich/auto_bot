@@ -7,11 +7,11 @@ LLM, ошибка LLM — во всех случаях конфиг не пор�
 import httpx
 import pytest
 
-from app.adapters.che168 import Che168HtmlAdapter
-from app.adapters.common.http import HttpClient
-from app.ai.llm_client import LLMError, LLMResult, MockLLMClient
-from app.db.models import Source
-from app.services.parser_doctor import extract_json, repair_parser
+from app.infrastructure.sources.che168 import Che168HtmlAdapter
+from app.infrastructure.sources.common.http import HttpClient
+from app.infrastructure.ai.llm_client import LLMError, LLMResult, MockLLMClient
+from app.infrastructure.db.models import Source
+from app.infrastructure.services.parser_doctor import extract_json, repair_parser
 from conftest import FakeRedis, FakeSession
 
 
@@ -19,10 +19,12 @@ from conftest import FakeRedis, FakeSession
 def _no_real_telegram(monkeypatch):
     """Тесты не должны ходить в реальный Telegram (BOT_TOKEN из .env)."""
 
-    async def _fake_send(bot_token: str, chat_id: int, text: str) -> bool:
+    async def _fake_send(self, chat_id: int, text: str) -> bool:
         return True
 
-    monkeypatch.setattr("app.services.alerting._send_telegram", _fake_send)
+    monkeypatch.setattr(
+        "app.infrastructure.messaging.telegram.TelegramNotifier.send_text", _fake_send
+    )
 
 # «Новая вёрстка» (то, к чему якобы переехал сайт) — старые селекторы тут не работают
 NEW_LAYOUT = """
@@ -339,7 +341,7 @@ async def test_server_down_does_not_consume_cooldown():
 
 
 def test_classify_page_buckets():
-    from app.services.parser_doctor import classify_page
+    from app.infrastructure.services.parser_doctor import classify_page
 
     assert classify_page(NEW_LAYOUT) == "markup_change"
     assert classify_page("Access Denied") == "banned"  # короче MIN_HTML_LEN
@@ -348,7 +350,7 @@ def test_classify_page_buckets():
 
 
 def test_classify_fetch_error_buckets():
-    from app.services.parser_doctor import classify_fetch_error
+    from app.infrastructure.services.parser_doctor import classify_fetch_error
 
     assert classify_fetch_error("HTTP 403 for https://x") == "banned"
     assert classify_fetch_error("HTTP 429 for https://x") == "banned"

@@ -6,7 +6,7 @@
 
 from fastapi import FastAPI
 
-from app.api import auth, me, users
+from app.transport.http.routers import auth, me, users
 from services._base import create_domain_service
 
 SERVICE_NAME = "identity"

@@ -6,13 +6,13 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from app.adapters.che168 import (
+from app.infrastructure.sources.che168 import (
     Che168HtmlAdapter,
     extract_make_zh,
     parse_wan_number,
 )
-from app.adapters.common.http import FetchError, HttpClient
-from app.schemas.criteria import SearchCriteria
+from app.infrastructure.sources.common.http import FetchError, HttpClient
+from app.domain.search.criteria import SearchCriteria
 
 CARD = """
 <li class="caritem" data-id="71085432">
@@ -195,6 +195,6 @@ async def test_fetch_raises_fetch_error_on_403():
 
 
 async def test_registry_has_che168():
-    from app.adapters import ADAPTER_CLASSES
+    from app.infrastructure.sources import ADAPTER_CLASSES
 
     assert ADAPTER_CLASSES["Che168HtmlAdapter"] is Che168HtmlAdapter

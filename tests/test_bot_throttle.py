@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from app.bot.throttle import FLOOD_TEXT, FloodGate, FloodMiddleware
+from app.transport.bot.throttle import FLOOD_TEXT, FloodGate, FloodMiddleware
 
 
 def test_gate_allows_within_limit():

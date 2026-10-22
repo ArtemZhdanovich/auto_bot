@@ -4,8 +4,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import app.bot.handlers as h
-from app.bot.handlers import (
+import app.transport.bot.handlers as h
+from app.transport.bot.handlers import (
     _car_card_kb,
     _format_analysis,
 )

@@ -4,20 +4,41 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from pydantic import SecretStr
 
-from app.core.config import get_settings
-from app.core.deps import get_current_user
-from app.db.models import Payment
-from app.db.session import get_session
-from app.main import app
+from app.config import get_settings
+from app.infrastructure.db.models import Payment, User
+from app.infrastructure.security.tokens import create_access_token
+from app.main_api import app
 
-from conftest import FakeSession
+from conftest import FakeSession, install_test_container
 
-TEST_USER = SimpleNamespace(
-    telegram_id=111111,
-    subscription_tier="free",
-    subscription_until=None,
-)
+INTERNAL_TOKEN = "test-internal-token"
+TG_ID = 111111
+
+
+def _user(**overrides) -> User:
+    """Базовый free-пользователь (id TG_ID)."""
+    fields: dict = {"telegram_id": TG_ID, "is_active": True}
+    fields.update(overrides)
+    return User(**fields)
+
+
+def _headers(user_id: int = TG_ID) -> dict[str, str]:
+    """Реальный Bearer-заголовок: auth-путь не подменяется."""
+    return {
+        "Authorization": f"Bearer {create_access_token(user_id, get_settings())}"
+    }
+
+
+@pytest.fixture(autouse=True)
+def _legacy_favorites_path(monkeypatch):
+    """Модуль проверяет legacy-ветку: FakeSession не умеет keyset-запросы.
+
+    Прод-путь (use_case_favorites=True) покрыт test_favorites_use_case.py
+    и test_favorites_list_use_case.py на реальной БД.
+    """
+    monkeypatch.setattr(get_settings(), "use_case_favorites", False)
 
 
 @pytest.fixture
@@ -28,14 +49,14 @@ def internal_env(monkeypatch):
     переменных окружения и наличия .env (в проде оба обязаны быть заданы).
     """
     settings = get_settings()
-    monkeypatch.setattr(settings, "internal_token", "test-internal-token")
-    monkeypatch.setattr(settings, "bot_token", "123:test")
+    monkeypatch.setattr(settings, "internal_token", SecretStr(INTERNAL_TOKEN))
+    monkeypatch.setattr(settings, "bot_token", SecretStr("123:test"))
 
 
 @pytest.fixture
 def internal_headers(internal_env) -> dict[str, str]:
     """Заголовки под internal_env: токен совпадает с замоканным INTERNAL_TOKEN."""
-    return {"X-Internal-Token": "test-internal-token"}
+    return {"X-Internal-Token": INTERNAL_TOKEN}
 
 
 @pytest.fixture
@@ -43,11 +64,17 @@ def client(fake_redis):  # noqa: ARG001
     from httpx import ASGITransport, AsyncClient
 
     session = FakeSession()
-    app.dependency_overrides[get_session] = lambda: session
-    app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    session.add(_user())
+    _prev = app.state.dishka_container
+    install_test_container(app, session=session)
 
-    yield AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), session
-    app.dependency_overrides.clear()
+    yield (
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test", headers=_headers()
+        ),
+        session,
+    )
+    app.state.dishka_container = _prev
 
 
 # ---------- GET /api/subscription ----------
@@ -72,19 +99,22 @@ async def test_subscription_status_expired_pro_is_free(client):
     """Истёкшая подписка = действующий Free (ТЗ п. 8.7)."""
     from httpx import ASGITransport, AsyncClient
 
-    expired = SimpleNamespace(
-        telegram_id=111111,
-        subscription_tier="pro",
-        subscription_until=datetime.now(UTC) - timedelta(days=1),
+    session = FakeSession()
+    session.add(
+        _user(
+            subscription_tier="pro",
+            subscription_until=datetime.now(UTC) - timedelta(days=1),
+        )
     )
-    app.dependency_overrides[get_current_user] = lambda: expired
+    _prev = app.state.dishka_container
+    install_test_container(app, session=session)
     try:
         async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
+            transport=ASGITransport(app=app), base_url="http://test", headers=_headers()
         ) as http:
             resp = await http.get("/api/subscription")
     finally:
-        app.dependency_overrides.pop(get_current_user, None)
+        app.state.dishka_container = _prev
     assert resp.status_code == 200
     body = resp.json()
     assert body["tier"] == "free"
@@ -100,7 +130,7 @@ async def test_stars_invoice_creates_pending_payment(client, internal_env, monke
 
     internal_env задаёт BOT_TOKEN (без него эндпоинт отвечает 503).
     """
-    from app.api import payments as payments_api
+    from app.transport.http.routers import payments as payments_api
 
     async def fake_link(**kwargs):
         assert kwargs["payload"] == "sub:1"
@@ -117,7 +147,7 @@ async def test_stars_invoice_creates_pending_payment(client, internal_env, monke
     assert body["invoice_url"] == "https://t.me/$4800invoice"
     assert body["amount"] == 4800
     assert body["period_days"] == 365
-    payment = session.added[0]
+    payment = next(o for o in session.added if isinstance(o, Payment))
     assert isinstance(payment, Payment)
     assert payment.status == "pending"
     assert payment.currency == "XTR"
@@ -147,7 +177,7 @@ async def test_prepare_payment_internal(client, internal_headers):
     body = resp.json()
     assert body["amount"] == 2500
     assert body["title"] == "AutoPick Business"
-    assert session.added[0].status == "pending"
+    assert next(o for o in session.added if isinstance(o, Payment)).status == "pending"
 
 
 @pytest.mark.asyncio
@@ -231,25 +261,13 @@ def _listing(i: int) -> SimpleNamespace:
     )
 
 
-@pytest.mark.asyncio
-async def test_favorite_toggle(client):
-    """Toggle: добавил → favorited=true, повторно → false (ТЗ п. 9.2.4)."""
-    http, session = client
+class _ResultWithRowcount:
+    """Результат execute() с rowcount — как у INSERT/DELETE в реальной БД."""
 
-    async def _get(model, pk):  # type: ignore[no-untyped-def]
-        return _listing(1) if model.__name__ == "Listing" else None
+    def __init__(self, rowcount: int) -> None:
+        self.rowcount = rowcount
 
-    session.get = _get  # type: ignore[method-assign]
-    session.set_result([])  # избранного ещё нет
-    resp = await http.post("/api/listings/1/favorite")
-    assert resp.status_code == 200
-    assert resp.json() == {"favorited": True}
-    assert len(session.added) == 1
 
-    session.set_result([SimpleNamespace(user_id=111111, listing_id=1)])
-    resp = await http.post("/api/listings/1/favorite")
-    assert resp.json() == {"favorited": False}
-    assert len(session.deleted) == 1
 
 
 @pytest.mark.asyncio
@@ -257,6 +275,8 @@ async def test_favorite_unknown_listing_404(client):
     http, session = client
 
     async def _get(model, pk):  # type: ignore[no-untyped-def]
+        if model is User:
+            return _user()
         return None
 
     session.get = _get  # type: ignore[method-assign]
@@ -264,23 +284,3 @@ async def test_favorite_unknown_listing_404(client):
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_list_favorites(client):
-    """Список избранного + first_price для бейджа «цена снизилась» (фаза 4)."""
-    http, session = client
-    now = datetime.now(UTC)
-    session.set_results(
-        [
-            [_listing(1), _listing(2)],
-            [  # история цен: у №1 цена снизилась (первая точка 18000)
-                SimpleNamespace(listing_id=1, price=18000.0, recorded_at=now),
-                SimpleNamespace(listing_id=1, price=17000.0, recorded_at=now),
-            ],
-        ]
-    )
-    resp = await http.get("/api/favorites")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert [item["id"] for item in body] == [1, 2]
-    assert body[0]["first_price"] == 18000.0
-    assert body[1]["first_price"] is None

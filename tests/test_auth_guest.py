@@ -2,10 +2,9 @@
 
 import pytest
 
-from app.db.session import get_session
-from app.main import app
+from app.main_api import app
 
-from conftest import FakeSession
+from conftest import FakeSession, install_test_container
 
 
 @pytest.fixture
@@ -13,9 +12,10 @@ def client():
     from httpx import ASGITransport, AsyncClient
 
     session = FakeSession()
-    app.dependency_overrides[get_session] = lambda: session
+    _prev = app.state.dishka_container
+    install_test_container(app, session=session)
     yield AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), session
-    app.dependency_overrides.clear()
+    app.state.dishka_container = _prev
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 """Калькулятор доставки Корея → РФ (MVP)."""
 
-from app.services.delivery import LEGAL_REFS, calc_delivery, format_breakdown
+from app.domain.calc.delivery import LEGAL_REFS, calc_delivery, format_breakdown
 
 CURRENT_YEAR = 2026
 
@@ -83,7 +83,7 @@ def test_util_fee_over_3000cc_full_rate_by_power():
 
 def test_clearance_fee_pp1637_rates_2026():
     """Сбор за тамож. операции: ПП № 1637 (ред. № 1638), с 01.01.2026."""
-    from app.services.delivery import _clearance_fee
+    from app.domain.calc.delivery import _clearance_fee
 
     assert _clearance_fee(150_000) == 1_231  # ≤200k
     assert _clearance_fee(400_000) == 2_462

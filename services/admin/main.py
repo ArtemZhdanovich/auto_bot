@@ -9,7 +9,7 @@ health источников, лиды (read-only), AI-ассистент, presig
 
 from fastapi import FastAPI
 
-from app.api import admin, metrics
+from app.transport.http.routers import admin, metrics
 from services._base import create_domain_service
 
 SERVICE_NAME = "admin"

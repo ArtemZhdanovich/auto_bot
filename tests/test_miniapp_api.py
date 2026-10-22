@@ -5,46 +5,89 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.deps import get_current_user
-from app.db.session import get_session
-from app.main import app
+from app.config import get_settings
+from app.infrastructure.db.models import User
+from app.infrastructure.security.tokens import create_access_token
+from app.main_api import app
 
-from conftest import FakeSession
+from conftest import FakeSession, install_test_container
 
-TEST_USER = SimpleNamespace(
-    telegram_id=111111, subscription_tier="free", subscription_until=None
-)
+TG_ID = 111111
 
 
-def _pro_user() -> SimpleNamespace:
-    """Pro-подписка на 30 дней вперёд."""
-    until = datetime.fromtimestamp(datetime.now(UTC).timestamp() + 30 * 86400, tz=UTC)
-    return SimpleNamespace(
-        telegram_id=111111, subscription_tier="pro", subscription_until=until
-    )
+class _CommitOnExit:
+    """Контекст session.begin(): коммитит при выходе без исключения."""
+
+    def __init__(self, session: FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc_info) -> bool:
+        if exc_info[0] is None:
+            self._session.committed = True
+        return False
+
+
+class _SessionWithBegin(FakeSession):
+    """FakeSession + async with begin(): create_filter пишет в транзакции."""
+
+    def begin(self) -> _CommitOnExit:
+        return _CommitOnExit(self)
+
+
+def _user(**overrides) -> User:
+    """Базовый free-пользователь мини-аппа (id TG_ID)."""
+    fields: dict = {"telegram_id": TG_ID, "is_active": True}
+    fields.update(overrides)
+    return User(**fields)
+
+
+def _headers(user_id: int = TG_ID) -> dict[str, str]:
+    """Реальный Bearer-заголовок: auth-путь не подменяется."""
+    return {
+        "Authorization": f"Bearer {create_access_token(user_id, get_settings())}"
+    }
 
 
 @pytest.fixture
 def client(fake_redis):  # noqa: ARG001
     from httpx import ASGITransport, AsyncClient
 
-    session = FakeSession()
-    app.dependency_overrides[get_session] = lambda: session
-    app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    session = _SessionWithBegin()
+    session.add(_user())
+    _prev = app.state.dishka_container
+    install_test_container(app, session=session)
 
-    yield AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), session
-    app.dependency_overrides.clear()
+    yield (
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test", headers=_headers()
+        ),
+        session,
+    )
+    app.state.dishka_container = _prev
 
 
 # ---------- Фильтры ----------
 
 
 @pytest.mark.asyncio
-async def test_create_filter_requires_auth(client):
-    http, _ = client
-    app.dependency_overrides.pop(get_current_user, None)
-    resp = await http.post("/api/filters", json={"name": "BMW"})
-    assert resp.status_code == 401
+async def test_create_filter_requires_auth():
+    """Запрос без Bearer-токена — 401 (auth не подменяется)."""
+    from httpx import ASGITransport, AsyncClient
+
+    session = _SessionWithBegin()
+    _prev = app.state.dishka_container
+    install_test_container(app, session=session)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as http:
+            resp = await http.post("/api/filters", json={"name": "BMW"})
+        assert resp.status_code == 401
+    finally:
+        app.state.dishka_container = _prev
 
 
 @pytest.mark.asyncio
@@ -65,7 +108,8 @@ async def test_create_filter_201(client):
     assert body["notify_mode"] == "digest"
     # criteria сохранён без None-полей
     assert "fuel" not in body["criteria"]
-    assert len(session.added) == 1
+    # в сессии: юзер (из фикстуры) + созданный фильтр
+    assert len([o for o in session.added if o.__class__.__name__ == "UserFilter"]) == 1
     assert session.committed is True
 
 
@@ -86,14 +130,15 @@ async def test_instant_allowed_on_pro():
     """Pro-пользователь может создать instant-фильтр."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.db.session import get_session
-
-    session = FakeSession()
-    app.dependency_overrides[get_session] = lambda: session
-    app.dependency_overrides[get_current_user] = lambda: _pro_user()
+    
+    until = datetime.fromtimestamp(datetime.now(UTC).timestamp() + 30 * 86400, tz=UTC)
+    session = _SessionWithBegin()
+    session.add(_user(subscription_tier="pro", subscription_until=until))
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=session)
     try:
         async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
+            transport=ASGITransport(app=app), base_url="http://test", headers=_headers()
         ) as http:
             resp = await http.post(
                 "/api/filters",
@@ -102,7 +147,8 @@ async def test_instant_allowed_on_pro():
         assert resp.status_code == 201
         assert resp.json()["notify_mode"] == "instant"
     finally:
-        app.dependency_overrides.clear()
+        app.state.dishka_container = _prev
+        await _container.close()
 
 
 @pytest.mark.asyncio
@@ -161,11 +207,28 @@ async def test_update_filter_not_found_404(client):
 
 
 @pytest.mark.asyncio
-async def test_delete_filter_marks_deleted(client):
-    from app.db.models import UserFilter
+async def test_foreign_filter_returns_404(client):
+    """IDOR: чужой фильтр неотличим от отсутствующего — 404 (PATCH и DELETE)."""
+    from app.infrastructure.db.models import UserFilter
 
     http, session = client
-    session.add(UserFilter(user_id=TEST_USER.telegram_id, criteria={}))
+    session.add(UserFilter(user_id=TG_ID + 1, criteria={}))
+    foreign_id = session.added[-1].id
+
+    resp = await http.patch(f"/api/filters/{foreign_id}", json={"name": "x"})
+    assert resp.status_code == 404
+
+    resp = await http.delete(f"/api/filters/{foreign_id}")
+    assert resp.status_code == 404
+    assert session.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_delete_filter_marks_deleted(client):
+    from app.infrastructure.db.models import UserFilter
+
+    http, session = client
+    session.add(UserFilter(user_id=TG_ID, criteria={}))
     resp = await http.delete("/api/filters/1")
     assert resp.status_code == 204
     assert len(session.deleted) == 1
@@ -281,7 +344,7 @@ async def test_get_listing_404(client):
 @pytest.mark.asyncio
 async def test_get_listing_with_price_history(client):
     """Карточка включает price_history (хронологический порядок), PLAN.md фаза 4."""
-    from app.db.models import Listing
+    from app.infrastructure.db.models import Listing
 
     http, session = client
     session.add(
@@ -324,7 +387,7 @@ async def test_get_listing_with_price_history(client):
 def _listing_row(**kw):
     from datetime import UTC, datetime
 
-    from app.db.models import Listing
+    from app.infrastructure.db.models import Listing
 
     base = dict(
         id=9,
@@ -374,7 +437,7 @@ async def test_by_url_validation(client):
 
 
 def test_norm_url_variants():
-    from app.api.listings import _norm_url
+    from app.transport.http.routers.listings import _norm_url
 
     assert _norm_url("HTTPS://WWW.Encar.com/car/1/") == "encar.com/car/1"
     assert _norm_url("http://m.encar.com/car/1") == "encar.com/car/1"
@@ -395,31 +458,25 @@ async def test_inspection_404_when_absent(client):
 @pytest.mark.asyncio
 async def test_inspection_put_forbidden_for_non_admin(client):
     """PUT осмотра — только admin (ручной осмотр)."""
-    http, _session = client
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
-        telegram_id=1, role="buyer", is_active=True
+    http, session = client
+    session.add(_user(telegram_id=1, role="buyer"))
+    resp = await http.put(
+        "/api/listings/42/inspection",
+        json={"marks": [], "items": []},
+        headers=_headers(1),
     )
-    try:
-        resp = await http.put(
-            "/api/listings/42/inspection", json={"marks": [], "items": []}
-        )
-        assert resp.status_code == 403
-    finally:
-        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_inspection_put_404_without_listing(client):
     """Несуществующее объявление — 404 даже у админа."""
-    http, _session = client
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
-        telegram_id=1, role="admin", is_active=True
+    http, session = client
+    session.add(_user(telegram_id=1, role="admin"))
+    resp = await http.put(
+        "/api/listings/42/inspection", json={}, headers=_headers(1)
     )
-    try:
-        resp = await http.put("/api/listings/42/inspection", json={})
-        assert resp.status_code == 404
-    finally:
-        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -428,10 +485,14 @@ async def test_inspection_upsert_roundtrip(client):
     from typing import Any
 
     http, session = client
+    admin = _user(telegram_id=1, role="admin")
+    session.add(admin)
     listing = SimpleNamespace(id=42, source="encar")
     report_holder: dict[str, Any] = {}
 
     async def fake_get(model: Any, pk: Any) -> Any:
+        if model is User:
+            return admin
         if model.__name__ == "Listing":
             return listing if pk == 42 else None
         if model.__name__ == "InspectionReport":
@@ -451,9 +512,6 @@ async def test_inspection_upsert_roundtrip(client):
             report_holder["report"] = obj
 
     session.add = add  # type: ignore[method-assign]
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
-        telegram_id=1, role="admin", is_active=True
-    )
     try:
         payload = {
             "source": "manual",
@@ -469,7 +527,9 @@ async def test_inspection_upsert_roundtrip(client):
                 {"key": "brakes", "status": "warn", "note": "передние колодки"},
             ],
         }
-        resp = await http.put("/api/listings/42/inspection", json=payload)
+        resp = await http.put(
+            "/api/listings/42/inspection", json=payload, headers=_headers(1)
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["grade"] == "good"
@@ -481,7 +541,9 @@ async def test_inspection_upsert_roundtrip(client):
         # Валидация: неизвестная зона — 422
         bad = dict(payload)
         bad["marks"] = [{"zone": "wheel", "type": "scratch"}]
-        resp = await http.put("/api/listings/42/inspection", json=bad)
+        resp = await http.put(
+            "/api/listings/42/inspection", json=bad, headers=_headers(1)
+        )
         assert resp.status_code == 422
     finally:
-        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+        del session.get  # type: ignore[attr-defined]

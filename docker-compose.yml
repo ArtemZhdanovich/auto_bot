@@ -73,7 +73,7 @@ services:
 
   bot:
     build: .
-    command: python -m app.bot
+    command: python -m app.transport.bot
     env_file: .env
     profiles: ["mono", "micro"]
     environment:
@@ -84,7 +84,7 @@ services:
       REDIS_URL: redis://redis:6379/0
     # Long-polling без HTTP-порта: liveness по heartbeat-файлу
     healthcheck:
-      test: ["CMD", "python", "-m", "app.services.heartbeat", "bot"]
+      test: ["CMD", "python", "-m", "app.application.services.heartbeat", "bot"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -96,7 +96,7 @@ services:
 
   worker_fetch:
     build: .
-    command: python -m app.workers.fetch
+    command: python -m app.infrastructure.workers.fetch
     env_file: .env
     profiles: ["mono", "micro"]
     environment:
@@ -104,7 +104,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     healthcheck:
-      test: ["CMD", "python", "-m", "app.services.heartbeat", "fetch"]
+      test: ["CMD", "python", "-m", "app.application.services.heartbeat", "fetch"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -116,7 +116,7 @@ services:
 
   worker_send:
     build: .
-    command: python -m app.workers.send
+    command: python -m app.infrastructure.workers.send
     env_file: .env
     profiles: ["mono", "micro"]
     environment:
@@ -124,7 +124,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     healthcheck:
-      test: ["CMD", "python", "-m", "app.services.heartbeat", "send"]
+      test: ["CMD", "python", "-m", "app.application.services.heartbeat", "send"]
       interval: 30s
       timeout: 5s
       retries: 3

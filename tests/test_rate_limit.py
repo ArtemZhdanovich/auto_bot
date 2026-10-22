@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from app.services import rate_limit
-from app.services.rate_limit import (
+from app.infrastructure.services import rate_limit
+from app.infrastructure.services.rate_limit import (
     TokenBucket,
     TelegramRateLimiter,
     bucket_advance,
@@ -144,7 +144,7 @@ async def test_wait_slot_disabled_limiter():
 
 
 async def test_send_message_uses_rate_limit_wait(monkeypatch):
-    import app.workers.send as send_mod
+    import app.infrastructure.workers.send as send_mod
 
     waited_calls: list[int] = []
 

@@ -2,22 +2,20 @@
 
 Для каждого сервиса: приложение собирается, /health отвечает, состав
 префиксов API ровно своего домена (ничего лишнего и ничего чужого),
-и один представительный эндпоинт отрабатывает сквозь реальные
-dependency-overrides (как в монолитных тестах, но на изолированном app).
+и один представительный эндпоинт отрабатывает сквозь контейнер на
+тестовых двойниках БД/Redis (auth — настоящий: JWT / X-API-Key).
 """
 
 from types import SimpleNamespace
+from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
-from app.core.config import get_settings
-from app.core.deps import get_current_user
-from app.core.deps_internal import get_redis
-from app.core.deps_partner import require_partner
-from app.core.security import create_refresh_token
-from app.db.models import User
-from app.db.session import get_session
+from app.config import get_settings
+from app.infrastructure.db.models import PartnerAccount, User
+from app.infrastructure.security.tokens import create_access_token, create_refresh_token
 from services.admin.main import create_app as create_admin
 from services.billing.main import create_app as create_billing
 from services.catalog.main import create_app as create_catalog
@@ -25,7 +23,7 @@ from services.dialog.main import create_app as create_dialog
 from services.identity.main import create_app as create_identity
 from services.partners.main import create_app as create_partners
 
-from conftest import FakeRedis, FakeSession
+from conftest import FakeRedis, FakeSession, install_test_container
 
 SERVICES = {
     "identity": create_identity,
@@ -46,9 +44,12 @@ EXPECTED_PREFIXES: dict[str, set[str]] = {
     "admin": {"/api/admin"},
 }
 
-TEST_USER = SimpleNamespace(
-    telegram_id=111111, subscription_tier="free", subscription_until=None
-)
+
+def _headers(user_id: int = 111111) -> dict[str, str]:
+    """Реальный Bearer-заголовок: auth-путь не подменяется."""
+    return {
+        "Authorization": f"Bearer {create_access_token(user_id, get_settings())}"
+    }
 
 
 def _iter_api_paths(routes) -> list[str]:
@@ -133,9 +134,10 @@ def test_smoke_no_context_leaks_across_services():
     assert owners("/api/users") == {"identity", "billing"}
 
 
-async def _client_for(app, overrides: dict) -> AsyncClient:
-    for dependency, replacement in overrides.items():
-        app.dependency_overrides[dependency] = replacement
+async def _client_for(app, session=None, redis=None) -> AsyncClient:
+    """Подменить БД/Redis контейнером (auth ходит по-настоящему, без подмен)."""
+    if session is not None or redis is not None:
+        install_test_container(app, session=session, redis=redis)
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://svc.test")
 
 
@@ -146,7 +148,7 @@ async def test_smoke_identity_refresh_endpoint():
     session.add(
         User(telegram_id=42, username="u", subscription_tier="free", is_active=True)
     )
-    async with await _client_for(app, {get_session: lambda: session}) as http:
+    async with await _client_for(app, session=session) as http:
         token = create_refresh_token(42, get_settings())
         resp = await http.post("/api/auth/refresh", json={"refresh_token": token})
     assert resp.status_code == 200
@@ -157,20 +159,24 @@ async def test_smoke_catalog_listings_feed():
     """catalog: /api/listings отвечает (пустая выдача на FakeSession)."""
     app = create_catalog()
     async with await _client_for(
-        app, {get_session: lambda: FakeSession()}
+        app, session=FakeSession()
     ) as http:
         resp = await http.get("/api/listings")
     assert resp.status_code == 200
-    assert resp.json() == {"total": 0, "items": []}
+    body = resp.json()
+    assert body["total"] == 0 and body["items"] == []
+    # keyset-поля аддитивны (фаза 9), старый контракт сохранён.
+    assert body.get("has_more") is False
+    assert body.get("next_cursor") is None
 
 
 async def test_smoke_billing_subscription():
     """billing: /api/subscription отдаёт тариф и лимиты."""
     app = create_billing()
-    async with await _client_for(
-        app, {get_current_user: lambda: TEST_USER}
-    ) as http:
-        resp = await http.get("/api/subscription")
+    session = FakeSession()
+    session.add(User(telegram_id=111111, subscription_tier="free", is_active=True))
+    async with await _client_for(app, session=session) as http:
+        resp = await http.get("/api/subscription", headers=_headers())
     assert resp.status_code == 200
     body = resp.json()
     assert body["tier"] == "free"
@@ -178,58 +184,57 @@ async def test_smoke_billing_subscription():
 
 
 async def test_smoke_partners_me():
-    """partners: /api/partner/me отдаёт ЛК партнёра (ключ из override)."""
+    """partners: /api/partner/me отдаёт ЛК партнёра (аккаунт в FakeSession)."""
     app = create_partners()
-    key = SimpleNamespace(key_prefix="pi_deadbeef…")
-    account = SimpleNamespace(
-        id=1,
-        name="Партнёр",
-        plan="starter",
-        daily_quota=10,
-        balance=100.0,
-        cpl_rate=None,
+    session = FakeSession()
+    session.add(
+        PartnerAccount(
+            id=1,
+            name="Партнёр",
+            plan="starter",
+            status="active",
+            balance=Decimal("100.0"),
+            daily_quota=10,
+            cpl_rate=None,
+        )
     )
-    async with await _client_for(
-        app,
-        {
-            require_partner: lambda: (key, account),
-            get_session: lambda: FakeSession(),
-        },
-    ) as http:
-        resp = await http.get("/api/partner/me")
+    # PartnerApiKey-строка для выборки по хэшу (FakeSession игнорирует WHERE,
+    # но первая строка обязана прийти первым execute-ом); аккаунт достаётся
+    # через get(). Вторая группа — пустая: scalar_one() у count (claimed_today)
+    # вернёт len(rows) = 0.
+    session.set_results([[SimpleNamespace(id=1, status="active", partner_id=1)], []])
+    async with await _client_for(app, session=session) as http:
+        resp = await http.get("/api/partner/me", headers={"X-API-Key": "pi_smoke"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["name"] == "Партнёр"
     assert body["quota_remaining"] == 10
-    assert body["balance"] == 100.0
+    # Decimal в схеме → строка в JSON (pydantic v2)
+    assert float(body["balance"]) == 100.0
 
 
 async def test_smoke_dialog_ai_reset():
     """dialog: /api/ai/reset проходит с JWT-юзером (user_id = telegram_id)."""
     app = create_dialog()
-    async with await _client_for(
-        app,
-        {
-            get_current_user: lambda: TEST_USER,
-            get_session: lambda: FakeSession(),
-            get_redis: lambda: FakeRedis(),
-        },
-    ) as http:
-        resp = await http.post("/api/ai/reset")
+    session = FakeSession()
+    session.add(User(telegram_id=111111, subscription_tier="free", is_active=True))
+    async with await _client_for(app, session=session, redis=FakeRedis()) as http:
+        resp = await http.post("/api/ai/reset", headers=_headers())
     assert resp.status_code == 200
     assert resp.json() == {"reset": True}
 
 
 async def test_smoke_admin_adapters(monkeypatch):
     """admin: /api/admin/adapters за internal-токеном (без БД)."""
-    token = "test-internal-token"
-    monkeypatch.setattr(get_settings(), "internal_token", token)
+    token_value = "test-internal-token"
+    # Settings.internal_token — SecretStr; строка сломает internal_token()
+    monkeypatch.setattr(get_settings(), "internal_token", SecretStr(token_value))
     app = create_admin()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://svc.test"
     ) as http:
         resp = await http.get(
-            "/api/admin/adapters", headers={"X-Internal-Token": token}
+            "/api/admin/adapters", headers={"X-Internal-Token": token_value}
         )
     assert resp.status_code == 200
     # ADAPTER_CLASSES — это классы адаптеров, а не имена источников

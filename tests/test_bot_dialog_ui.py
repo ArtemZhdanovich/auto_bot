@@ -1,6 +1,6 @@
 """UI-панель диалога бота: форматы, кнопки, токены хода, мини-апп."""
 
-from app.bot.handlers import (
+from app.transport.bot.handlers import (
     _miniapp_button,
     _search_ready,
     build_dialog_kb,
@@ -51,7 +51,7 @@ def test_dialog_kb_shows_search_when_ready():
 
 
 def test_miniapp_button_http_falls_back_to_url(monkeypatch):
-    import app.bot.handlers as h
+    import app.transport.bot.handlers as h
 
     monkeypatch.setattr(h, "_miniapp_url", lambda: "http://localhost:8080")
     btn = _miniapp_button()
@@ -61,7 +61,7 @@ def test_miniapp_button_http_falls_back_to_url(monkeypatch):
 
 
 def test_miniapp_button_https_uses_web_app(monkeypatch):
-    import app.bot.handlers as h
+    import app.transport.bot.handlers as h
 
     monkeypatch.setattr(h, "_miniapp_url", lambda: "https://app.example.com")
     btn = _miniapp_button()

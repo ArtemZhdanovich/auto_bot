@@ -12,10 +12,10 @@ import pytest
 
 from aiogram.filters import CommandObject
 
-from app.services.delivery import calc_delivery
+from app.domain.calc.delivery import calc_delivery
 
-import app.bot.handlers as h
-from app.bot.handlers import (
+import app.transport.bot.handlers as h
+from app.transport.bot.handlers import (
     _car_card_kb,
     _format_calc_out,
     _miniapp_button,

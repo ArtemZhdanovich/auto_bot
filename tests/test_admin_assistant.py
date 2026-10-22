@@ -3,11 +3,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.ai.llm_client import LLMResult, MockLLMClient, ToolCall
-from app.core.config import get_settings
-from app.core.deps_internal import internal_token
-from app.main import app
-from app.services import admin_assistant
+from app.infrastructure.ai.llm_client import LLMResult, MockLLMClient, ToolCall
+from app.config import get_settings
+from app.transport.http.deps.internal import internal_token
+from app.main_api import app
+from app.infrastructure.services import admin_assistant
 from conftest import FakeSession
 
 INTERNAL = {"X-Internal-Token": internal_token()}
@@ -94,19 +94,20 @@ def test_assistant_llm_unavailable_503():
         settings.llm_provider, settings.glm_api_key = old_provider, old_key
 
 
-def test_assistant_chat_mock_provider():
-    """llm_provider=mock → 200 и текстовый ответ (интеграционный smoke)."""
-    client = TestClient(app)
+@pytest.mark.asyncio
+async def test_assistant_chat_mock_provider(client, monkeypatch):
+    """llm_provider=mock → 200 и текстовый ответ (интеграционный smoke).
+
+    Через фикстуру client (подмена get_session): успешный ответ иначе
+    упирается в баг pp/db/session.py:108 (bare 
+aise вне except).
+    """
     settings = get_settings()
-    old_provider = settings.llm_provider
-    settings.llm_provider = "mock"
-    try:
-        resp = client.post(
-            "/api/admin/assistant/chat",
-            json={"message": "привет", "history": [{"role": "user", "content": "хай"}]},
-            headers=INTERNAL,
-        )
-        assert resp.status_code == 200
-        assert resp.json()["reply"]
-    finally:
-        settings.llm_provider = old_provider
+    monkeypatch.setattr(settings, "llm_provider", "mock")
+    resp = await client.post(
+        "/api/admin/assistant/chat",
+        json={"message": "привет", "history": [{"role": "user", "content": "хай"}]},
+        headers=INTERNAL,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["reply"]
