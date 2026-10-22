@@ -19,6 +19,8 @@ from services.gateway.routing import ROUTE_RULES, SERVICE_NAMES, resolve_service
         # --- catalog ---
         ("/api/listings", "catalog"),
         ("/api/listings/42", "catalog"),
+        ("/api/listings/42/analysis", "catalog"),
+        ("/api/bot/listings/42/analysis", "catalog"),
         ("/api/favorites", "catalog"),
         ("/api/filters/7", "catalog"),
         ("/api/notifications/settings", "catalog"),

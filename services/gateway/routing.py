@@ -25,6 +25,10 @@ ROUTE_RULES: tuple[RouteRule, ...] = (
     RouteRule("/api/filters", "catalog"),
     RouteRule("/api/notifications", "catalog"),
     RouteRule("/api/calc", "catalog"),
+    # Внутренний канал бота (analysis.bot_router: X-Internal-Token);
+    # веб-часть анализа /api/listings/{id}/analysis уходит правилом
+    # /api/listings выше — тоже в catalog.
+    RouteRule("/api/bot", "catalog"),
     RouteRule("/api/payments", "billing"),
     RouteRule("/api/subscription", "billing"),
     RouteRule("/api/partner", "partners"),

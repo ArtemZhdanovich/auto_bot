@@ -36,6 +36,29 @@
 - **ps1:** named-mutex (второй экземпляр завершается сразу) + все
   события через `Log` с `[yyyy-MM-dd HH:mm:ss]`. Теперь цикл виден:
   детект 2×fail → kill ssh → новый URL → .env → бот ≈ 50с.
+## 71. Анализ цены: analysis.router не смонтирован ни в одном сервисе (2026-10-22)
+
+- **Симптом:** «анализ цены не работает» в миниаппе (и в боте).
+- **Причина — близнец calc-бага (#68):** монолит монтирует 17 роутеров
+  (app/main_api.py:155-172), при разъезде на сервисы про
+  `analysis.router` (GET/POST `/api/listings/{id}/analysis`) забыли:
+  gateway шлёт `/api/listings/*` в catalog, а там роута нет →
+  `404 Not Found`. Ботский канал `POST /api/bot/listings/{id}/analysis`
+  (app/transport/bot/client.py:243, X-Internal-Token) вдобавок не имел
+  правила в ROUTE_RULES → «no route for /api/bot/...».
+- **Фикс:** `analysis.router` + `analysis.bot_router` смонтированы в
+  catalog (общий префикс /api/listings, полный DI-контейнер общий —
+  create_domain_service/make_container); в ROUTE_RULES добавлено
+  `RouteRule("/api/bot", "catalog")`. Тесты routing: +2 кейса (52/52).
+- **Проверка:** web без токена 404→401 «Missing bearer token»;
+  бот-канал «no route»→422 (валидация тела); гость (реальный JWT из
+  /api/auth/guest): GET кэша 200, POST → 403 `guest_forbidden: AI-анализ
+  цены доступен только после входа` — вся цепочка gateway→catalog→DI→
+  use case жива. Для вошедшего POST запускает LLM-разбор (квота free:
+  1 разбор/нед). NB: в гостевом режиме анализ закрыт by design
+  (баннер «Войти — для AI-анализа цены»).
+
+
 - **Вёрстка ПК («едет вправо»):** глобального box-sizing не было —
   `.guest-banner` (`flex: 1 1 100%` + паддинги + бордер, content-box)
   переполнял flex-строку `.app-shell--desktop`, страницу вело вправо.
