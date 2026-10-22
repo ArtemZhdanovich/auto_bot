@@ -1,0 +1,70 @@
+# tests/adapters/test_base.py
+
+def test_credentials_str_rejected():
+    """Аннотация врёт: str не должен сохраняться в self.credentials."""
+    with pytest.raises(TypeError, match="credentials must be a dict"):
+        BaseApiAdapter(source_name="x", credentials="api_key=abc")
+
+
+def test_credentials_none_becomes_empty_dict():
+    a = BaseApiAdapter(source_name="x")
+    assert a.credentials == {}
+    assert isinstance(a.credentials, dict)
+
+
+def test_repr_masks_credentials():
+    a = BaseApiAdapter(
+        source_name="encar",
+        credentials={"api_key": "super-secret", "token": "another"},
+    )
+    r = repr(a)
+    assert "super-secret" not in r
+    assert "another" not in r
+    assert "***" in r
+
+
+def test_rate_limit_validation():
+    with pytest.raises(ValueError, match="rate_limit"):
+        BaseApiAdapter(source_name="x", rate_limit=0)
+    with pytest.raises(ValueError, match="rate_limit"):
+        BaseApiAdapter(source_name="x", rate_limit=-1)
+
+
+def test_timeout_validation():
+    with pytest.raises(ValueError, match="timeout"):
+        BaseApiAdapter(source_name="x", timeout=0)
+
+
+def test_not_implemented_message_contains_class_name():
+    a = BaseApiAdapter(source_name="x")
+    with pytest.raises(NotImplementedError, match="BaseApiAdapter"):
+        asyncio.run(a.fetch(criteria=_dummy_criteria()))
+
+
+def test_protocol_has_close():
+    """SourceAdapter должен включать close() для lifecycle-контракта."""
+    assert hasattr(SourceAdapter, "close")
+
+
+def test_close_is_idempotent_and_swallows_errors(caplog):
+    class BrokenHttp:
+        async def close(self):
+            raise RuntimeError("boom")
+    a = BaseApiAdapter(source_name="x", http_client=BrokenHttp())
+    asyncio.run(a.close())
+    asyncio.run(a.close())  # не падает
+    assert "adapter_close_failed" in caplog.text
+
+
+def test_async_context_manager():
+    async def run():
+        async with BaseApiAdapter(source_name="x") as a:
+            assert a.source_name == "x"
+    asyncio.run(run())
+
+
+def test_http_client_bypasses_timeout():
+    """Документируем: при передаче http_client параметр timeout игнорируется."""
+    fake = HttpClient(timeout=999)
+    a = BaseApiAdapter(source_name="x", timeout=5, http_client=fake)
+    assert a.http is fake  # timeout=5 не применился

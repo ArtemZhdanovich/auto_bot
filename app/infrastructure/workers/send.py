@@ -1,0 +1,500 @@
+"""Send Worker — этап 4 (ТЗ п. 4.6, 8.6). Очередь: RabbitMQ (`send`).
+
+Запуск: python -m app.infrastructure.workers.send
+
+- instant: notify_new_listings (после парсинга) → фанаут задач
+  send_listing_notification (rate limit 30 сек/пользователь, тихие часы);
+- digest: cron 09:00 и 20:00 UTC, 3–5 карточек одним сообщением;
+- подписки: cron 12:00 UTC — напоминания за 3/1 день, даунгрейд;
+- антидубли: sent_log + notified:{uid}:{lid} (TTL 7 дней) — в Redis;
+- Telegram Bot API напрямую через httpx, обработка 429 (retry_after).
+"""
+
+import asyncio
+import logging
+from datetime import datetime, timezone
+from typing import Any
+
+import httpx
+from redis.asyncio import Redis
+
+from app.config import get_settings
+from app.infrastructure.db.models import Listing, ListingPriceHistory, User, UserFilter
+from app.infrastructure.db.session import get_session, session_factory
+from app.infrastructure.messaging.legacy_worker import QUEUE_SEND, CronSpec, TaskPublisher, TaskWorker
+from app.infrastructure.services import rate_limit
+from app.infrastructure.services.dialog import cleanup_expired_dialogs
+from app.infrastructure.services.notify import (
+    _fmt_price,
+    buffer_for_digest,
+    clear_digest,
+    collect_for_filters,
+    event_audience,
+    format_listing_card,
+    in_quiet_hours,
+    mark_sent,
+    mark_sent_many,
+    read_digest,
+    was_sent,
+)
+from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
+
+# TECHDEBT 9.7: общий клиент Telegram API (ленивый, один на процесс).
+_TG_CLIENT: httpx.AsyncClient | None = None
+
+
+def _tg_client() -> httpx.AsyncClient:
+    global _TG_CLIENT
+    if _TG_CLIENT is None or _TG_CLIENT.is_closed:
+        _TG_CLIENT = httpx.AsyncClient(timeout=15.0)
+    return _TG_CLIENT
+
+
+async def close_telegram_client() -> None:
+    """Закрыть общий клиент Telegram (shutdown воркера)."""
+    global _TG_CLIENT
+    if _TG_CLIENT is not None and not _TG_CLIENT.is_closed:
+        await _TG_CLIENT.aclose()
+    _TG_CLIENT = None
+
+TELEGRAM_API = "https://api.telegram.org"
+
+
+async def send_telegram_message(
+    bot_token: str, chat_id: int, text: str
+) -> tuple[bool, str | None]:
+    """sendMessage с parse_mode=HTML. 429 → ждём retry_after и повторяем раз.
+
+    Перед отправкой — Token Bucket (ТЗ п. 12.6): ~30 msg/s глобально,
+    ~1 msg/s на чат; Redis лежит → отправка не блокируется (fail-open).
+    """
+    if not bot_token:
+        logger.warning("telegram_send_skipped: no BOT_TOKEN")
+        return False, "no_bot_token"
+
+    waited = await rate_limit.rate_limit_wait(chat_id)
+    if waited:
+        logger.info("telegram_rate_limited_local: waited=%.2fs chat=%s", waited, chat_id)
+
+    url = f"{TELEGRAM_API}/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    for attempt in (1, 2):
+        try:
+            # TECHDEBT 9.7: один httpx.AsyncClient на процесс (пул соединений),
+            # закрывается в `shutdown` через `close_telegram_client()`.
+            resp = await _tg_client().post(url, json=payload)
+        except httpx.HTTPError as exc:
+            logger.error("telegram_send_failed: %s", exc)
+            return False, str(exc)
+
+        if resp.status_code == 429 and attempt == 1:
+            retry_after = resp.json().get("parameters", {}).get("retry_after", 1)
+            logger.warning("telegram_rate_limited: retry_after=%s", retry_after)
+            await asyncio.sleep(min(float(retry_after), 30.0))
+            continue
+        if resp.status_code == 200:
+            return True, None
+        logger.error(
+            "telegram_send_bad_status: %s %s", resp.status_code, resp.text[:200]
+        )
+        return False, f"status_{resp.status_code}"
+    return False, "rate_limited"
+
+
+async def _user_quiet_hours(session: Any, user_id: int) -> str | None:
+    result = await session.execute(
+        select(UserFilter.quiet_hours).where(UserFilter.user_id == user_id).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def send_listing_notification(
+    ctx: dict[str, Any], user_id: int, listing_id: int
+) -> dict[str, Any]:
+    """Instant-уведомление одному пользователю об одном объявлении."""
+    settings = get_settings()
+    redis: Redis = ctx["redis"]
+    bot_token: str = ctx.get("bot_token", "")
+
+    # антидубль (п. 8.6)
+    if await was_sent(redis, user_id, listing_id):
+        return {"user_id": user_id, "listing_id": listing_id, "skipped": "already_sent"}
+
+    # rate limit: не чаще 1 сообщения в 30 сек на пользователя
+    allowed = await redis.set(
+        f"rl:notify:{user_id}", "1", nx=True, ex=settings.notify_rate_limit_sec
+    )
+    if not allowed:
+        return {"user_id": user_id, "listing_id": listing_id, "skipped": "rate_limited"}
+
+    async with session_factory() as session:
+        listing = await session.get(Listing, listing_id)
+        if listing is None:
+            return {"user_id": user_id, "listing_id": listing_id, "error": "not_found"}
+
+        if in_quiet_hours(await _user_quiet_hours(session, user_id)):
+            # тихие часы: в буфер дайджеста, чтобы не потерять
+            await buffer_for_digest(redis, user_id, listing_id)
+            return {"user_id": user_id, "listing_id": listing_id, "skipped": "quiet_hours"}
+
+        ok, err = await send_telegram_message(
+            bot_token, user_id, format_listing_card(listing)
+        )
+        if not ok:
+            return {"user_id": user_id, "listing_id": listing_id, "error": err}
+
+        await mark_sent(session, redis, user_id, listing_id)
+        return {"user_id": user_id, "listing_id": listing_id, "sent": True}
+
+
+def format_status_card(listing: Any, kind: str, old_price: Any = None) -> str:
+    """Карточка статусного события (PLAN.md, фаза 3): price_drop/gone/returned."""
+    if kind == "price_drop":
+        line = "⬇️ <b>Цена снизилась</b>"
+        if old_price is not None:
+            line += (
+                f": {_fmt_price(old_price, listing.currency)} → "
+                f"{_fmt_price(listing.price, listing.currency)}"
+            )
+    elif kind == "returned":
+        line = "✅ <b>Снова в продаже</b>"
+    else:  # gone
+        line = "🔴 <b>Объявление исчезло с источника</b>"
+    return line + "\n" + format_listing_card(listing)
+
+
+async def _old_price(session: Any, listing_id: int) -> Any:
+    """Предыдущая точка цены (вторая с конца) — для «было → стало»."""
+    result = await session.execute(
+        select(ListingPriceHistory.price)
+        .where(ListingPriceHistory.listing_id == listing_id)
+        .order_by(ListingPriceHistory.recorded_at.desc())
+        .limit(2)
+    )
+    rows = list(result.scalars().all())
+    return rows[1] if len(rows) > 1 else None
+
+
+async def send_listing_status(
+    ctx: dict[str, Any], user_id: int, listing_id: int, kind: str
+) -> dict[str, Any]:
+    """Статусное уведомление (price_drop/gone/returned) — тот же контур, что
+    instant: rate limit, тихие часы (в буфер дайджеста), антидубль по kind."""
+    settings = get_settings()
+    redis: Redis = ctx["redis"]
+    bot_token: str = ctx.get("bot_token", "")
+
+    if await was_sent(redis, user_id, listing_id, kind):
+        return {
+            "user_id": user_id,
+            "listing_id": listing_id,
+            "kind": kind,
+            "skipped": "already_sent",
+        }
+    allowed = await redis.set(
+        f"rl:notify:{user_id}", "1", nx=True, ex=settings.notify_rate_limit_sec
+    )
+    if not allowed:
+        return {
+            "user_id": user_id,
+            "listing_id": listing_id,
+            "kind": kind,
+            "skipped": "rate_limited",
+        }
+
+    async with session_factory() as session:
+        listing = await session.get(Listing, listing_id)
+        if listing is None:
+            return {
+                "user_id": user_id,
+                "listing_id": listing_id,
+                "kind": kind,
+                "error": "not_found",
+            }
+
+        if in_quiet_hours(await _user_quiet_hours(session, user_id)):
+            # тихие часы: в буфер дайджеста, чтобы не потерять
+            await buffer_for_digest(redis, user_id, listing_id)
+            return {
+                "user_id": user_id,
+                "listing_id": listing_id,
+                "kind": kind,
+                "skipped": "quiet_hours",
+            }
+
+        old_price = (
+            await _old_price(session, listing_id) if kind == "price_drop" else None
+        )
+        ok, err = await send_telegram_message(
+            bot_token, user_id, format_status_card(listing, kind, old_price)
+        )
+        if not ok:
+            return {
+                "user_id": user_id,
+                "listing_id": listing_id,
+                "kind": kind,
+                "error": err,
+            }
+
+        await mark_sent(session, redis, user_id, listing_id, kind=kind)
+        return {"user_id": user_id, "listing_id": listing_id, "kind": kind, "sent": True}
+
+
+async def listing_status_scan(
+    ctx: dict[str, Any], kind: str, listing_ids: list[int]
+) -> dict[str, Any]:
+    """Фанаут статусных уведомлений аудитории sent_log (кто уже видел карточку).
+
+    Вызывается fetch-воркером: price_drop/returned сразу после парсинга,
+    gone — из stale_check_job (cron 04:00 UTC).
+    """
+    publisher: TaskPublisher | None = ctx.get("publisher")
+    dispatched = 0
+    async with session_factory() as session:
+        for listing_id in listing_ids:
+            for user_id in await event_audience(session, listing_id):
+                if publisher is not None:
+                    await publisher.enqueue(
+                        "send_listing_status", user_id, listing_id, kind
+                    )
+                dispatched += 1
+
+    if dispatched:
+        logger.info("status_scan_done: kind=%s dispatched=%s", kind, dispatched)
+    return {"kind": kind, "dispatched": dispatched}
+
+
+async def notify_new_listings(
+    ctx: dict[str, Any], source: str | None = None
+) -> dict[str, Any]:
+    """Скан фильтров после парсинга: instant → задачи отправки, digest → буфер."""
+    redis: Redis = ctx["redis"]
+    publisher: TaskPublisher | None = ctx.get("publisher")
+    counts = {"instant": 0, "digest": 0}
+
+    async with session_factory() as session:
+        for mode in ("instant", "digest"):
+            for flt, listings in await collect_for_filters(session, redis, mode):
+                for item in listings:
+                    if mode == "instant":
+                        if publisher is not None:
+                            await publisher.enqueue(
+                                "send_listing_notification", flt.user_id, item.id
+                            )
+                        counts["instant"] += 1
+                    else:
+                        await buffer_for_digest(redis, flt.user_id, item.id)
+                        counts["digest"] += 1
+
+    if any(counts.values()):
+        logger.info("notify_scan_done: %s source=%s", counts, source)
+    return counts
+
+
+async def digest_job(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron (09:00 и 20:00 UTC): дайджест 3–5 карточек одним сообщением."""
+    redis: Redis = ctx["redis"]
+    bot_token: str = ctx.get("bot_token", "")
+    sent = skipped = 0
+
+    # TECHDEBT 9.1: SCAN вместо KEYS — не блокирует event loop/Redis
+    # на всём keyspace (ключей может быть тысячи).
+    async for key in redis.scan_iter("digest:*"):
+        raw_key = key.decode() if isinstance(key, bytes) else str(key)
+        try:
+            user_id = int(raw_key.split(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+
+        ids = await read_digest(redis, user_id)
+        if not ids:
+            await clear_digest(redis, user_id)
+            continue
+
+        async with session_factory() as session:
+            cards: list[str] = []
+            for listing_id in ids:
+                listing = await session.get(Listing, listing_id)
+                if listing is None:
+                    continue
+                cards.append(format_listing_card(listing))
+
+            if cards:
+                header = f"📬 <b>Дайджест:</b> {len(cards)} новых вариантов\n\n"
+                ok, _err = await send_telegram_message(
+                    bot_token, user_id, header + "\n\n".join(cards)
+                )
+            else:
+                ok = True  # буфер пуст по факту — просто чистим
+
+            if ok:
+                # TECHDEBT 9.2: одна batch-запись (bulk insert + pipeline)
+                # вместо N отдельных insert+commit+SETEX.
+                await mark_sent_many(session, redis, user_id, ids)
+                sent += len(ids)
+            else:
+                skipped += len(ids)  # оставляем буфер до следующего прогона
+
+        if ok:
+            await clear_digest(redis, user_id)
+
+    logger.info("digest_sent: sent=%s kept=%s", sent, skipped)
+    return {"sent": sent, "kept": skipped}
+
+
+async def subscription_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron ежедневно (12:00 UTC): напоминания за 3/1 день и даунгрейд (ТЗ п. 8.7).
+
+    - за 3 дня и за 1 день до окончания — уведомление;
+    - после окончания (не позднее 3 дней) — возврат на Free + сообщение.
+    """
+    redis: Redis = ctx["redis"]
+    bot_token: str = ctx.get("bot_token", "")
+    now = datetime.now(timezone.utc)
+    reminded = downgraded = 0
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(User).where(
+                User.subscription_tier != "free",
+                User.subscription_until.is_not(None),
+                # TECHDEBT 9.8: деактивированным не пишем — ни напоминаний,
+                # ни даунгрейда (мусорные сообщения на мёртвый chat_id).
+                User.is_active.is_(True),
+            )
+        )
+        users = list(result.scalars().all())
+        for user in users:
+            until = user.subscription_until
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+            days_left = (until - now).days
+
+            if days_left <= 0:
+                if (now - until).total_seconds() > 3 * 86400:
+                    continue  # давно истёкших не спамим повторно
+                user.subscription_tier = "free"
+                # TECHDEBT 9.3: until очищаем — иначе «истёкший» пользователь
+                # вечно попадает в выборку и в карточках висит старая дата.
+                user.subscription_until = None
+                await session.commit()
+                await redis.delete(f"sub:reminded:{user.telegram_id}")
+                await send_telegram_message(
+                    bot_token,
+                    user.telegram_id,
+                    "⌛ Подписка закончилась — вы переведены на тариф Free.\n"
+                    "Продлить: /subscribe (Pro даёт instant-уведомления и 20 фильтров).",
+                )
+                downgraded += 1
+            elif days_left in (1, 3):
+                already = await redis.get(f"sub:reminded:{user.telegram_id}:{days_left}")
+                if already:
+                    continue
+                await redis.set(
+                    f"sub:reminded:{user.telegram_id}:{days_left}",
+                    "1",
+                    ex=2 * 86400,
+                )
+                await send_telegram_message(
+                    bot_token,
+                    user.telegram_id,
+                    f"🔔 Подписка <b>{user.subscription_tier}</b> закончится через "
+                    f"{days_left} дн. Продлить со скидкой: /subscribe",
+                )
+                reminded += 1
+
+    if reminded or downgraded:
+        logger.info(
+            "subscription_check_done: reminded=%s downgraded=%s", reminded, downgraded
+        )
+    return {"reminded": reminded, "downgraded": downgraded}
+
+
+async def dialog_cleanup_job(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron ежедневно: снос архивных диалогов, молчащих сутки с последнего
+    сообщения (п. «диалоги сносить через сутки»)."""
+    async for session in get_session():
+        deleted = await cleanup_expired_dialogs(session)
+    return {"dialog_sessions_deleted": deleted}
+
+
+async def startup(ctx: dict[str, Any]) -> None:
+    settings = get_settings()
+    # Redis (данные: дедуп, rate limit, digest-буферы, ключи подписок)
+    redis = Redis.from_url(settings.redis_url)
+    ctx["redis"] = redis
+    # Token Bucket Telegram (ТЗ п. 12.6): 30 msg/s глобально, 1 msg/s на чат
+    rate_limit.init_rate_limiter(
+        redis, settings.telegram_rate_global_per_sec, settings.telegram_rate_chat_per_sec
+    )
+    ctx["bot_token"] = settings.bot_token.get_secret_value()
+    ctx["publisher"] = TaskPublisher(settings.rabbitmq_url)
+    logger.info("send_worker_started")
+
+
+async def shutdown(ctx: dict[str, Any]) -> None:
+    publisher: TaskPublisher | None = ctx.get("publisher")
+    if publisher:
+        await publisher.aclose()
+    rate_limit.reset_rate_limiter()
+    await close_telegram_client()
+    redis: Redis | None = ctx.get("redis")
+    if redis:
+        await redis.aclose()
+    logger.info("send_worker_stopped")
+
+
+HANDLERS = {
+    "send_listing_notification": send_listing_notification,
+    "send_listing_status": send_listing_status,
+    "notify_new_listings": notify_new_listings,
+    "listing_status_scan": listing_status_scan,
+    "digest_job": digest_job,
+    "subscription_check_job": subscription_check_job,
+}
+
+# Дайджест 09:00 и 20:00 UTC, подписки — 12:00 UTC (ТЗ п. 8.6, 8.7),
+# чистка диалогов старше суток — 04:00 UTC
+CRON_JOBS = [
+    CronSpec(digest_job, hour=9, minute=0),
+    CronSpec(digest_job, hour=20, minute=0),
+    CronSpec(subscription_check_job, hour=12, minute=0),
+    CronSpec(dialog_cleanup_job, hour=4, minute=0),
+]
+
+
+async def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
+    settings = get_settings()
+    ctx: dict[str, Any] = {}
+    await startup(ctx)
+    # Heartbeat для healthcheck (консюмер без HTTP-порта)
+    from app.infrastructure.runtime.heartbeat import start_heartbeat
+
+    await start_heartbeat("send")
+    worker = TaskWorker(
+        amqp_url=settings.rabbitmq_url,
+        bindings={QUEUE_SEND: list(HANDLERS)},
+        handlers=HANDLERS,
+        ctx=ctx,
+        concurrency=5,   # как arq max_jobs=5
+        job_timeout=60,  # как arq job_timeout
+        cron_jobs=CRON_JOBS,
+    )
+    try:
+        await worker.run()
+    finally:
+        await shutdown(ctx)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

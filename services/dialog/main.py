@@ -8,7 +8,7 @@
 
 from fastapi import FastAPI
 
-from app.api import ai_search, dialog
+from app.transport.http.routers import ai_search, dialog
 from services._base import create_domain_service
 
 SERVICE_NAME = "dialog"

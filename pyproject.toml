@@ -20,6 +20,9 @@ dependencies = [
     "aio-pika>=10.1.1",
     "cryptography>=45",
     "aioboto3>=13.2",
+    "dishka>=1.10.1",
+    "dishka-faststream>=0.7.0",
+    "faststream>=0.7.7",
 ]
 
 [dependency-groups]
@@ -40,4 +43,14 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]  # импорт services.* (микросервисы) из корня репозитория
 
+[tool.ruff]
+line-length = 100
+target-version = "py311"
 
+[tool.ruff.lint]
+# База: ошибки (E4/E7/E9) и pyflakes (F). Игнорируем устоявшийся стиль:
+# E402 — импорты после docstring-конфига; E741 — `l` в тестах листингов;
+# F811 — намеренные переопределения (схемы partner.py, стабы тестов);
+# F601 — дубль ключа в normalize (двусторонняя карта трансляции).
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E402", "E741", "F811", "F601"]

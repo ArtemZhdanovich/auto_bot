@@ -4,9 +4,12 @@ import logging
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
 
+from dishka import AsyncContainer
+from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI
 
-from app.core.config import get_settings
+from app.config import get_settings
+from app.di.container import make_container
 
 
 def create_domain_service(
@@ -14,15 +17,28 @@ def create_domain_service(
 ) -> FastAPI:
     """FastAPI-приложение сервиса: /health + роутеры своего домена.
 
-    Роутеры переиспользуются из монолита (app/api/*) без копирования —
-    один и тот же код крутится в режиме `mono` (app/main.py) и в
-    режиме `micro` (отдельный процесс на сервис).
+    Роутеры переиспользуются из монолита (app/transport/http/routers/*)
+    без копирования — один и тот же код крутится в режиме `mono`
+    (app/main_api.py) и в режиме `micro` (отдельный процесс на сервис).
+    Сборка зависимостей — общий Dishka-контейнер (`app/di`).
+
+    Args:
+        name: Имя сервиса (заголовок и health).
+        version: Версия сервиса.
+        routers: Роутеры домена.
+
+    Returns:
+        Настроенное FastAPI-приложение.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         logging.basicConfig(level=get_settings().log_level)
-        yield
+        container: AsyncContainer = app.state.dishka_container
+        try:
+            yield
+        finally:
+            await container.close()
 
     app = FastAPI(
         title=f"auto_bot {name}",
@@ -30,6 +46,9 @@ def create_domain_service(
         description=f"Доменный сервис `{name}` (профиль micro)",
         lifespan=lifespan,
     )
+
+    container = make_container()
+    setup_dishka(container, app)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

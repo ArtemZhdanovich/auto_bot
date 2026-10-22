@@ -1825,3 +1825,83 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   ruff ok. bot/miniapp пересобраны, polling запущен.
 - Ручной шаг: inline-режим бота должен быть включён в BotFather (`/setinline`),
   иначе switchInlineQuery из вебаппа ничего не откроет.
+
+## 2026-10-21: Clean Architecture — домен/сценарии/инфраструктура + Dishka + FastStream
+
+- `app/` переложен по слоям: `domain/` (чистая логика) → `application/`
+  (сценарии) → `infrastructure/` (db, cache, security, sources, storage,
+  workers, messaging) → `transport/` (http, bot, messaging) + `di/`
+  (dishka-контейнер: settings/database/redis/broker/security/adapters/
+  repositories/use_cases). Правила зависимостей закреплены тестом
+  `tests/architecture/test_layers.py`; `domain` не импортирует `app/*`.
+- DI: все сценарии и зависимости — через dishka; HTTP-роутеры принимают
+  зависимости в сигнатурах.
+- Очереди: добавлен FastStream-контур — строгие контракты команд
+  (`extra="forbid"` + обязательный `idempotency_key`), обработчик `enrich`
+  (догрузка спеков лота), publisher + outbox-релей с идемпотентностью
+  доставки; legacy aio-pika TaskWorker/CronSpec остался в fetch/send.
+- Пакет проектных документов — `docs/REFACTOR/` (аудит, blueprint, миграция,
+  финал). Suite на момент фиксации: 1119 passed, 3 skipped.
+
+## 2026-10-22: HTTP-слой на dishka — FastAPI Depends выпилен
+
+- `deps/providers.py`: HttpDepsProvider строит `CurrentUser` (Bearer → порт
+  `AccessTokenVerifier` → `GetCurrentUser`) и `PartnerAuthState` (X-API-Key →
+  `AuthenticateApiKey`); HTTP-маппинг ошибок (401/403) и audit-лог сохранены
+  1:1.
+- `InternalDishkaRoute` заменяет router-level `Depends(check_internal_token)`:
+  X-Internal-Token — Header-параметр сигнатуры (OpenAPI-паритет), проверка до
+  dishka-резолва сценариев; константное сравнение сохранено.
+- Удалён мёртвый юзкейс `VerifyAccessToken` (+ биндинги DI) — его роль играет
+  порт `AccessTokenVerifier` в провайдере.
+- Suite: 908 passed, 257 skipped (Postgres-скипы), ruff clean.
+
+## 2026-10-22 (позже): application → 6 микросервисов (ports/dto) + тесты и документация
+
+### Прикладной слой: контракты по сервисам
+- Внутри `identity / catalog / billing / partners / dialog / admin` — явные
+  `ports.py` (Protocol) и `dto.py` (DTO/команды); все порты вытащены из
+  use_cases/queries/settings ~22 модулей, команды/результаты сценариев
+  переехали из use_cases в `<service>/dto.py`.
+- Старые общие каталоги `app/application/dto/` (18 файлов) и
+  `app/application/ports/` расформированы; кросс-сервисные порты
+  (CachePort, LLMPort, ClockPort) — в `shared/ports.py`.
+- Коллизии имён: `users.ports.UserRepository` → `UserUpsertRepository`;
+  партнёрский `LeadView` → `PartnerLeadView` (не путать с CRM-`LeadView`).
+- Порты и inline-DTO вырезаны скриптами (`.zwork/refactor_phase*`), глобальный
+  рерайт импортов — 66 файлов (app/ services/ tests/). Suite: 908 passed,
+  257 skipped, ruff по `app/application` чист.
+
+### Тесты: раскладка по сервисам
+- Плоские тесты разложены зеркально архитектуре: `tests/identity/`,
+  `catalog/`, `billing/`, `partners/` (+ `helpers.py` вместо
+  `partners_helpers.py`), `dialog/`, `admin/`, `bot/`, `security/`,
+  `transport/`; инфра-тесты — в `tests/infrastructure/`, смоук
+  микросервисов — в `tests/architecture/`. Описание — `docs/TESTING.md`.
+
+### Документация: README → пакет docs/
+- `README.md` сокращён до обзора + карты документации; по разделам собраны
+  `docs/ARCHITECTURE.md` (слои, 6 сервисов, DI, очередь, micro-профиль, БД),
+  `API.md`, `SOURCES.md`, `AI.md`, `MONETIZATION.md`, `OPERATIONS.md`,
+  `TESTING.md`, `SECURITY.md` (модель + свод угроз).
+- Неактуальное ТЗ (`TZ.md`, 112 КБ: бот/сайт/архитектура до рефакторинга)
+  удалено; `docs/REFACTOR/README.md` помечен баннером «зафиксировано» со
+  ссылкой на актуальную архитектуру.
+- `INCIDENTS.md`: заведён свод из 23 устранённых угроз (initData, секреты,
+  SSRF, IDOR, инъекции, rate limits, ПД, ключи партнёров, PQ-шифрование…)
+  с контрмерами и тестами; дата аудита актуализирована.
+
+### Дожим техдолга (серия 22.10, вторая волна)
+- Закрыто **43 пункта** TECHDEBT с фиксами и тестами: безопасность
+  (1.3 prompt-injection лимиты строк, 1.4 guest rate limit по IP,
+  1.6 запрет дев-дефолтов URL в prod), данные (2.4 unique списаний за
+  лид, 3.6 UUID-дефолт DialogSession, 3.7 specs_enriched_at — миграция
+  0020), AI (4.5/4.8/4.9/4.10, 5.1/5.2/5.6/5.7), бот (6.1/6.4/6.9/6.12,
+  7.2-7.6, 2.9 ретраи активации оплаты + эскалация админу, 2.10 анти-
+  даблклик), воркеры (8.8, 9.1 SCAN, 9.2 mark_sent_many, 9.3, 9.7, 9.8),
+  health (12.15), PQ-крипта (12.18 версия в info), очереди (13.3 replay-
+  CLI, 13.8 enqueue_many с семафором), CI (14.9: GitHub Actions pytest +
+  ruff + pip-audit + bandit), доки (14.7 ADR.md, 14.8 RUNBOOK.md).
+- `[tool.ruff]` в pyproject зафиксирован (E4/E7/E9/F; ignores — устоявшийся
+  стиль); ruff по app+tests — чисто.
+- Новый счётчик TECHDEBT: ✅ 107 / 🟡 27 / ⬜ 22 из 156.

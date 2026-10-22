@@ -19,7 +19,7 @@ import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.core.config import get_settings
+from app.config import get_settings
 from services.gateway.routing import SERVICE_NAMES, resolve_service
 
 logger = logging.getLogger(__name__)

@@ -1,0 +1,129 @@
+# tests/api/test_filters.py
+
+# --- create: race / лимит ----------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_filter_race_respects_limit(client, auth_headers, session):
+    """Два параллельных POST при лимите free=3 не дают 4-й."""
+    # Создать 2 фильтра
+    for i in range(2):
+        await client.post("/api/filters", json={
+            "name": f"f{i}", "criteria": {"make": "Toyota"},
+        }, headers=auth_headers)
+    # Параллельно 2 POST
+    r1, r2 = await asyncio.gather(
+        client.post("/api/filters", json={"name": "a", "criteria": {"make": "Kia"}}, headers=auth_headers),
+        client.post("/api/filters", json={"name": "b", "criteria": {"make": "Kia"}}, headers=auth_headers),
+        return_exceptions=True,
+    )
+    statuses = sorted([r.status_code for r in (r1, r2) if hasattr(r, "status_code")])
+    assert statuses == [201, 409], f"got {statuses}"
+
+
+@pytest.mark.asyncio
+async def test_create_filter_business_no_limit(client_biz, auth_headers_biz, session):
+    """Business (max_filters=None) — без ограничений."""
+    for _ in range(50):
+        r = await client_biz.post("/api/filters", json={
+            "name": "x", "criteria": {"make": "Toyota"},
+        }, headers=auth_headers_biz)
+        assert r.status_code == 201
+
+
+# --- downgrade bypass ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_filter_blocks_instant_after_downgrade(
+    client, auth_headers, session, user_downgraded, filter_with_instant,
+):
+    """Пользователь потерял Pro — PATCH любого поля не сохранит instant."""
+    r = await client.patch(
+        f"/api/filters/{filter_with_instant.id}",
+        json={"name": "new name"},  # notify_mode не передан
+        headers=auth_headers,
+    )
+    assert r.status_code == 403
+    assert "Instant" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_filter_allows_downgrade_to_digest(
+    client, auth_headers, session, user_downgraded, filter_with_instant,
+):
+    """Смена instant → digest разрешена после downgrade."""
+    r = await client.patch(
+        f"/api/filters/{filter_with_instant.id}",
+        json={"notify_mode": "digest"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_filter_pro_keeps_instant(
+    client_pro, auth_headers_pro, session, user_pro, filter_with_instant_pro,
+):
+    """Pro-пользователь может менять поля, instant остаётся."""
+    r = await client_pro.patch(
+        f"/api/filters/{filter_with_instant_pro.id}",
+        json={"name": "new name"},
+        headers=auth_headers_pro,
+    )
+    assert r.status_code == 200
+    assert r.json()["notify_mode"] == "instant"
+
+
+# --- list: пагинация ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_filters_paginated(client, auth_headers, many_filters):
+    r = await client.get("/api/filters?limit=5&offset=0", headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) <= 5
+
+
+@pytest.mark.asyncio
+async def test_list_filters_limit_capped(client, auth_headers):
+    r = await client.get("/api/filters?limit=1000", headers=auth_headers)
+    assert r.status_code == 422  # le=200
+
+
+# --- is_active ---------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_filter_inactive_user(client, auth_headers, inactive_user):
+    r = await client.post("/api/filters", json={
+        "name": "x", "criteria": {"make": "Toyota"},
+    }, headers=auth_headers)
+    assert r.status_code == 403
+
+
+# --- Path(ge=1) --------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_filter_id_zero_rejected(client, auth_headers):
+    r = await client.patch("/api/filters/0", json={"name": "x"}, headers=auth_headers)
+    assert r.status_code == 422
+
+
+# --- ownership ---------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_other_users_filter_404(client, auth_headers, other_user_filter):
+    r = await client.patch(
+        f"/api/filters/{other_user_filter.id}",
+        json={"name": "x"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 404
+
+
+# --- logging -----------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_filter_logs(client, auth_headers, caplog):
+    with caplog.at_level("INFO"):
+        await client.post("/api/filters", json={
+            "name": "x", "criteria": {"make": "Toyota"},
+        }, headers=auth_headers)
+    assert "filter_created" in caplog.text

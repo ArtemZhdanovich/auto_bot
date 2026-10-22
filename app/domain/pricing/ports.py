@@ -1,0 +1,56 @@
+"""Порт и данные разбора цены: то, что прикладному слою нужно от БД."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class ListingQuery:
+    """Минимум полей объявления для подбора сопоставимых."""
+
+    id: int
+    make: str | None = None
+    model: str | None = None
+    year: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MarketContext:
+    """Рыночный контекст: цены сопоставимых и история цены объявления."""
+
+    comp_prices: tuple[float, ...] = ()
+    history: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PriceAnalysisRecord:
+    """Строка разбора для сохранения (кэш общий на листинг)."""
+
+    listing_id: int
+    user_id: int
+    verdict: str
+    fair_min: float | None
+    fair_max: float | None
+    summary: str | None
+    payload: dict[str, Any]
+
+
+class PriceAnalysisRepository(Protocol):
+    """Хранилище разборов цены и рыночного контекста объявления."""
+
+    async def count_recent(
+        self, user_id: int, listing_id: int, *, since: datetime
+    ) -> int:
+        """Сколько разборов этой машины юзер запросил с `since`."""
+
+    async def context(self, listing: ListingQuery) -> MarketContext:
+        """Сопоставимые цены и история цены объявления."""
+
+    async def save(self, record: PriceAnalysisRecord) -> None:
+        """Поставить строку разбора в текущую транзакцию."""
+
+    async def latest_payload(self, listing_id: int) -> dict[str, Any] | None:
+        """Payload последнего разбора листинга (общий кэш)."""

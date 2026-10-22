@@ -7,7 +7,7 @@
 
 from fastapi import FastAPI
 
-from app.api import payments
+from app.transport.http.routers import payments
 from services._base import create_domain_service
 
 SERVICE_NAME = "billing"
