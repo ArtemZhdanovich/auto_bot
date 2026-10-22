@@ -68,6 +68,34 @@ app = FastAPI(title='rag-api', version='0.1.0')
 _state: dict[str, Any] = {'connection': None, 'channel': None}
 
 
+async def _publish_default(
+    channel: aio_pika.abc.AbstractChannel,
+    message: aio_pika.Message,
+    routing_key: str,
+) -> None:
+    """Publish via the default exchange.
+
+    aio-pika >= 10 removed ``Channel.default_exchange``, and RabbitMQ
+    refuses even a passive declare of the default exchange. So:
+    - RobustChannel (producer side): bare Exchange object with empty name;
+    - plain Channel (what ``IncomingMessage.channel`` returns): fall back
+      to low-level ``basic_publish`` with pamqp properties.
+    """
+    if hasattr(channel, 'get_underlay_channel'):  # RobustChannel
+        exchange = aio_pika.Exchange(channel, '', type='direct')
+        await exchange.publish(message, routing_key=routing_key)
+        return
+    # message.properties — готовый pamqp Basic.Properties (correlation_id,
+    # headers, delivery_mode внутри): передаём как есть, иначе теряется
+    # correlation_id и RPC-матчинг ответа ломается.
+    await channel.basic_publish(
+        body=message.body,
+        exchange='',
+        routing_key=routing_key,
+        properties=message.properties,
+    )
+
+
 async def _ensure_rabbit() -> None:
     if _state['connection'] is not None and not _state['connection'].is_closed:
         return
@@ -151,7 +179,7 @@ async def ask(
 
     consumer_tag = await reply_queue.consume(_on_reply, no_ack=False)
     try:
-        await channel.default_exchange.publish(message, routing_key=QUERY_QUEUE)
+        await _publish_default(channel, message, routing_key=QUERY_QUEUE)
         raw = await asyncio.wait_for(future, timeout=ASK_TIMEOUT)
     except asyncio.TimeoutError:
         logger.warning('rpc_timeout', query_id=query_id)

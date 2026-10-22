@@ -61,6 +61,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      # RAG — по имени сервиса (localhost в .env — для запуска по процессам)
+      RAG_SERVICE_URL: http://rag_api:8100
+      # glm отвечает ~60-90 сек: дефолтные 5 сек бот не дожидается
+      RAG_TIMEOUT_SEC: "120"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -84,7 +88,7 @@ services:
       REDIS_URL: redis://redis:6379/0
     # Long-polling без HTTP-порта: liveness по heartbeat-файлу
     healthcheck:
-      test: ["CMD", "python", "-m", "app.application.services.heartbeat", "bot"]
+      test: ["CMD", "python", "-m", "app.infrastructure.runtime.heartbeat", "bot"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -104,7 +108,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     healthcheck:
-      test: ["CMD", "python", "-m", "app.application.services.heartbeat", "fetch"]
+      test: ["CMD", "python", "-m", "app.infrastructure.runtime.heartbeat", "fetch"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -124,7 +128,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     healthcheck:
-      test: ["CMD", "python", "-m", "app.application.services.heartbeat", "send"]
+      test: ["CMD", "python", "-m", "app.infrastructure.runtime.heartbeat", "send"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -384,10 +388,16 @@ services:
       REDIS_URL: redis://redis:6379/1
       METRICS_PORT: "8101"
       WORKER_QUEUES: "all"
+      # Кэш embedding-модели — как у translate: без volume модель
+      # скачивается с HF при каждом рестарте; xet отключаем (флейт у anon-доступа)
+      HF_HOME: /srv/.hf
+      HF_HUB_DISABLE_XET: "1"
     # Воркер держит embedding-модель (e5-small) + шифрованные чанки в памяти —
     # фиксированный потолок вместо «сколько дадут».
     mem_limit: 1500m
     memswap_limit: 1500m
+    volumes:
+      - hf_cache_worker:/srv/.hf
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -411,7 +421,7 @@ services:
       API_TOKEN: ${RAG_API_TOKEN:-change-me-rag}
       JWT_SECRET: ${RAG_JWT_SECRET:-${APP_SECRET_KEY}}
       SERVICE_USER_ID: auto_bot
-      ASK_TIMEOUT_SEC: "30"
+      ASK_TIMEOUT_SEC: "150"
       PORT: "8100"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
@@ -474,4 +484,5 @@ volumes:
   pg_data:
   redis_data:
   rabbitmq_data:
+  hf_cache_worker:
   hf_cache:

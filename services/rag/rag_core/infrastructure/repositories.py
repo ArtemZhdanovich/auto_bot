@@ -35,7 +35,7 @@ class DocumentORM(Base):
     owner_id: Mapped[str] = mapped_column(nullable=False, index=True)
     access_group: Mapped[str | None] = mapped_column(nullable=True, index=True)
     uploaded_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(timezone.utc)
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: колонки TIMESTAMP WITHOUT TIME ZONE
     )
     status: Mapped[str] = mapped_column(nullable=False)
     deleted: Mapped[bool] = mapped_column(default=False)
@@ -63,7 +63,7 @@ class ConversationORM(Base):
     response: Mapped[str] = mapped_column(nullable=False)
     sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(timezone.utc)
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC: колонки TIMESTAMP WITHOUT TIME ZONE
     )
 
 

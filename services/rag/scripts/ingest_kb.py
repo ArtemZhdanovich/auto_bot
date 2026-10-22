@@ -24,6 +24,34 @@ import os
 
 KB_DIR = Path(__file__).resolve().parent.parent / 'kb'
 
+
+async def _publish_default(
+    channel: aio_pika.abc.AbstractChannel,
+    message: aio_pika.Message,
+    routing_key: str,
+) -> None:
+    """Publish via the default exchange.
+
+    aio-pika >= 10 removed ``Channel.default_exchange``, and RabbitMQ
+    refuses even a passive declare of the default exchange. So:
+    - RobustChannel (producer side): bare Exchange object with empty name;
+    - plain Channel (what ``IncomingMessage.channel`` returns): fall back
+      to low-level ``basic_publish`` with pamqp properties.
+    """
+    if hasattr(channel, 'get_underlay_channel'):  # RobustChannel
+        exchange = aio_pika.Exchange(channel, '', type='direct')
+        await exchange.publish(message, routing_key=routing_key)
+        return
+    # message.properties — готовый pamqp Basic.Properties (correlation_id,
+    # headers, delivery_mode внутри): передаём как есть, иначе теряется
+    # correlation_id и RPC-матчинг ответа ломается.
+    await channel.basic_publish(
+        body=message.body,
+        exchange='',
+        routing_key=routing_key,
+        properties=message.properties,
+    )
+
 RABBITMQ_URL = os.environ.get('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672/')
 JWT_SECRET = os.environ.get('JWT_SECRET', '')
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
@@ -41,8 +69,7 @@ from rag_core.infrastructure.file_storage import MinioStorage, compute_file_hash
 from rag_core.infrastructure.repositories import PostgresDocumentRepository  # noqa: E402
 
 from minio import Minio  # noqa: E402
-from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
-from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 
 def mint_token(ttl: int = 120) -> str:
@@ -67,7 +94,7 @@ async def main() -> None:
         return
 
     engine = create_async_engine(POSTGRES_DSN, echo=False)
-    session_factory = sessionmaker(engine, expire_on_commit=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
     repo = PostgresDocumentRepository(session_factory)
     storage = MinioStorage(
         Minio(
@@ -106,7 +133,8 @@ async def main() -> None:
             file_hash=compute_file_hash(path),
             owner_id=SERVICE_USER_ID,
             access_group=None,
-            uploaded_at=datetime.now(timezone.utc),
+            # колонка TIMESTAMP WITHOUT TIME ZONE — наивный UTC
+            uploaded_at=datetime.now(timezone.utc).replace(tzinfo=None),
             status=DocStatus.PENDING,
         )
         old = existing.get(path.name)
@@ -116,7 +144,7 @@ async def main() -> None:
                 continue
             # перезалив: помечаем старый удалённым, индексируем новый под новым id
             await repo.mark_deleted(old.id)
-            await channel.default_exchange.publish(
+            await _publish_default(channel, 
                 aio_pika.Message(
                     body=orjson.dumps(
                         {'token': token, 'doc_id': str(old.id), 'remove_file': False}
@@ -126,7 +154,7 @@ async def main() -> None:
                 routing_key='delete_queue',
             )
         await repo.save(doc)
-        await channel.default_exchange.publish(
+        await _publish_default(channel, 
             aio_pika.Message(
                 body=orjson.dumps({'token': token, 'doc_id': str(doc_id)}),
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,

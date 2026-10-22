@@ -44,6 +44,35 @@ RETRY_DELAYS_MS: tuple[int, ...] = (5_000, 30_000, 120_000)
 
 RETRY_COUNT_HEADER = 'x-retry-count'
 REQUEST_ID_HEADER = 'x-request-id'
+REQUEST_ID_HEADER = 'x-request-id'
+
+
+async def _publish_default(
+    channel: aio_pika.abc.AbstractChannel,
+    message: aio_pika.Message,
+    routing_key: str,
+) -> None:
+    """Publish via the default exchange.
+
+    aio-pika >= 10 removed ``Channel.default_exchange``, and RabbitMQ
+    refuses even a passive declare of the default exchange. So:
+    - RobustChannel (producer side): bare Exchange object with empty name;
+    - plain Channel (what ``IncomingMessage.channel`` returns): fall back
+      to low-level ``basic_publish`` with pamqp properties.
+    """
+    if hasattr(channel, 'get_underlay_channel'):  # RobustChannel
+        exchange = aio_pika.Exchange(channel, '', type='direct')
+        await exchange.publish(message, routing_key=routing_key)
+        return
+    # message.properties — готовый pamqp Basic.Properties (correlation_id,
+    # headers, delivery_mode внутри): передаём как есть, иначе теряется
+    # correlation_id и RPC-матчинг ответа ломается.
+    await channel.basic_publish(
+        body=message.body,
+        exchange='',
+        routing_key=routing_key,
+        properties=message.properties,
+    )
 
 
 class BaseConsumer(ABC):
@@ -264,7 +293,7 @@ class BaseConsumer(ABC):
         try:
             if isinstance(error, PermanentError):
                 # Poison message: never retry, move to the DLQ at once.
-                await channel.default_exchange.publish(
+                await _publish_default(channel, 
                     aio_pika.Message(
                         body=message.body,
                         headers=headers,
@@ -284,7 +313,7 @@ class BaseConsumer(ABC):
             elif attempt < len(RETRY_DELAYS_MS):
                 delay = RETRY_DELAYS_MS[attempt]
                 headers[RETRY_COUNT_HEADER] = attempt + 1
-                await channel.default_exchange.publish(
+                await _publish_default(channel, 
                     aio_pika.Message(
                         body=message.body,
                         headers=headers,
@@ -303,7 +332,7 @@ class BaseConsumer(ABC):
                     queue=self._queue_name,
                 )
             else:
-                await channel.default_exchange.publish(
+                await _publish_default(channel, 
                     aio_pika.Message(
                         body=message.body,
                         headers=headers,
@@ -492,7 +521,7 @@ class QueryConsumer(BaseConsumer):
                 )
                 return
             channel = cast(aio_pika.RobustChannel, message.channel)
-            await channel.default_exchange.publish(
+            await _publish_default(channel, 
                 aio_pika.Message(
                     body=reply_body,
                     correlation_id=correlation_id,
