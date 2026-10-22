@@ -24,6 +24,7 @@ ROUTE_RULES: tuple[RouteRule, ...] = (
     RouteRule("/api/favorites", "catalog"),
     RouteRule("/api/filters", "catalog"),
     RouteRule("/api/notifications", "catalog"),
+    RouteRule("/api/calc", "catalog"),
     RouteRule("/api/payments", "billing"),
     RouteRule("/api/subscription", "billing"),
     RouteRule("/api/partner", "partners"),
