@@ -1,8 +1,10 @@
 """Хендлеры бота. Команды + AI-диалог через backend (этап 3, ТЗ п. 7)."""
 
+import asyncio
 import html
 import logging
 import re
+import time
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
@@ -18,6 +20,7 @@ from aiogram.types import (
     PreCheckoutQuery,
 )
 
+from app.infrastructure.services.alerting import fire, send_alert
 from app.transport.bot.client import BackendClient
 
 logger = logging.getLogger(__name__)
@@ -666,10 +669,11 @@ async def main_menu_callback(cb, state: FSMContext) -> None:
             await cb.message.answer(text)
         return
     if action == "subscribe":
-        # переиспользуем логику /subscribe
-        fake = cb.message
-        if fake is not None:
-            await cmd_subscribe(fake)
+        # 6.1: у `cb.message.from_user` — БОТ, а не пользователь; раньше
+        # `cmd_subscribe(cb.message)` показывал тарифы бота («Backend
+        # недоступен»). Передаём реального пользователя явно.
+        if cb.message is not None:
+            await _send_subscribe_options(cb.message, user_id)
         return
     if action == "reset":
         await state.clear()
@@ -750,7 +754,13 @@ def _tier_label(tier: str, period_days: int, amount: int) -> str:
 @router.message(Command("subscribe"))
 async def cmd_subscribe(message: Message) -> None:
     """Подписка: статус тарифа + выбор варианта оплаты Stars (ТЗ п. 8.7)."""
-    user_id = message.from_user.id if message.from_user else 0
+    await _send_subscribe_options(
+        message, message.from_user.id if message.from_user else 0
+    )
+
+
+async def _send_subscribe_options(message: Message, user_id: int) -> None:
+    """Карточка подписки для конкретного пользователя (TECHDEBT 6.1)."""
     status = await backend.subscription_status(user_id)
     if status is None:
         await message.answer("Backend недоступен, попробуйте позже.")
@@ -789,30 +799,58 @@ async def cmd_subscribe(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("sub:buy:"))
 async def sub_buy(cb) -> None:
-    """Выбор тарифа → pending-платёж в backend → sendInvoice (XTR)."""
+    """Выбор тарифа → pending-платёж в backend → sendInvoice (XTR).
+
+    TECHDEBT 2.10: двойной клик по тарифу больше не создаёт два
+    pending-платежа — в течение кулдауна повторные нажатия игнорируются
+    (бот однопроцессный, in-memory-таблицы достаточно).
+    """
     await cb.answer()
     parts = (cb.data or "").split(":")  # sub:buy:{tier}:{days}
     if len(parts) != 4:
         return
     tier, days = parts[2], parts[3]
     user_id = cb.from_user.id
+    now = time.monotonic()
+    last = _SUB_INVOICE_AT.get(user_id)
+    if last is not None and now - last < _SUB_INVOICE_COOLDOWN_SEC:
+        logger.info("sub_buy_throttled: user=%s", user_id)
+        return
+    _SUB_INVOICE_AT[user_id] = now
     prep = await backend.prepare_payment(user_id, tier, int(days))
     if prep is None:
         await cb.message.answer("Backend недоступен, попробуйте позже.")
         return
     await cb.message.answer_invoice(
-        title=prep["title"],
-        description=prep["description"],
+        title=prep["title"][:64],  # 6.12: лимит Telegram — 64 символа
+        description=prep["description"][:255],
         payload=f"sub:{prep['payment_id']}",
         provider_token="",  # Telegram Stars: провайдер не нужен
         currency="XTR",
-        prices=[LabeledPrice(label=prep["title"], amount=prep["amount"])],
+        prices=[LabeledPrice(label=prep["title"][:32], amount=prep["amount"])],
     )
+
+
+# 2.10: время последнего нажатия «купить» на пользователя (монотонные часы)
+_SUB_INVOICE_COOLDOWN_SEC = 10.0
+_SUB_INVOICE_AT: dict[int, float] = {}
 
 
 @router.pre_checkout_query()
 async def pre_checkout_query(query: PreCheckoutQuery) -> None:
-    """Telegram ждёт подтверждение перед списанием Stars."""
+    """Telegram ждёт подтверждение перед списанием Stars.
+
+    TECHDEBT 6.9: payload валидируется структурно — только `sub:<id>`.
+    Подделанный/чужой payload отклоняется, списания не происходит.
+    """
+    payload = query.invoice_payload or ""
+    if not payload.startswith("sub:") or not payload[4:].isdigit():
+        logger.warning("pre_checkout_bad_payload: %r", payload)
+        await query.answer(
+            ok=False,
+            error_message="Счёт устарел — оформите подписку заново (Меню → Подписка).",
+        )
+        return
     await query.answer(ok=True)
 
 
@@ -829,13 +867,33 @@ async def on_successful_payment(message: Message) -> None:
         logger.error("successful_payment_bad_payload: %s", sp.invoice_payload)
         return
 
-    result = await backend.payment_success(
-        payment_id=payment_id,
-        user_id=user_id,
-        provider_payment_id=sp.telegram_payment_charge_id,
-        amount=sp.total_amount,
-    )
+    # TECHDEBT 2.9: backend мог быть недоступен в момент оплаты — ретраим
+    # активацию с бэкоффом, прежде чем сообщать пользователю о проблеме.
+    result: dict | None = None
+    for attempt in range(3):
+        result = await backend.payment_success(
+            payment_id=payment_id,
+            user_id=user_id,
+            provider_payment_id=sp.telegram_payment_charge_id,
+            amount=sp.total_amount,
+        )
+        if result is not None:
+            break
+        if attempt < 2:
+            await asyncio.sleep(2 * (attempt + 1))
     if result is None:
+        # Все ретраи исчерпаны: деньги списаны, подписка не активна —
+        # эскалируем админу (ручная активация), пользователю — менеджер.
+        logger.error(
+            "payment_activation_failed_after_retries: payment=%s user=%s",
+            payment_id, user_id,
+        )
+        fire(send_alert(
+            f"🔴 Оплата прошла, активация не удалась после 3 попыток: "
+            f"payment_id={payment_id}, user_id={user_id}, "
+            f"charge_id={sp.telegram_payment_charge_id}. Нужна ручная активация.",
+            dedup_key=f"pay:stuck:{payment_id}",
+        ))
         await message.answer(
             "Оплата получена, но активация не удалась — напишите менеджеру."
         )

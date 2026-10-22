@@ -6,10 +6,8 @@ Fallback обязателен: S3 недоступен → объявления 
 
 from datetime import datetime, timezone
 import json
-from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 
 import app.infrastructure.workers.fetch as fetch_mod
 from app.transport.http.routers import admin as admin_mod

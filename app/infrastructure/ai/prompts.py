@@ -64,26 +64,24 @@ SYSTEM_PROMPT = """Ты — Артём, личный менеджер по по�
 ТЕКУЩЕЕ СОСТОЯНИЕ:
 {state_json}
 
-ПОСЛЕДНИЕ СООБЩЕНИЯ:
-{messages}
-
 ЧТО СДЕЛАТЬ:
 Выбери один tool и вызови его. Если нужно просто ответить — используй
 answer_question или обычный текст."""
 
 
 def build_messages(state: DialogState, history_len: int = 8) -> list[dict[str, str]]:
-    """System-промпт с текущим состоянием + последние N сообщений (ТЗ п. 7.7.3)."""
+    """System-промпт с состоянием + последние N сообщений (ТЗ п. 7.7.3).
+
+    TECHDEBT 4.8: история не дублируется в system-промпте — раньше те же
+    сообщения уходили и строкой внутри system, и как turns, что удваивало
+    расход токенов и путало модель.
+    """
     recent = state.messages[-history_len:]
-    messages_str = (
-        "\n".join(f"{m.role}: {m.content}" for m in recent) or "(диалог только начался)"
-    )
     return [
         {
             "role": "system",
             "content": SYSTEM_PROMPT.format(
                 state_json=state.criteria.model_dump_json(indent=2),
-                messages=messages_str,
             ),
         },
         *[{"role": m.role, "content": m.content} for m in recent if m.role in ("user", "assistant")],

@@ -145,6 +145,23 @@ class Settings(BaseSettings):
                     "INTERNAL_TOKEN обязателен в prod: fallback на APP_SECRET_KEY "
                     "связывает компрометацию JWT-секрета с доступом к internal API"
                 )
+            # TECHDEBT 1.6: дев-дефолты URL (localhost/guest-креды) в prod —
+            # верный способ «случайно» поднять прод на локальной БД или
+            # RabbitMQ с guest/guest.
+            if self.database_url == self.model_fields["database_url"].default:
+                raise ValueError(
+                    "DATABASE_URL не задан (dev-дефолт localhost) — в prod это запрещено"
+                )
+            if self.rabbitmq_url == self.model_fields["rabbitmq_url"].default or (
+                "guest:guest" in self.rabbitmq_url
+            ):
+                raise ValueError(
+                    "RABBITMQ_URL не задан или использует guest:guest — в prod это запрещено"
+                )
+            if self.redis_url == self.model_fields["redis_url"].default:
+                raise ValueError(
+                    "REDIS_URL не задан (dev-дефолт localhost) — в prod это запрещено"
+                )
         return self
 
     # DB
@@ -364,6 +381,10 @@ class Settings(BaseSettings):
     svc_partners_url: str = "http://localhost:8104"
     svc_dialog_url: str = "http://localhost:8105"
     svc_admin_url: str = "http://localhost:8106"
+
+    # Guest rate limit (TECHDEBT 1.4): созданий гостевых сессий с одного IP
+    # в минуту (фиксированное окно в Redis; превышение → 429).
+    guest_ip_rate_limit: int = Field(default=5, gt=0)
 
     # Alerting / мониторинг (этап 8, ТЗ п. 10)
     alerts_enabled: bool = True  # алерты в Telegram на ADMIN_CHAT_ID

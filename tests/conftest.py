@@ -79,7 +79,7 @@ class FakeRedis:
         return len(self.data.get(key) or [])
 
     async def incr(self, key: str) -> int:
-        """Инкремент счётчика (rate limit партнёрского API)."""
+        """Инкремент счётчика (rate limit партнёрского API, guest-лимит 1.4)."""
         self.data[key] = int(self.data.get(key, 0)) + 1
         return int(self.data[key])
 
@@ -88,6 +88,48 @@ class FakeRedis:
             self.ttls[key] = ttl
             return True
         return False
+
+    async def scan_iter(self, pattern: str = "*"):
+        """Async-итератор по ключам (аналог SCAN)."""
+        import fnmatch
+        import re
+
+        regex = fnmatch.translate(pattern)
+        for key in list(self.data):
+            if re.match(regex, key):
+                yield key
+
+    class _Pipeline:
+        """Мини-пайплайн: команды применяются при execute()."""
+
+        def __init__(self, owner: "FakeRedis") -> None:
+            self._owner = owner
+            self._ops: list[tuple] = []
+
+        def setex(self, key: str, ttl: int, value: str) -> None:
+            self._ops.append(("setex", key, ttl, value))
+
+        def set(self, key: str, value: str, ex: int | None = None) -> None:
+            self._ops.append(("set", key, value, ex))
+
+        def delete(self, *keys: str) -> None:
+            self._ops.append(("delete", keys))
+
+        async def execute(self) -> list[bool]:
+            results = []
+            for op in self._ops:
+                if op[0] == "setex":
+                    _, key, ttl, value = op
+                    results.append(await self._owner.setex(key, ttl, value))
+                elif op[0] == "set":
+                    _, key, value, ex = op
+                    results.append(await self._owner.set(key, value, ex=ex))
+                else:
+                    results.append(await self._owner.delete(*op[1]))
+            return results
+
+    def pipeline(self, transaction: bool = True) -> "_Pipeline":
+        return FakeRedis._Pipeline(self)
 
 
 class FakeSession:

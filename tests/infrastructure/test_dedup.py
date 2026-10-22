@@ -64,7 +64,7 @@ def _listing(**overrides) -> UnifiedListing:
 def test_vin_key_deterministic_and_normalized():
     assert vin_key("ABC123") == vin_key(" abc123 ")
     assert vin_key("ABC123") != vin_key("XYZ789")
-    assert vin_key("ABC123").startswith("dedup:v2:vin:")
+    assert vin_key("ABC123").startswith("dedup:v3:vin:")
 
 
 def test_fuzzy_key_same_car():
@@ -131,12 +131,24 @@ def test_fuzzy_decimal_mileage_same_key():
     assert fuzzy_key(a) == fuzzy_key(b)
 
 
-def test_fuzzy_price_rounds():
+def test_fuzzy_price_ignored():
+    """TECHDEBT 3.2: цена не входит в fuzzy-ключ — смена цены = тот же лот."""
     a = _listing(vin=None, make="X", model="Y", year=2020,
-                 mileage_km=1, price=19999.6)   # → 20000
+                 mileage_km=1, price=19999.6)
     b = _listing(vin=None, make="X", model="Y", year=2020,
                  mileage_km=1, price=20000.0)
+    c = _listing(vin=None, make="X", model="Y", year=2020,
+                 mileage_km=1, price=None)
+    assert fuzzy_key(a) == fuzzy_key(b) == fuzzy_key(c)
+
+
+def test_fuzzy_mileage_rounds_to_1000():
+    """TECHDEBT 3.2: пробег округляется до 1000 км (счётчик гуляет)."""
+    a = _listing(vin=None, make="X", model="Y", year=2020, mileage_km=84350)
+    b = _listing(vin=None, make="X", model="Y", year=2020, mileage_km=84410)
+    c = _listing(vin=None, make="X", model="Y", year=2020, mileage_km=85000)
     assert fuzzy_key(a) == fuzzy_key(b)
+    assert fuzzy_key(a) != fuzzy_key(c)
 
 
 def test_fuzzy_case_and_whitespace():

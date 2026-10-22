@@ -17,15 +17,19 @@ FLOOD_TEXT = "🐢 Слишком быстро — давай поспокойн
 class FloodGate:
     """Не более max_events событий за window_sec на пользователя."""
 
+    _CLEANUP_INTERVAL_SEC = 60.0  # TECHDEBT 7.5: период чистки устаревших записей
+
     def __init__(self, max_events: int = 15, window_sec: float = 10.0) -> None:
         self.max_events = max_events
         self.window_sec = window_sec
         self._hits: dict[int, list[float]] = {}
         self._warned: dict[int, float] = {}
+        self._last_cleanup = 0.0
 
     def allow(self, user_id: int, now: float | None = None) -> bool:
         """Пропустить событие? (чистая функция времени — тестируема)."""
         t = time.monotonic() if now is None else now
+        self._maybe_cleanup(t)
         hits = [x for x in self._hits.get(user_id, []) if t - x < self.window_sec]
         if len(hits) >= self.max_events:
             self._hits[user_id] = hits
@@ -33,6 +37,30 @@ class FloodGate:
         hits.append(t)
         self._hits[user_id] = hits
         return True
+
+    def _maybe_cleanup(self, now: float) -> None:
+        """Раз в `_CLEANUP_INTERVAL_SEC` выкидывает устаревшие записи (7.5).
+
+        Без чистки `_hits`/`_warned` растут пропорционально числу
+        пользователей за всё время жизни процесса.
+        """
+        if now - self._last_cleanup < self._CLEANUP_INTERVAL_SEC:
+            return
+        self._last_cleanup = now
+        stale_hits = [
+            uid
+            for uid, hits in self._hits.items()
+            if not hits or now - hits[-1] >= self.window_sec
+        ]
+        for uid in stale_hits:
+            self._hits.pop(uid, None)
+        stale_warned = [
+            uid
+            for uid, ts in self._warned.items()
+            if now - ts >= self.window_sec
+        ]
+        for uid in stale_warned:
+            self._warned.pop(uid, None)
 
     def should_warn(self, user_id: int, now: float | None = None) -> bool:
         """Предупредить юзера не чаще раза за окно (иначе спам предупреждениями)."""

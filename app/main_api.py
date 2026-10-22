@@ -91,27 +91,39 @@ async def _check_db() -> bool:
         return False
 
 
+# TECHDEBT 12.15: health check не должен создавать соединения на каждый
+# запрос — клиенты переиспользуются (Redis сам переподключается).
+_health_redis = None
+_health_rabbit = None
+
+
 async def _check_redis() -> bool:
+    global _health_redis
     try:
         from redis.asyncio import Redis
 
-        client = Redis.from_url(settings.redis_url, decode_responses=True)
-        try:
-            return bool(await client.ping())
-        finally:
-            await client.aclose()
+        if _health_redis is None:
+            _health_redis = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_timeout=5.0,
+                socket_connect_timeout=5.0,
+            )
+        return bool(await _health_redis.ping())
     except Exception:  # noqa: BLE001
         logger.warning("health_redis_failed", exc_info=True)
         return False
 
 
 async def _check_rabbit() -> bool:
+    global _health_rabbit
     try:
         import aio_pika
 
-        connection = await aio_pika.connect(settings.rabbitmq_url)
-        await connection.close()
-        return True
+        if _health_rabbit is None or _health_rabbit.is_closed:
+            # connect_robust: разорванная связь восстанавливается сама
+            _health_rabbit = await aio_pika.connect_robust(settings.rabbitmq_url)
+        return not _health_rabbit.is_closed
     except Exception:  # noqa: BLE001
         logger.warning("health_rabbit_failed", exc_info=True)
         return False

@@ -19,7 +19,10 @@ from app.domain.listings.unified import UnifiedListing
 logger = logging.getLogger(__name__)
 
 DEDUP_TTL_SEC = 48 * 60 * 60  # 48 часов
-_DEDUP_VERSION = "v2"  # bump при изменении состава/normalization ключей
+_DEDUP_VERSION = "v3"  # bump при изменении состава/normalization ключей
+# TECHDEBT 3.2: пробег в fuzzy-ключе округляется до кратного 1000 км —
+# счётчик пробега гуляет между заходами парсера на единицы км.
+_MILEAGE_ROUND_KM = 1000
 
 # Атомарно: если ЛЮБОЙ из ключей существует — вернуть 0 и ничего не менять;
 # иначе выставить ВСЕ ключи с TTL и вернуть 1. Без этого частичный SET
@@ -100,6 +103,29 @@ def _norm_price(value: Any) -> str:
         return "-"
 
 
+def _norm_mileage(value: Any) -> str:
+    """Канонизирует пробег: целое, округлённое до кратного 1000 км.
+
+    TECHDEBT 3.2: парсер может прочитать 84 350 км в одном заходе и
+    84 410 км в следующем — без округления это «два разных объявления».
+
+    Args:
+        value: Исходное значение пробега (int/float/Decimal/str/None).
+
+    Returns:
+        Строка целого, кратного `_MILEAGE_ROUND_KM`; `"-"` для
+        `None`/невалидного значения.
+    """
+    if value is None:
+        return "-"
+    try:
+        km = int(round(float(value)))
+    except (TypeError, ValueError, OverflowError):
+        return "-"
+    rounded = int(round(km / _MILEAGE_ROUND_KM)) * _MILEAGE_ROUND_KM
+    return str(rounded)
+
+
 def vin_key(vin: str) -> str:
     """Redis-ключ дедупа по VIN.
 
@@ -121,9 +147,14 @@ def vin_key(vin: str) -> str:
 
 
 def fuzzy_key(listing: UnifiedListing) -> str:
-    """Хэш по make+model+year+mileage+price — когда VIN отсутствует.
+    """Хэш по make+model+year+mileage (без цены) — когда VIN отсутствует.
 
-    Числовые поля канонизируются (`_norm_int`/`_norm_price`), чтобы
+    TECHDEBT 3.2: `price` исключён — смена цены («снизил цену, чтобы
+    продать») не должна рождать «новое» объявление: это тот же лот.
+    `mileage_km` округляется до 1000 км — счётчик пробега гуляет между
+    заходами парсера, точное равенство здесь вредно.
+
+    Числовые поля канонизируются (`_norm_int`/`_norm_mileage`), чтобы
     `Decimal("50000")` и `Decimal("50000.0")` давали одинаковый ключ.
 
     Args:
@@ -137,8 +168,7 @@ def fuzzy_key(listing: UnifiedListing) -> str:
             _norm_str(listing.make),
             _norm_str(listing.model),
             _norm_int(listing.year),
-            _norm_int(listing.mileage_km),
-            _norm_price(listing.price),
+            _norm_mileage(listing.mileage_km),
         )
     )
     digest = hashlib.sha256(parts.encode("utf-8")).hexdigest()

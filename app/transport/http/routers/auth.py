@@ -62,6 +62,10 @@ from app.application.identity.dto import (
 from app.application.identity.dto import AuthResult
 from app.application.errors import AppError
 from app.config import get_settings
+from dishka.integrations.fastapi import FromDishka
+from redis.asyncio import Redis
+
+from app.infrastructure.security.ip_limit import client_ip, guest_ip_allowed
 from app.transport.http.deps.auth_use_cases import (
     AuthenticateTelegramDep,
     CancelTelegramLoginDep,
@@ -449,7 +453,11 @@ async def auth_register(
 @router.post(
     "/guest", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
 )
-async def auth_guest(use_case: CreateGuestSessionDep) -> AuthResponse:
+async def auth_guest(
+    use_case: CreateGuestSessionDep,
+    request: Request,
+    redis: FromDishka[Redis],
+) -> AuthResponse:
     """Гостевой режим: сайт открыт без регистрации (демо функционала).
 
     Создаёт временного пользователя («Гость», синтетический telegram_id < 0,
@@ -458,9 +466,22 @@ async def auth_guest(use_case: CreateGuestSessionDep) -> AuthResponse:
     покупка Pro — только после входа/регистрации. Апгрейд до аккаунта:
     «Войти/Зарегистрироваться» на экране профиля.
 
-    Внимание: эндпоинт не требует аутентификации и должен быть защищён
-    rate-limit по IP на уровне gateway/nginx.
+    Защита (TECHDEBT 1.4): фиксированное окно в Redis — не более
+    `GUEST_IP_RATE_LIMIT` (по умолчанию 5) созданий сессий в минуту
+    с одного IP (`X-Forwarded-For`, иначе client host); превышение — 429.
     """
+    settings = get_settings()
+    ip = client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+    )
+    if not await guest_ip_allowed(
+        redis, ip, limit=settings.guest_ip_rate_limit
+    ):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many guest sessions from this IP, try again later",
+        )
     try:
         result = await use_case.execute()
     except AppError as exc:

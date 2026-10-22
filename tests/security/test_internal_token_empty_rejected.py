@@ -44,6 +44,10 @@ def test_prod_app_env_normalized(monkeypatch):
         APP_ENV="PROD",
         APP_SECRET_KEY="x" * 64,
         INTERNAL_TOKEN="y" * 48,
+        # TECHDEBT 1.6: дев-дефолты URL в prod запрещены — задаём «настоящие»
+        DATABASE_URL="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
+        RABBITMQ_URL="amqp://svc:pw@mq.internal:5672/",
+        REDIS_URL="redis://redis.internal:6379/0",
     )
     assert Settings().app_env == "prod"
 
@@ -54,6 +58,9 @@ def test_prod_app_env_production_alias(monkeypatch):
         APP_ENV=" production ",
         APP_SECRET_KEY="x" * 64,
         INTERNAL_TOKEN="y" * 48,
+        DATABASE_URL="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
+        RABBITMQ_URL="amqp://svc:pw@mq.internal:5672/",
+        REDIS_URL="redis://redis.internal:6379/0",
     )
     assert Settings().app_env == "prod"
 

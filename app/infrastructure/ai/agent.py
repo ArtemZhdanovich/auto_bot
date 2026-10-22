@@ -439,6 +439,9 @@ def _is_confirmation(text: str) -> bool:
     return bool(parts) and all(p in confirmations for p in parts)
 
 
+_TURN_LOCK_TTL_SEC = 20  # страхование: лок сгорает, если процесс умер
+
+
 async def run_agent(
     user_id: int,
     text: str,
@@ -451,25 +454,51 @@ async def run_agent(
     rag: RAGClient | None = None,
     quota_limit: int | None = None,
 ) -> AgentReply:
-    """Один ход диалога (п. 7.2). При ошибке LLM — DialogError → кнопки (п. 7.9).
+    """Один ход диалога с локом на пользователя (TECHDEBT 4.10).
 
-    Args:
-        user_id: ID пользователя.
-        text: Сообщение пользователя.
-        session: Асинхронная сессия БД.
-        redis: Клиент Redis.
-        llm: LLM-клиент.
-        finalize: Колбэк запуска полного поиска.
-        store: Хранилище `DialogState` (по умолчанию `DialogStore(redis)`).
-        rag: RAG-клиент или `None`.
-        quota_limit: Лимит AI-поисков (`None` = безлимит).
-
-    Returns:
-        `AgentReply` с текстом, опциями и статусом.
+    Двойной тап по кнопке = два параллельных `run_agent` → оба читают
+    одно состояние, оба пишут — второй затирает изменения первого
+    (lost update). Redis `SET NX` сериализует ходы: пока обрабатывается
+    первый запрос, второй получает `DialogError("busy")` → вызывающий
+    показывает кнопки-fallback.
 
     Raises:
-        DialogError: При ошибке LLM (вызывающий переключается на кнопки).
+        DialogError: При ошибке LLM или если ход этого пользователя уже
+            выполняется.
     """
+    lock_key = f"dlg:turn-lock:{user_id}"
+    acquired = await redis.set(lock_key, "1", nx=True, ex=_TURN_LOCK_TTL_SEC)
+    if not acquired:
+        raise DialogError("busy")
+    try:
+        return await _run_agent_locked(
+            user_id,
+            text,
+            session=session,
+            redis=redis,
+            llm=llm,
+            finalize=finalize,
+            store=store,
+            rag=rag,
+            quota_limit=quota_limit,
+        )
+    finally:
+        await redis.delete(lock_key)
+
+
+async def _run_agent_locked(
+    user_id: int,
+    text: str,
+    *,
+    session: AsyncSession,
+    redis: Redis,
+    llm: BaseLLMClient,
+    finalize: Callable[[SearchCriteria], Awaitable[list[str]]] | None = None,
+    store: DialogStore | None = None,
+    rag: RAGClient | None = None,
+    quota_limit: int | None = None,
+) -> AgentReply:
+    """Тело хода диалога — вызывать только под локом (`run_agent`)."""
     from app.config import get_settings
 
     settings = get_settings()
@@ -518,9 +547,11 @@ async def run_agent(
 
     # 5. выполнение tools (валидация каждого патча — п. 7.1)
     if rag is None and settings.rag_service_url and settings.rag_enabled:
-        from app.infrastructure.ai.rag_client import rag_client_from_settings
+        # TECHDEBT 5.1: общий на процесс клиент — состояние circuit
+        # breaker живёт сквозь ходы (клиент per-turn делал breaker мёртвым).
+        from app.infrastructure.ai.rag_client import get_shared_rag_client
 
-        rag = rag_client_from_settings(redis)
+        rag = get_shared_rag_client(redis)
     ctx = ToolContext(
         session=session, redis=redis, finalize=finalize, rag=rag, quota_limit=quota_limit
     )

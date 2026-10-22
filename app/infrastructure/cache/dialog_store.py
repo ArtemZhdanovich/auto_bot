@@ -16,6 +16,10 @@ from app.domain.dialog.state import DialogState
 
 logger = logging.getLogger(__name__)
 
+# TECHDEBT 4.9: потолок истории сообщений в DialogState (Redis-значение
+# не должно расти неограниченно). Всё, что старше, тихо отбрасывается.
+MAX_STATE_MESSAGES = 50
+
 
 def dialog_key(user_id: int) -> str:
     """Ключ состояния диалога пользователя."""
@@ -41,7 +45,12 @@ class RedisDialogStore:
             return None
 
     async def save(self, state: DialogState) -> None:
-        """Записать состояние с TTL (обновляет `updated_at`)."""
+        """Записать состояние с TTL (обновляет `updated_at`).
+
+        TECHDEBT 4.9: история обрезается до `MAX_STATE_MESSAGES` —
+        Redis-значение не должно расти неограниченно.
+        """
+        state.messages = state.messages[-MAX_STATE_MESSAGES:]
         state.updated_at = datetime.now(UTC)
         await self._client.setex(
             dialog_key(state.user_id), self._ttl, state.model_dump_json()

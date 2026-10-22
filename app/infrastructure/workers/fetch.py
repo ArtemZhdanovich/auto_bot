@@ -355,7 +355,11 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["translate"] = translate_client_from_settings(redis)
     # S3-хранилище raw_payload (фаза 6): disabled, если S3_ENDPOINT_URL пуст
     storage = storage_from_settings()
-    await storage.ensure_bucket()
+    try:
+        await storage.ensure_bucket()
+    except Exception:  # noqa: BLE001 — TECHDEBT 8.8: S3 мог лежать на старте;
+        # воркер должен подняться (fetch работает, raw_payload деградирует)
+        logger.warning("ensure_bucket_failed: raw_payload may be unavailable", exc_info=True)
     ctx["storage"] = storage
     logger.info("fetch_worker_started: sources=%s", [a.source_name for a in registry.all()])
 

@@ -81,6 +81,24 @@ async def test_store_delete(fake_redis: FakeRedis):
     assert await store.load(7) is None
 
 
+@pytest.mark.asyncio
+async def test_state_messages_capped(fake_redis: FakeRedis):
+    """TECHDEBT 4.9: история обрезается до MAX_STATE_MESSAGES при save."""
+    from app.infrastructure.cache.dialog_store import MAX_STATE_MESSAGES
+
+    store = RedisDialogStore(fake_redis)
+    state = new_state(11)
+    state.messages = [
+        Message(role="user", content=f"msg {i}") for i in range(MAX_STATE_MESSAGES + 30)
+    ]
+    await store.save(state)
+    loaded = await store.load(11)
+    assert loaded is not None
+    assert len(loaded.messages) == MAX_STATE_MESSAGES
+    # остались последние сообщения, не первые
+    assert loaded.messages[-1].content == f"msg {MAX_STATE_MESSAGES + 29}"
+
+
 # --- сценарии на фейковой сессии ---------------------------------
 
 

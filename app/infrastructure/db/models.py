@@ -16,6 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
+import uuid
 
 from sqlalchemy import (
     BigInteger,
@@ -236,7 +237,13 @@ class DialogSession(Base):
         Index("idx_dialog_sessions_updated", "updated_at"),
     )
 
-    id: Mapped[UUID] = mapped_column(PGUUID, primary_key=True)
+    # TECHDEBT 3.6: default + server_default — раньше каждый insert обязан
+    # был явно ставить id (иначе IntegrityError), при архивации из двух
+    # мест это постоянно стреляло.
+    id: Mapped[UUID] = mapped_column(
+        PGUUID, primary_key=True, default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     criteria: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -451,6 +458,10 @@ class Listing(Base):
     title_ru: Mapped[str | None] = mapped_column(Text)
     source_language: Mapped[str | None] = mapped_column(String(16))
     translated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # TECHDEBT 3.7: момент последней попытки обогащения спеками (detail
+    # источника). NULL = ещё не пробовали; выставляется после ПЕРВОЙ
+    # попытки — источники, не отдающие spec/rvo, не долбятся на каждом PDP.
+    specs_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ListingPriceHistory(Base):
@@ -582,6 +593,13 @@ class PartnerTransaction(Base):
             "kind IN ('topup','charge_lead','adjustment')", name="kind_valid",
         ),
         Index("idx_partner_tx_partner_created", "partner_id", "created_at"),
+        # TECHDEBT 2.4: двойное списание за один лид не поймать без
+        # уникальности (lead_id, kind). Частичный индекс: NULL lead_id
+        # (topup/adjustment) не ограничиваем.
+        Index(
+            "uq_partner_tx_lead_kind", "lead_id", "kind",
+            unique=True, postgresql_where=text("lead_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

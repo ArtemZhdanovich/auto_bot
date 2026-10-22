@@ -11,6 +11,7 @@
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from redis.asyncio import Redis
@@ -153,7 +154,13 @@ async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
 
     Только если чего-то не хватает (1 запрос на лот, повторные открытия PDP
     бесплатны). Возвращает True, если обновили хоть одно поле.
+
+    TECHDEBT 3.7: попытка enrichment — одна на лот (`specs_enriched_at`).
+    Раньше, если источник не возвращал часть полей (у kcar часто нет rvo),
+    каждый открытие PDP делало внешний запрос к encar/kcar.
     """
+    if getattr(listing, "specs_enriched_at", None) is not None:
+        return False  # уже пробовали — внешний запрос не повторяем
     spec_fields = ("body_type", "fuel", "transmission", "engine_volume", "color")
     if listing.source == "encar":
         if all(getattr(listing, f) is not None for f in spec_fields):
@@ -210,7 +217,12 @@ async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
         if value is not None and getattr(listing, field, None) is None:
             setattr(listing, field, value)
             updates[field] = value
+    # 3.7: флаг ставится после ЛЮБОЙ попытки (успешной или «источник ничего
+    # не отдал») — второй раз наружу за этим лотом не ходим.
+    listing.specs_enriched_at = datetime.now(timezone.utc)
     if updates:
         await session.commit()
         logger.info("enriched: id=%s %s", listing.id, sorted(updates))
+    else:
+        await session.commit()
     return bool(updates)

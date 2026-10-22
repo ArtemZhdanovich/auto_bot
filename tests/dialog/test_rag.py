@@ -324,6 +324,30 @@ def test_cache_key_non_serializable_returns_none():
     assert c._cache_key("q", {"when": datetime.now()}) is None
 
 
+def test_cache_key_shared_between_users():
+    """TECHDEBT 5.2: user_id не влияет на ключ кэша — кэш общий."""
+    c = RAGClient(base_url="http://x")
+    ctx_a = {"tenant": "car", "filters": {"make": "BMW"}, "user_id": 1}
+    ctx_b = {"tenant": "car", "filters": {"make": "BMW"}, "user_id": 999}
+    assert c._cache_key("вопрос", ctx_a) == c._cache_key("вопрос", ctx_b)
+    # другой вопрос/фильтры → другой ключ
+    assert c._cache_key("вопрос", ctx_a) != c._cache_key("другой", ctx_a)
+    assert c._cache_key("вопрос", ctx_a) != c._cache_key(
+        "вопрос", {"tenant": "car", "filters": {"make": "Kia"}, "user_id": 1}
+    )
+
+
+async def test_shared_http_client_reused():
+    """TECHDEBT 5.7: один httpx.AsyncClient на инстанс, aclose закрывает."""
+    c = RAGClient(base_url="http://x")
+    first = c._http_client()
+    assert c._http_client() is first
+    await c.aclose()
+    assert c._http is None
+    # после закрытия клиент создаётся заново
+    assert c._http_client() is not first
+
+
 def test_base_url_whitespace_disabled():
     """'   ' → enabled=False, не '  /api/v1/ask'."""
     c = RAGClient(base_url="   ")

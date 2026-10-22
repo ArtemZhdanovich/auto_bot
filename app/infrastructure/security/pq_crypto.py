@@ -52,7 +52,14 @@ _PQ_SHARED_SIZE = 32    # shared secret
 _PQ_SEED_SIZE = 64      # seed ML-KEM (d || z), cryptography >= 50
 
 _X25519_SIZE = 32
-_INFO = b"autoselect/pq-hybrid-document/v1"
+# TECHDEBT 12.18: info-строка привязана к версии контейнера — после
+# появления v2 (другой KEM/шейфры) старые контейнеры останутся
+# расшифровываемыми: каждая версия деривирует свой ключ.
+_INFO_TEMPLATE = "autoselect/pq-hybrid-document/v{version}"
+
+
+def _info_for_version(version: int) -> bytes:
+    return _INFO_TEMPLATE.format(version=version).encode()
 
 # Приватный ключ v1: version | (seed | dk) | x25519.
 _PRIVATE_V1_SIZE = 1 + _PQ_DK_SIZE + _X25519_SIZE
@@ -179,12 +186,14 @@ def _mlkem_private_from_dk(dk_bytes: bytes) -> MLKEM768PrivateKey:
         ) from exc
 
 
-def _derive_key(mlkem_shared: bytes, x25519_shared: bytes, salt: bytes) -> bytes:
+def _derive_key(
+    mlkem_shared: bytes, x25519_shared: bytes, salt: bytes, version: int = _VERSION
+) -> bytes:
     return HKDF(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
-        info=_INFO,
+        info=_info_for_version(version),
     ).derive(mlkem_shared + x25519_shared)
 
 
@@ -300,8 +309,9 @@ def decrypt_document(
         raise PQCryptoError(f"X25519 exchange failed: {exc}") from exc
 
     eph_pub_raw = blob[len(MAGIC) + 1 : len(MAGIC) + 1 + _X25519_SIZE]
-    salt = bytes([_VERSION]) + eph_pub_raw + kem_ct
-    key = _derive_key(mlkem_shared, x25519_shared, salt)
+    container_version = blob[len(MAGIC)]  # 12.18: ключ деривируется версией контейнера
+    salt = bytes([container_version]) + eph_pub_raw + kem_ct
+    key = _derive_key(mlkem_shared, x25519_shared, salt, version=container_version)
     try:
         return AESGCM(key).decrypt(nonce, body, aad)
     except Exception as exc:  # noqa: BLE001

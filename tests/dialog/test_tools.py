@@ -54,6 +54,14 @@ def test_lookup_reference():
     assert "Sorento" in (lookup_reference("sorento") or "")
     assert "Hyundai" in (lookup_reference("hyundai") or "")
     assert "Genesis GV80" in (lookup_reference("gv80") or "")
+
+
+def test_lookup_reference_no_false_positive():
+    """TECHDEBT 4.5: подстрока больше не матчит — `"ai"` не Hyundai."""
+    assert lookup_reference("ai") is None
+    assert lookup_reference("unda") is None
+    # префикс по-прежнему работает
+    assert lookup_reference("hyu") is not None
     assert lookup_reference("абракадабра") is None
     assert lookup_reference("") is None
 

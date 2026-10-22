@@ -239,8 +239,9 @@ def test_initdata_invalid_hash_hex():
 
 def test_initdata_missing_auth_date():
     init = _make_init_data(BOT_TOKEN, {"id": 42}, int(time.time()))
-    # Удаляем auth_date (подпись сломается, но проверка поля — раньше)
-    parts = [p for p in init.split("&") if not p.startswith("auth_date=")]
+    # Удаляем auth_date (подпись сломается, но проверка поля — раньше);
+    # собранный init пригодился бы только для пересборки хэша — см. ниже.
+    _ = [p for p in init.split("&") if not p.startswith("auth_date=")]
     # Пересобираем с новым хэшем... сложно; проще проверить на «пустой» init
     with pytest.raises(InitDataError):
         validate_init_data("hash=" + "0"*64 + "&user=x", BOT_TOKEN, 3600)

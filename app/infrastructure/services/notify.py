@@ -75,6 +75,36 @@ async def mark_sent(
     )
 
 
+async def mark_sent_many(
+    session: AsyncSession,
+    redis: Redis,
+    user_id: int,
+    listing_ids: list[int],
+    kind: str = "new",
+) -> None:
+    """Пакетная `mark_sent` (TECHDEBT 9.2): один bulk insert + pipeline SETEX.
+
+    Дайджест на 50 пользователей x 5 карточек — это 250 отдельных
+    insert+commit+SETEX в наивном варианте; здесь — 1 запрос + 1 pipeline.
+    """
+    if not listing_ids:
+        return
+    await session.execute(
+        pg_insert(SentLog)
+        .values([
+            {"user_id": user_id, "listing_id": lid, "kind": kind}
+            for lid in listing_ids
+        ])
+        .on_conflict_do_nothing()
+    )
+    await session.commit()
+    ttl = get_settings().notify_sent_ttl_sec
+    pipe = redis.pipeline(transaction=False)
+    for lid in listing_ids:
+        pipe.setex(notified_key(user_id, lid, kind), ttl, "1")
+    await pipe.execute()
+
+
 async def event_audience(session: AsyncSession, listing_id: int) -> list[int]:
     """Аудитория статусных уведомлений (PLAN.md, фаза 3): пользователи, уже
     получавшие карточку этого объявления (sent_log)."""

@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -94,6 +95,36 @@ class TaskPublisher:
         await exchange.publish(message, routing_key=job)
         logger.info("task_enqueued: job=%s id=%s", job, msg_id)
         return msg_id
+
+    async def enqueue_many(
+        self,
+        job: str,
+        arg_tuples: Iterable[tuple],
+        *,
+        max_inflight: int = 50,
+    ) -> list[str]:
+        """Пакетная постановка (TECHDEBT 13.8) с ограничением параллелизма.
+
+        Цикл `for user in users: await publisher.enqueue(...)` на 1000+
+        получателей дайджеста создаёт 1000 одновременных publishes —
+        брокер захлёбывается, канал душится. Semaphore ограничивает
+        число незавершённых publishes значением `max_inflight`.
+
+        Args:
+            job: Имя задачи (routing key).
+            arg_tuples: Список кортежей позиционных аргументов.
+            max_inflight: Одновременных publishes за раз.
+
+        Returns:
+            Список message_id в порядке завершения.
+        """
+        semaphore = asyncio.Semaphore(max_inflight)
+
+        async def _one(args: tuple) -> str:
+            async with semaphore:
+                return await self.enqueue(job, *args)
+
+        return list(await asyncio.gather(*(_one(t) for t in arg_tuples)))
 
     async def aclose(self) -> None:
         if self._connection and not self._connection.is_closed:

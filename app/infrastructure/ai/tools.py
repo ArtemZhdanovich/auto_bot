@@ -365,11 +365,11 @@ REFERENCE: dict[str, list[str]] = {
 
 
 def lookup_reference(query: str) -> str | None:
-    """Ищет марку/модель в справочнике по подстроке.
+    """Ищет марку/модель в справочнике по префиксу.
 
-    Матч требует минимум 2 символа (защита от `"a"` → все марки).
-    Сначала проверяются марки (canonical name), затем модели. Возвращает
-    каноническое имя бренда (`BMW`, а не `Bmw`).
+    TECHDEBT 4.5: раньше матч был по подстроке — `"ai" in "hyundai"`
+    возвращал Hyundai. Теперь совпадение только по началу строки
+    (префикс запроса): `"gv80"` → `Genesis GV80`, `"ai"` → `None`.
 
     Args:
         query: Запрос пользователя.
@@ -382,9 +382,9 @@ def lookup_reference(query: str) -> str | None:
         return None
     for make, models in REFERENCE.items():
         canonical_make = normalize_make(make) or make
-        if q in make or q in canonical_make.lower():
+        if make.lower().startswith(q) or canonical_make.lower().startswith(q):
             return f"{canonical_make}: {', '.join(models)}"
         for model in models:
-            if q in model.lower():
+            if model.lower().startswith(q):
                 return f"{canonical_make} {model}"
     return None

@@ -2,16 +2,35 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
+
+# TECHDEBT 1.3 (prompt injection): строковые поля попадают в system-prompt
+# LLM (`build_messages`), поэтому — без переводов строк (ломают структуру
+# промпта) и с разумным потолком длины (не дают раздуть контекст/токены).
+# Числам инъекция не страшна — они ограничены ge/le.
+# Якоря ^$ обязательны: pydantic проверяет pattern в search-режиме,
+# без них `[^\n\r]*` сматчил бы пустой префикс любой строки.
+_NoNewlines = StringConstraints(pattern=r"^[^\n\r]*$", max_length=100)
+SafeStr = Annotated[str, _NoNewlines]
+SafeStrShort = Annotated[str, StringConstraints(pattern=r"^[^\n\r]*$", max_length=50)]
+# Свободный текст пользователя: переводы строк разрешены, длина ограничена.
+NotesStr = Annotated[str, StringConstraints(max_length=1000)]
 
 
 class SearchCriteria(BaseModel):
     # Основное
-    make: str | None = None
-    model: str | None = None
-    generation: str | None = None
+    make: SafeStr | None = None
+    model: SafeStr | None = None
+    generation: SafeStr | None = None
 
     # Годы
     year_from: int | None = Field(default=None, ge=1900, le=2100)
@@ -20,36 +39,36 @@ class SearchCriteria(BaseModel):
     # Цена
     price_min: Decimal | None = Field(default=None, ge=0)
     price_max: Decimal | None = Field(default=None, ge=0)
-    currency: str | None = None
+    currency: Annotated[str, StringConstraints(pattern=r"^[^\n\r]*$", max_length=8)] | None = None
 
     # Пробег
     mileage_max: int | None = Field(default=None, ge=0)
 
     # Характеристики
-    fuel: str | None = None
-    transmission: str | None = None
-    drive: str | None = None
-    body_type: str | None = None
-    color: str | None = None
+    fuel: SafeStrShort | None = None
+    transmission: SafeStrShort | None = None
+    drive: SafeStrShort | None = None
+    body_type: SafeStrShort | None = None
+    color: SafeStrShort | None = None
     engine_volume_min: float | None = Field(default=None, ge=0, le=20)
     engine_volume_max: float | None = Field(default=None, ge=0, le=20)
 
     # География и источник
-    country: str | None = None  # "KR", "DE", "US", "CN", "JP"
-    sources: list[str] | None = None  # явный список источников
-    location: str | None = None
+    country: SafeStrShort | None = None  # "KR", "DE", "US", "CN", "JP"
+    sources: list[SafeStrShort] | None = Field(default=None, max_length=20)
+    location: SafeStr | None = None
 
     # Состояние
     not_damaged: bool | None = None
     no_accidents: bool | None = None
-    seller_type: str | None = None
+    seller_type: SafeStrShort | None = None
 
     # Свободные заметки
-    notes: str | None = None
+    notes: NotesStr | None = None
 
     # Метаданные
     created_from_dialog: bool = False
-    dialog_session_id: str | None = None
+    dialog_session_id: SafeStr | None = None
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "SearchCriteria":

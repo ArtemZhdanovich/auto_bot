@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import time
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,10 @@ from app.infrastructure.services.alerting import fire, send_alert
 logger = logging.getLogger(__name__)
 
 _CACHE_PREFIX = "rag:answer"
+# TECHDEBT 5.2: per-user ключи контекста не участвуют в ключе кэша —
+# иначе кэш не переиспользуется между пользователями (одинаковый вопрос
+# про один фильтр = один запрос к RAG-сервису).
+_CACHE_CTX_EXCLUDE = frozenset({"user_id", "user", "session_id", "telegram_id"})
 # 5xx и сетевые ошибки — транзиентные; 4xx — клиентские (не ретраим, breaker не трогаем).
 _RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
 _DEFAULT_FAIL_THRESHOLD = 5
@@ -104,9 +109,33 @@ class RAGClient:
         self._cooldown_sec = cooldown_sec
         self._max_ingest_bytes = max_ingest_bytes
         self._transport = transport
+        # TECHDEBT 5.7: один httpx.AsyncClient на инстанс (пул соединений
+        # переиспользуется), создаётся лениво; закрывается в `aclose()`.
+        self._http: httpx.AsyncClient | None = None
         # Circuit breaker (in-memory, per-process).
         self._consecutive_failures = 0
         self._open_until = 0.0
+
+    def _http_client(self) -> httpx.AsyncClient:
+        """Ленивый общий `httpx.AsyncClient` (5.7): пул живёт между запросами."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(transport=self._transport)
+        return self._http
+
+    async def aclose(self) -> None:
+        """Закрывает общий HTTP-клиент (вызывать при shutdown процесса)."""
+        if self._http is not None and not self._http.is_closed:
+            await self._http.aclose()
+        self._http = None
+
+    async def _backoff_sleep(self, attempt: int) -> None:
+        """Экспоненциальный бэкофф с jitter (TECHDEBT 5.6).
+
+        Jitter (`random.uniform`) размазывает ретраи параллельных
+        запросов: без него все клиенты стучатся в RAG одновременно
+        («thundering herd») на каждой волне ретрая.
+        """
+        await asyncio.sleep(0.5 * 2**attempt + random.uniform(0.0, 0.2))
 
     # --- circuit breaker -------------------------------------------------
 
@@ -129,13 +158,16 @@ class RAGClient:
                 "rag_circuit_breaker_open: cooldown=%ss threshold=%s",
                 self._cooldown_sec, self._fail_threshold,
             )
-            fire(
-                send_alert(
-                    f"🔴 RAG circuit breaker открыт на {self._cooldown_sec}s "
-                    f"({self._fail_threshold} ошибок подряд) — ответы через LLM.",
-                    dedup_key="cb:rag",
+            try:
+                fire(
+                    send_alert(
+                        f"🔴 RAG circuit breaker открыт на {self._cooldown_sec}s "
+                        f"({self._fail_threshold} ошибок подряд) — ответы через LLM.",
+                        dedup_key="cb:rag",
+                    )
                 )
-            )
+            except Exception:  # noqa: BLE001 — алерт не должен ронять запрос (5.6)
+                logger.warning("rag_alert_fire_failed", exc_info=True)
 
     def _record_success(self) -> None:
         """Сбрасывает счётчик сбоев и закрывает breaker."""
@@ -157,6 +189,9 @@ class RAGClient:
         Вопрос lowercased намеренно: «What is X?» и «what is x?» — один
         семантический запрос, кэшируем один раз. Для case-sensitive NER
         это может быть неверно; при необходимости — убрать `.lower()`.
+        Per-user ключи контекста (`user_id` и т.п.) исключаются (5.2):
+        ответ RAG зависит только от вопроса+фильтров, а не от того,
+        кто спросил.
 
         Args:
             question: Вопрос.
@@ -166,9 +201,12 @@ class RAGClient:
             Ключ кэша или `None`, если context не сериализуется (тогда
             кэш для этого запроса отключается).
         """
+        shared_ctx = {
+            k: v for k, v in context.items() if k not in _CACHE_CTX_EXCLUDE
+        }
         try:
             raw = json.dumps(
-                {"q": question.strip().lower(), "ctx": context},
+                {"q": question.strip().lower(), "ctx": shared_ctx},
                 sort_keys=True,
                 ensure_ascii=False,
             )
@@ -260,21 +298,20 @@ class RAGClient:
         last_error: Exception | None = None
         reason = "rag_bad_response"
 
+        client = self._http_client()
         for attempt in range(self._max_retries + 1):
             try:
-                async with httpx.AsyncClient(
-                    timeout=self.timeout, transport=self._transport
-                ) as client:
-                    resp = await client.post(
-                        f"{self.base_url}/api/v1/ask",
-                        json=payload,
-                        headers=self._headers(),
-                    )
+                resp = await client.post(
+                    f"{self.base_url}/api/v1/ask",
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=self.timeout,
+                )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = exc
                 reason = f"rag_network_error: {exc}"
                 if attempt < self._max_retries:
-                    await asyncio.sleep(0.5 * 2**attempt)
+                    await self._backoff_sleep(attempt)
                 continue
 
             if resp.status_code in _RETRYABLE_STATUS:
@@ -284,7 +321,7 @@ class RAGClient:
                         "rag_retryable_status status=%d attempt=%d/%d",
                         resp.status_code, attempt + 1, self._max_retries,
                     )
-                    await asyncio.sleep(0.5 * 2**attempt)
+                    await self._backoff_sleep(attempt)
                 continue
 
             if resp.status_code >= 400:
@@ -307,7 +344,7 @@ class RAGClient:
                     exc, resp.text[:200],
                 )
                 if attempt < self._max_retries:
-                    await asyncio.sleep(0.5 * 2**attempt)
+                    await self._backoff_sleep(attempt)
                 continue
 
             answer.latency_ms = int((time.perf_counter() - started) * 1000)
@@ -413,29 +450,27 @@ class RAGClient:
 
         last_error: Exception | None = None
         reason = "rag_bad_response"
+        client = self._http_client()
         for attempt in range(self._max_retries + 1):
             try:
-                async with httpx.AsyncClient(
+                resp = await client.post(
+                    f"{self.base_url}/api/v1/ingest",
+                    files={"file": (path.name, file_bytes)},
+                    data={"metadata": metadata_json},
+                    headers=headers,
                     timeout=self.timeout * 4,  # файлы дольше
-                    transport=self._transport,
-                ) as client:
-                    resp = await client.post(
-                        f"{self.base_url}/api/v1/ingest",
-                        files={"file": (path.name, file_bytes)},
-                        data={"metadata": metadata_json},
-                        headers=headers,
-                    )
+                )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = exc
                 reason = f"rag_network_error: {exc}"
                 if attempt < self._max_retries:
-                    await asyncio.sleep(0.5 * 2**attempt)
+                    await self._backoff_sleep(attempt)
                 continue
 
             if resp.status_code in _RETRYABLE_STATUS:
                 reason = f"rag_http_{resp.status_code}"
                 if attempt < self._max_retries:
-                    await asyncio.sleep(0.5 * 2**attempt)
+                    await self._backoff_sleep(attempt)
                 continue
 
             if resp.status_code >= 400:
@@ -447,12 +482,50 @@ class RAGClient:
                 last_error = exc
                 reason = "rag_bad_response"
                 if attempt < self._max_retries:
-                    await asyncio.sleep(0.5 * 2**attempt)
+                    await self._backoff_sleep(attempt)
                 continue
 
         if last_error is not None:
             raise RAGUnavailable(reason) from last_error
         raise RAGUnavailable(reason)
+
+
+# --- процессный синглтон (TECHDEBT 5.1) ---------------------------------
+#
+# Circuit breaker живёт в инстансе `RAGClient`: клиент, создаваемый на
+# каждый ход диалога, никогда не наберёт порог — breaker мёртв. Поэтому
+# агент берёт общий на процесс экземпляр (`get_shared_rag_client`).
+
+_shared_rag: RAGClient | None = None
+
+
+def get_shared_rag_client(redis: Redis | None = None) -> RAGClient:
+    """Общий на процесс `RAGClient` — состояние breaker сквозное.
+
+    Args:
+        redis: Клиент Redis для кэша (используется при первой сборке).
+
+    Returns:
+        Единственный на процесс `RAGClient`.
+    """
+    global _shared_rag
+    if _shared_rag is None:
+        _shared_rag = rag_client_from_settings(redis)
+    return _shared_rag
+
+
+async def close_shared_rag_client() -> None:
+    """Закрывает общий клиент (вызывать в lifespan при shutdown)."""
+    global _shared_rag
+    if _shared_rag is not None:
+        await _shared_rag.aclose()
+        _shared_rag = None
+
+
+def reset_shared_rag_client() -> None:
+    """Сбрасывает общий клиент (для тестов)."""
+    global _shared_rag
+    _shared_rag = None
 
 
 def rag_client_from_settings(redis: Redis | None = None) -> RAGClient:

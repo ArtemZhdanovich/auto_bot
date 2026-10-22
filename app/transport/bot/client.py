@@ -1,6 +1,15 @@
-"""HTTP-клиент бота к Backend API. Бот не работает с БД напрямую (ТЗ п. 4.1)."""
+"""HTTP-клиент бота к Backend API. Бот не работает с БД напрямую (ТЗ п. 4.1).
 
+TECHDEBT 7.2/7.6: один `httpx.AsyncClient` на инстанс (пул соединений),
+ретраи транзиентных сбоев (сеть/5xx) и простой circuit breaker:
+`CB_THRESHOLD` ошибок подряд -> `CB_COOLDOWN_SEC` секунд запросы не идут
+(быстрый fail вместо таймаута у каждого пользователя).
+"""
+
+import asyncio
 import logging
+import random
+import time
 
 import httpx
 
@@ -11,8 +20,12 @@ logger = logging.getLogger(__name__)
 
 class BackendClient:
     # LLM-ход диалога на reasoning-моделях (glm-5-turbo) идёт 15-60 с —
-    # обычный таймаут 10 с рвал соединение раньше ответа → «AI недоступен».
+    # обычный таймаут 10 с рвал соединение раньше ответа -> «AI недоступен».
     DIALOG_TIMEOUT = 120.0
+
+    # Circuit breaker (TECHDEBT 7.2): in-memory, однопроцессный бот.
+    CB_THRESHOLD = 5
+    CB_COOLDOWN_SEC = 30.0
 
     def __init__(self, base_url: str | None = None, timeout: float = 10.0):
         settings = get_settings()
@@ -22,6 +35,89 @@ class BackendClient:
             or settings.app_secret_key.get_secret_value()
         )
         self._timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+        # состояние breaker
+        self._failures = 0
+        self._open_until = 0.0
+
+    def _http(self) -> httpx.AsyncClient:
+        """Ленивый общий клиент (7.6): один пул на процесс бота."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self._timeout)
+        return self._client
+
+    async def aclose(self) -> None:
+        """Закрыть общий HTTP-клиент (shutdown бота)."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
+
+    def _breaker_open(self) -> bool:
+        return time.monotonic() < self._open_until
+
+    def _record_failure(self) -> None:
+        self._failures += 1
+        if self._failures >= self.CB_THRESHOLD:
+            self._open_until = time.monotonic() + self.CB_COOLDOWN_SEC
+            self._failures = 0
+            logger.warning("backend_circuit_open: cooldown=%ss", self.CB_COOLDOWN_SEC)
+
+    def _record_success(self) -> None:
+        self._failures = 0
+        self._open_until = 0.0
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict | None = None,
+        timeout: float | None = None,
+        retries: int = 1,
+    ) -> dict | None:
+        """Запрос с retry (сеть/5xx) и breaker. None — недоступен/ошибка.
+
+        Долгие вызовы (`timeout` > дефолта, напр. LLM-диалог) не ретраим:
+        повтор мог бы задвоить ход диалога.
+        """
+        if self._breaker_open():
+            logger.warning("backend_circuit_skipped: %s", path)
+            return None
+        attempts = retries + 1
+        if timeout is not None and timeout > self._timeout:
+            attempts = 1  # долгий вызов — без ретрая
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                resp = await self._http().request(
+                    method,
+                    f"{self._base_url}{path}",
+                    json=json,
+                    headers={"X-Internal-Token": self._internal_token},
+                    timeout=timeout or self._timeout,
+                )
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(0.5 * 2**attempt + random.uniform(0, 0.2))
+                continue
+            if resp.status_code >= 500:
+                last_error = httpx.HTTPStatusError(
+                    f"backend_{resp.status_code}", request=resp.request, response=resp
+                )
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(0.5 * 2**attempt + random.uniform(0, 0.2))
+                continue
+            if resp.status_code >= 400:
+                # 4xx — клиентская ошибка (403 quota и т.п.): не ретраим,
+                # breaker не считаем (misconfig не равно «backend лежит»).
+                logger.error("backend_client_error: %s %s", path, resp.status_code)
+                return None
+            self._record_success()
+            return resp.json()
+        self._record_failure()
+        logger.error("backend_request_failed: %s %s", path, last_error)
+        return None
 
     async def upsert_user(
         self,
@@ -40,36 +136,14 @@ class BackendClient:
             "last_name": last_name,
             "language_code": language_code,
         }
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(
-                    f"{self._base_url}/api/users/upsert",
-                    json=payload,
-                    headers={"X-Internal-Token": self._internal_token},
-                )
-                resp.raise_for_status()
-                return resp.json()
-        except httpx.HTTPError as exc:
-            # Падение backend не ломает бота (ТЗ п. 1.3 — отказоустойчивость)
-            logger.error("backend_upsert_user_failed: %s", exc)
-            return None
+        # Падение backend не ломает бота (ТЗ п. 1.3 — отказоустойчивость)
+        return await self._request("POST", "/api/users/upsert", json=payload)
 
     async def _post(
         self, path: str, payload: dict, timeout: float | None = None
     ) -> dict | None:
         """POST с internal-токеном. None — backend недоступен/ошибка."""
-        try:
-            async with httpx.AsyncClient(timeout=timeout or self._timeout) as client:
-                resp = await client.post(
-                    f"{self._base_url}{path}",
-                    json=payload,
-                    headers={"X-Internal-Token": self._internal_token},
-                )
-                resp.raise_for_status()
-                return resp.json()
-        except httpx.HTTPError as exc:
-            logger.error("backend_post_failed: %s %s", path, exc)
-            return None
+        return await self._request("POST", path, json=payload, timeout=timeout)
 
     async def dialog_message(self, user_id: int, text: str) -> dict | None:
         """POST /api/dialog/message — ход AI-диалога (долгий LLM-вызов)."""
@@ -143,17 +217,7 @@ class BackendClient:
 
     async def _get(self, path: str) -> dict | None:
         """GET с internal-токеном. None — backend недоступен/ошибка."""
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.get(
-                    f"{self._base_url}{path}",
-                    headers={"X-Internal-Token": self._internal_token},
-                )
-                resp.raise_for_status()
-                return resp.json()
-        except httpx.HTTPError as exc:
-            logger.error("backend_get_failed: %s %s", path, exc)
-            return None
+        return await self._request("GET", path)
 
     async def subscription_status(self, user_id: int) -> dict | None:
         """GET /api/users/{id}/subscription — тариф для /subscribe (ТЗ п. 8.7)."""
@@ -174,22 +238,25 @@ class BackendClient:
 
         Отдельная реализация: 403 (квота free) — не ошибка, а сигнал апселла.
         """
-        import httpx
-
         try:
-            async with httpx.AsyncClient(timeout=self.DIALOG_TIMEOUT) as client:
-                resp = await client.post(
-                    f"{self._base_url}/api/bot/listings/{listing_id}/analysis",
-                    json={"user_id": user_id},
-                    headers={"X-Internal-Token": self._internal_token},
-                )
-                if resp.status_code == 403:
-                    return {"quota_exceeded": True}
-                resp.raise_for_status()
-                return resp.json()
+            resp = await self._http().post(
+                f"{self._base_url}/api/bot/listings/{listing_id}/analysis",
+                json={"user_id": user_id},
+                headers={"X-Internal-Token": self._internal_token},
+                timeout=self.DIALOG_TIMEOUT,
+            )
         except httpx.HTTPError as exc:
             logger.error("backend_analyze_failed: %s", exc)
+            self._record_failure()
             return None
+        if resp.status_code == 403:
+            return {"quota_exceeded": True}  # квота free — сигнал апселла
+        if resp.status_code >= 400:
+            logger.error("backend_analyze_failed: %s", resp.status_code)
+            self._record_failure()
+            return None
+        self._record_success()
+        return resp.json()
 
     async def search_listings(
         self, params: dict | None = None, limit: int = 5

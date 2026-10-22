@@ -112,8 +112,9 @@ async def _finalize(message: Message, state: FSMContext, data: dict) -> None:
     backend: BackendClient = message.bot["backend"]
     user_id = message.from_user.id if message.from_user else 0
     result = await backend.dialog_finalize(user_id, criteria=data)
-    await state.clear()
     if result is None:
+        # TECHDEBT 6.4: state НЕ чистим — при недоступном backend
+        # пользователь не теряет 4 заполненных шага, может повторить.
         await _show_step(
             message,
             state,
@@ -121,6 +122,7 @@ async def _finalize(message: Message, state: FSMContext, data: dict) -> None:
             kb=_panel_kb(),
         )
         return
+    await state.clear()
     sources = ", ".join(result.get("sources", [])) or "нет активных источников"
     rows: list[list[InlineKeyboardButton]] = []
     mini = _miniapp_button("📱 Смотреть подборку")

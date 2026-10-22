@@ -33,12 +33,31 @@ from app.infrastructure.services.notify import (
     format_listing_card,
     in_quiet_hours,
     mark_sent,
+    mark_sent_many,
     read_digest,
     was_sent,
 )
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
+
+# TECHDEBT 9.7: общий клиент Telegram API (ленивый, один на процесс).
+_TG_CLIENT: httpx.AsyncClient | None = None
+
+
+def _tg_client() -> httpx.AsyncClient:
+    global _TG_CLIENT
+    if _TG_CLIENT is None or _TG_CLIENT.is_closed:
+        _TG_CLIENT = httpx.AsyncClient(timeout=15.0)
+    return _TG_CLIENT
+
+
+async def close_telegram_client() -> None:
+    """Закрыть общий клиент Telegram (shutdown воркера)."""
+    global _TG_CLIENT
+    if _TG_CLIENT is not None and not _TG_CLIENT.is_closed:
+        await _TG_CLIENT.aclose()
+    _TG_CLIENT = None
 
 TELEGRAM_API = "https://api.telegram.org"
 
@@ -68,8 +87,9 @@ async def send_telegram_message(
     }
     for attempt in (1, 2):
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(url, json=payload)
+            # TECHDEBT 9.7: один httpx.AsyncClient на процесс (пул соединений),
+            # закрывается в `shutdown` через `close_telegram_client()`.
+            resp = await _tg_client().post(url, json=payload)
         except httpx.HTTPError as exc:
             logger.error("telegram_send_failed: %s", exc)
             return False, str(exc)
@@ -284,7 +304,9 @@ async def digest_job(ctx: dict[str, Any]) -> dict[str, Any]:
     bot_token: str = ctx.get("bot_token", "")
     sent = skipped = 0
 
-    for key in list(await redis.keys("digest:*")):
+    # TECHDEBT 9.1: SCAN вместо KEYS — не блокирует event loop/Redis
+    # на всём keyspace (ключей может быть тысячи).
+    async for key in redis.scan_iter("digest:*"):
         raw_key = key.decode() if isinstance(key, bytes) else str(key)
         try:
             user_id = int(raw_key.split(":", 1)[1])
@@ -313,8 +335,9 @@ async def digest_job(ctx: dict[str, Any]) -> dict[str, Any]:
                 ok = True  # буфер пуст по факту — просто чистим
 
             if ok:
-                for listing_id in ids:
-                    await mark_sent(session, redis, user_id, listing_id)
+                # TECHDEBT 9.2: одна batch-запись (bulk insert + pipeline)
+                # вместо N отдельных insert+commit+SETEX.
+                await mark_sent_many(session, redis, user_id, ids)
                 sent += len(ids)
             else:
                 skipped += len(ids)  # оставляем буфер до следующего прогона
@@ -342,6 +365,9 @@ async def subscription_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
             select(User).where(
                 User.subscription_tier != "free",
                 User.subscription_until.is_not(None),
+                # TECHDEBT 9.8: деактивированным не пишем — ни напоминаний,
+                # ни даунгрейда (мусорные сообщения на мёртвый chat_id).
+                User.is_active.is_(True),
             )
         )
         users = list(result.scalars().all())
@@ -355,6 +381,9 @@ async def subscription_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
                 if (now - until).total_seconds() > 3 * 86400:
                     continue  # давно истёкших не спамим повторно
                 user.subscription_tier = "free"
+                # TECHDEBT 9.3: until очищаем — иначе «истёкший» пользователь
+                # вечно попадает в выборку и в карточках висит старая дата.
+                user.subscription_until = None
                 await session.commit()
                 await redis.delete(f"sub:reminded:{user.telegram_id}")
                 await send_telegram_message(
@@ -415,6 +444,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     if publisher:
         await publisher.aclose()
     rate_limit.reset_rate_limiter()
+    await close_telegram_client()
     redis: Redis | None = ctx.get("redis")
     if redis:
         await redis.aclose()

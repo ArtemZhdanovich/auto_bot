@@ -403,3 +403,23 @@ async def test_quota_none_is_unlimited(fake_redis: FakeRedis, fake_session):
     await run_agent(33, "что есть?", session=fake_session, redis=fake_redis, llm=llm, quota_limit=None)
     await run_agent(33, "ещё раз", session=fake_session, redis=fake_redis, llm=llm, quota_limit=None)
     assert await quota_used(fake_redis, 33) == 0  # без лимита счётчик не пишем
+
+
+@pytest.mark.asyncio
+async def test_run_agent_busy_lock(fake_redis: FakeRedis, fake_session):
+    """TECHDEBT 4.10: занятый лок → DialogError('busy'), состояние не трогаем."""
+    await fake_redis.set("dlg:turn-lock:77", "1", nx=True, ex=20)
+    with pytest.raises(DialogError, match="busy"):
+        await run_agent(77, "привет", session=fake_session, redis=fake_redis, llm=_llm())
+    # лок остался (его снимет владелец, не мы)
+    assert await fake_redis.exists("dlg:turn-lock:77") == 1
+
+
+@pytest.mark.asyncio
+async def test_run_agent_releases_lock(fake_redis: FakeRedis, fake_session):
+    """TECHDEBT 4.10: после хода лок снят — следующий ход возможен."""
+    llm = _llm(LLMResult(text="Ок"))
+    await run_agent(88, "привет", session=fake_session, redis=fake_redis, llm=llm)
+    assert await fake_redis.exists("dlg:turn-lock:88") == 0
+    # повторный ход не падает
+    await run_agent(88, "ещё", session=fake_session, redis=fake_redis, llm=_llm())
