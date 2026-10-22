@@ -22,13 +22,24 @@ gateway+6 сервисов (профиль micro), qdrant, minio, rag (api/worke
 translate.
 
 ```bash
-docker compose --profile mono up -d      # монолит (по умолчанию)
+docker compose up -d                     # профиль из COMPOSE_PROFILES (.env; по умолчанию mono)
+docker compose --profile mono up -d      # монолит
 docker compose --profile micro up -d     # gateway + доменные сервисы
+start.bat [mono|micro]                   # то же + миграции + ожидание health (Windows)
 ```
 
+Оба профиля работают ОДИНАКОВО: API на хосте всегда `:8000` (mono — backend,
+micro — gateway; порт общий, поэтому оба API-контейнера одновременно жить
+не могут), сайт на `:8080`/`:8443`, миграции:
+`docker compose exec -T backend alembic upgrade head` (mono) или
+`docker compose exec -T gateway alembic upgrade head` (micro).
+
 ⚠️ Профили не смешивать: gateway имеет сетевой алиас `backend` — при двух
-профилей одновременно DNS отдаёт два IP и половина запросов ловит 502
-(DNS round-robin). Погасить чужой профиль: `docker compose stop gateway`.
+профилях одновременно DNS отдаёт два IP и половина запросов ловит 502
+(DNS round-robin). CLI-флаг `--profile` ОБЪЕДИНЯЕТСЯ с `COMPOSE_PROFILES`
+из `.env` — переключать профиль меняйте переменную в `.env` или запускайте
+через `start.bat` (он выставляет `COMPOSE_PROFILES` окружением, что имеет
+приоритет). Погасить чужой API-контейнер: `docker compose stop gateway`.
 
 Боевой развёртывание (Caddy + Let's Encrypt, bootstrap VPS) —
 [deploy/DEPLOY.md](../deploy/DEPLOY.md).

@@ -170,6 +170,9 @@ services:
     env_file: .env
     profiles: ["micro"]
     environment:
+      # Для миграций (start.bat micro гонит alembic отсюда) и общего кода;
+      # в .env DATABASE_URL указывает на localhost — внутри сети хост postgres.
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       SVC_IDENTITY_URL: http://identity:8101
       SVC_CATALOG_URL: http://catalog:8102
       SVC_BILLING_URL: http://billing:8103
@@ -181,7 +184,10 @@ services:
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     ports:
-      - "8010:8000"
+      # Один и тот же хост-порт, что и у mono-backend: профили взаимно
+      # исключающи (общий алиас backend), попытка поднять оба = громкая
+      # ошибка бинда порта вместо тихих 502 от DNS round-robin.
+      - "8000:8000"
     networks:
       default:
         aliases: [backend]

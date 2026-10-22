@@ -79,7 +79,7 @@ gateway'ем:
 
 | Сервис | Порт | Домены |
 |---|---|---|
-| `gateway` | 8010→8000 (алиас `backend` в сети) | маршрутизация `/api/*` |
+| `gateway` | 8000→8000 (алиас `backend` в сети) | маршрутизация `/api/*` |
 | `identity` | 8101 | auth, users, me |
 | `catalog` | 8102 | listings, favorites, filters, notifications |
 | `billing` | 8103 | payments, subscription |
