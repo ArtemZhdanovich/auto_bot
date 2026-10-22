@@ -32,9 +32,9 @@ rem записи указывают на уже убитые туннели
 del .miniapp_tunnel.log >nul 2>&1
 
 echo [2/4] Поднимаю туннель localhost.run (проброс на nginx :8080)...
-rem Туннель в отдельном ps1: цикл с автоперезапуском ssh (git-овский),
-rem лог/ошибки в .miniapp_tunnel.log/.err, PID в .miniapp_tunnel.pid.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\miniapp_tunnel.ps1' -RedirectStandardOutput '.miniapp_tunnel.log' -RedirectStandardError '.miniapp_tunnel.err' -WindowStyle Hidden -PassThru; $p.Id | Set-Content .miniapp_tunnel.pid" || goto :err
+rem Туннель в отдельном ps1: цикл с автоперезапуском ssh (git-овский),
+rem лог/ошибки в .miniapp_tunnel.log/.err, PID в .miniapp_tunnel.pid.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\miniapp_tunnel.ps1' -RedirectStandardOutput '.miniapp_tunnel_loop.log' -RedirectStandardError '.miniapp_tunnel.err' -WindowStyle Hidden -PassThru; $p.Id | Set-Content .miniapp_tunnel.pid" || goto :err
 
 echo [3/4] Ожидание URL (до ~60с)...
 set URL=

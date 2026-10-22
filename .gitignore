@@ -54,3 +54,4 @@ REVIEW.md
 .miniapp_tunnel.log
 .miniapp_tunnel.err
 .miniapp_tunnel.pid
+.miniapp_tunnel_loop.log
