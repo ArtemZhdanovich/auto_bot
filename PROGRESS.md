@@ -1,5 +1,28 @@
 
 
+## 66. Auth: «Ссылка входа устарела» — миграция 0021 users.source (2026-10-22)
+
+- **Корень бага:** коммит 4d42fde (dishka-рефакторинг) добавил в модель User
+  колонку `source` + индексы `idx_users_source_created` /
+  `uq_users_email_lower` **без миграции**. Любой `SELECT *` ORM-модели User
+  падал с `column users.source does not exist` → identity не мог ни создать
+  юзера, ни подтвердить код логина → фронт показывал «Ссылка входа устарела»
+  (ссылка была живая — под капотом identity отдавал 500).
+- **Фикс:** `0021_users_source_and_email_lower.py` — `users.source String(16)`
+  + оба индекса (функциональный `uq_users_email_lower` с
+  `WHERE email IS NOT NULL`). Косметический дрейф TEXT→VARCHAR из
+  autogenerate-диффа сознательно не включён (риск NOT NULL на грязных
+  данных); мёртвая таблица `outbox` (наследие 0019, из моделей удалена) в БД
+  сохранена — дропать не стали.
+- **Нюанс деплоя:** alembic гонится из контейнера gateway (`build: .` без
+  volume) → после новой миграции нужен `docker compose build gateway`,
+  иначе контейнерный alembic упадёт с «Can't locate revision 0021».
+  На живую БД применяется с хоста: `.venv/Scripts/alembic.exe upgrade head`
+  (postgres проброшен на localhost:5432).
+- **Проверка:** `alembic current` = 0021; ORM `select(User)` — OK;
+  `POST /api/auth/telegram` через gateway → 422 (валидация) вместо 500;
+  ошибок `column source` в логах identity больше нет.
+
 ## 65. Инфра: healthcheck всем контейнерам + OOM-защита translate + лок ParserDoctor + PDP «все данные» (2026-10-17)
 
 - **Запуск рантайма (перевод + RAG + постоянный скрининг):** подняты qdrant,
