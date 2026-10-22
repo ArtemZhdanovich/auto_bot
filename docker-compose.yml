@@ -483,6 +483,12 @@ services:
       # прогрев NLLB (~30с) + первая загрузка весов из HF — не считать unhealthy
       start_period: 300s
 
+  # Публичный туннель к миниаппу для Telegram — поднимается НЕ здесь, а
+  # скриптом miniapp-url.bat (ssh -R к localhost.run) на хосте: контейнерный
+  # cloudflared не работает — trycloudflare.com блокируется сетью провайдера
+  # (EOF на api.trycloudflare.com). Для постоянного домена см. miniapp-url.bat,
+  # раздел про аккаунт localhost.run / именованный Cloudflare Tunnel.
+
 
 volumes:
   qdrant_storage:

@@ -70,7 +70,7 @@ if defined LAN_IP (
   echo   API:     http://%LAN_IP%:8000/health
 )
 echo.
-echo   WebApp-кнопка бота ведёт на MINIAPP_URL из .env
+echo   WebApp в Telegram: запусти miniapp-url.bat (валидный TLS-туннель)
 echo   Опц. фичи: docker compose up -d qdrant minio translate rag_api rag_worker
 echo   Логи: docker compose logs -f %API_SVC% bot
 goto :eof

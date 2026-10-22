@@ -60,6 +60,33 @@ API-контейнерах одновременно DNS отдаёт два IP �
 Боевой развёртывание (Caddy + Let's Encrypt, bootstrap VPS) —
 [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 
+## Миниапп в Telegram (валидный HTTPS)
+
+Telegram открывает web_app **только** по https с доверенным сертификатом.
+Self-signed из `frontend/entrypoint-ssl.sh` годится для браузера на LAN
+(`https://<LAN_IP>:8443`), но Telegram такой сайт молча не покажет.
+Публичный адрес выдаёт SSH-туннель к localhost.run — без аккаунта:
+
+```bat
+miniapp-url.bat
+```
+
+Скрипт: поднимает `ssh -R 80:localhost:8080 nokey@localhost.run`, забирает
+выданный URL (`https://<random>.lhr.life`), пишет его в `MINIAPP_URL` (.env)
+и пересоздаёт бота (кнопку web_app бот ставит при старте; PID туннеля — в
+`.miniapp_tunnel.pid`). Проверка руками: `curl -s https://<url>` — должен
+быть 200 **без** `-k`.
+
+Нюансы:
+- URL случайный и меняется при обрыве ssh/повторном запуске — просто
+  запусти скрипт ещё раз (старый процесс он гасит сам).
+- Cloudflare quick-tunnel (`trycloudflare.com`) в этой сети блокируется
+  провайдером (EOF на `api.trycloudflare.com`) — поэтому localhost.run.
+  ngrok доступен, но требует аккаунт.
+- Постоянный адрес: бесплатный аккаунт localhost.run (свой поддомен
+  `name.lhr.life`) или именованный Cloudflare Tunnel со своим доменом;
+  тогда туннель можно завернуть в compose-сервис и забыть про пересоздания.
+
 ## Конфигурация (.env)
 
 Полное зеркало `Settings` — см. `.env.example` (комментарии по каждому блоку).
