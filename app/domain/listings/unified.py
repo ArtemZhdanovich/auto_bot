@@ -47,6 +47,11 @@ class UnifiedListing(BaseModel):
     # Медиа
     images: list[HttpUrl] = Field(default_factory=list)
 
+    # Отчёт осмотра источника (если отдаётся): словарь в формате отчёта
+    # осмотра {source, grade, summary, marks, items, ...}. Пишется
+    # writer'ом в `inspection_reports`; `None` — отчёта нет.
+    inspection: Optional[dict[str, Any]] = None
+
     # Время
     published_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -55,11 +55,105 @@ def _params_of(request: httpx.Request) -> dict[str, list[str]]:
     return parse_qs(urlparse(str(request.url)).query, keep_blank_values=True)
 
 
+# --- обогащение детальными карточками (окт 2026) ----------------------------
+
+# Фрагмент реального ответа /v1/readside/vehicle/{id} (анонимно).
+DETAIL_RESPONSE = {
+    "vehicleId": 361895918,
+    "vin": " kmhsrc81abu123456",  # мусор-регистр/пробел — нормализуется
+    "spec": {"type": "CAR", "mileage": 42000, "displacement": 2199, "seatCount": 7},
+    "photos": [
+        {"code": "001", "path": "/carpicture09/pic3618/361895918_001.jpg", "type": "OUTER"},
+        {"code": "010", "path": "/carpicture09/pic3618/361895918_010.jpg", "type": "INNER"},
+    ],
+    "advertisement": {"advertisementType": "NORMAL", "diagnosisCar": True},
+    "condition": {
+        "accident": {"recordView": True, "resumeView": True},
+        "inspection": {"formats": ["TABLE"]},
+        "seizing": {"seizingCount": 0, "pledgeCount": 0},
+    },
+}
+CLEAN_RESPONSE = {"vehicleId": 361895918, "cleaned": True}
+
+
+def make_enrich_adapter(detail: dict, clean: dict | None) -> tuple[EncarApiAdapter, list[httpx.Request]]:
+    """Адаптер с маршрутизацией по URL: search → выдача, detail/clean → ответы."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        url = str(request.url)
+        if "clean-encar" in url:
+            if clean is None:
+                return httpx.Response(500, json={})
+            return httpx.Response(200, json=clean)
+        if "readside/vehicle/" in url:
+            return httpx.Response(200, json=detail)
+        return httpx.Response(200, json=_payload([SAMPLE_ITEM], total=1))
+
+    adapter = EncarApiAdapter(
+        source_name="encar",
+        http_client=HttpClient(transport=httpx.MockTransport(handler), timeout=10),
+    )
+    return adapter, requests
+
+
+async def test_fetch_enriches_vin_spec_photos_inspection():
+    """Detail-карточка дополняет search: VIN, объём, полный набор фото, осмотр."""
+    adapter, requests = make_enrich_adapter(DETAIL_RESPONSE, CLEAN_RESPONSE)
+    result = await adapter.fetch(SearchCriteria())
+
+    item = result.items[0]
+    assert item.vin == "KMHSRC81ABU123456"  # strip + upper, 17 знаков ISO 3779
+    assert item.engine_volume == 2199.0  # см³ из spec.displacement
+    # Полный набор фото из detail (search-набор заменён)
+    assert [str(i) for i in item.images] == [
+        "https://ci.encar.com/carpicture09/pic3618/361895918_001.jpg",
+        "https://ci.encar.com/carpicture09/pic3618/361895918_010.jpg",
+    ]
+    report = item.inspection
+    assert report is not None and report["source"] == "encar"
+    assert "Диагностика Encar (엔카진단): пройдена" in report["summary"]
+    assert "запись осмотра доступна" in report["summary"]
+    assert "Clean Encar: безаварийная" in report["summary"]
+    assert report["grade"] is None and report["marks"] == [] and report["items"] == []
+    # Три запроса: search + detail + clean-encar
+    urls = [str(r.url) for r in requests]
+    assert any("/v1/readside/vehicle/361895918" in u for u in urls)
+    assert any("/v1/readside/clean-encar/vehicle/361895918" in u for u in urls)
+    await adapter.close()
+
+
+async def test_fetch_survives_detail_failure():
+    """«Мусорный» detail (без vin/spec/photos) не портит search-данные."""
+    adapter, _ = make_enrich_adapter({"message": "Not Found"}, None)  # clean → 500
+    result = await adapter.fetch(SearchCriteria())
+    item = result.items[0]
+    assert item.vin is None  # в detail нет валидного VIN
+    assert [str(i) for i in item.images] == [  # search-фото не потеряны
+        "https://ci.encar.com/photo/nc1/2024/01/1.jpg",
+        "https://ci.encar.com/photo/nc1/2024/01/2.jpg",
+    ]
+    assert len(result.items) == 1
+    await adapter.close()
+
+
+async def test_bad_vin_not_saved():
+    """Мусор вместо VIN (госномер/короткая строка) не попадает в listing."""
+    bad = dict(DETAIL_RESPONSE, vin="812루7127")
+    adapter, _ = make_enrich_adapter(bad, CLEAN_RESPONSE)
+    result = await adapter.fetch(SearchCriteria())
+    assert result.items[0].vin is None
+    await adapter.close()
+
+
+
 async def test_fetch_maps_to_unified_listing():
     adapter, requests = make_adapter([_payload([SAMPLE_ITEM], total=1)])
     result = await adapter.fetch(SearchCriteria())
 
-    assert len(requests) == 1
+    # search + detail-карточка + clean-encar (обогащение окт 2026)
+    assert len(requests) == 3
     assert len(result.items) == 1
     item = result.items[0]
     assert item.source == "encar"

@@ -60,6 +60,41 @@
   «Назад» — в гриде (min-width:1024, `grid-template-columns: 1.6fr 1fr`)
   занимала ячейку (1,1); main с галереей уезжал в правую узкую колонку
   (418px), side — в левую широкую (670px). Ровно «уход вправо первой
+## 74. Encar: VIN + чек состояния в парсере (2026-10-22)
+
+- **Разведка API живыми запросами.** Search-выдача Encar не содержит Vin
+  (0 из 1902 записей в БД) и отдаёт только часть фото. Анонимно работают:
+  `/v1/readside/vehicle/{id}` (VIN у заполненных, spec.displacement,
+  полный набор фото 20-35, `advertisement.diagnosisCar`,
+  `condition.inspection.formats`, `condition.seizing`) и
+  `/v1/readside/clean-encar/vehicle/{id}` (`{"cleaned": bool}`).
+  Пути diagnosis/inspection вытащены из JS-бандла fem.encar.com
+  (`app-*.js`), но полный чек (엔카진단, таблица зон) требует
+  encar-авторизации — анонимно 404. Сторонние API-обёртки (encarapi и
+  пр. из подсказки) не проверял — прямые эндпоинты уже работали.
+- **Адаптер encar.py**: после parse страницы — обогащение детальными
+  карточками (semaphore 5, ошибки отдельной карточки не роняют страницу,
+  у 404 удалённых просто остаются search-данные): VIN по маске ISO 3779
+  (17 знаков без I/O/Q — мусор вида «812루7127» не проходит), объём из
+  см³, замена фото на полный набор, отчёт осмотра из анонимных фактов
+  (diagnosisCar, запись осмотра, Clean Encar, залоги) → `summary`.
+- **UnifiedListing.inspection** (Optional[dict]) — новый необязательный
+  контракт; writer (listings_writer.py) пишет отчёты в
+  `inspection_reports` (INSERT ON CONFLICT (listing_id) DO UPDATE ...
+  WHERE source='encar' — ручные отчёты админа не перетираются), в
+  SAVEPOINT: сбой пачки отчётов не роняет сохранение объявлений.
+- **Живая проверка end-to-end**: fetch страницы → ingest → API:
+  5/5 с VIN, `GET /api/listings/{id}` отдаёт vin/объём/33 фото,
+  `GET /api/listings/{id}/inspection` — отчёт с фактом «Диагностика
+  пройдена · Clean Encar: безаварийная». Тесты: +3 (enrichment,
+  деградация, мусорный VIN), encar-сьют 48/48.
+- **Открыто**: полная диагностическая таблица (оценки зон) — только с
+  encar-аккаунтом (Bearer в `/v1/readside/diagnosis/vehicle/{id}`); слот
+  готов — ложится в marks/items. VIN у части объявлений NULL — продавцы
+  не заполнили. Существующие 1902 записи подтянут VIN при повторном
+  fetch источника (admin trigger).
+
+
 ## 73. Туннель: probe слеп — IWR залипал на «хорошей» ноде ELB (2026-10-22)
 
 - **Механика падений выяснена окончательно.** Edge localhost.run — ELB

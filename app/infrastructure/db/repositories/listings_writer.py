@@ -107,6 +107,27 @@ _PRICE_POINT_SQL = text(
     "VALUES (:listing_id, :price, :currency)"
 )
 
+# Отчёт осмотра из источника. Ручные отчёты не перетираем: DO UPDATE
+# срабатывает только если текущая строка — тоже парсерная (`source='encar'`).
+# При вставке inspector/inspected_at остаются NULL (ручных данных нет).
+_INSPECTION_SQL = text(
+    """
+    INSERT INTO inspection_reports (listing_id, source, grade, summary, marks, items)
+    VALUES (:listing_id, :source, :grade, :summary, :marks, :items)
+    ON CONFLICT (listing_id) DO UPDATE SET
+        source = EXCLUDED.source,
+        grade = COALESCE(EXCLUDED.grade, inspection_reports.grade),
+        summary = EXCLUDED.summary,
+        marks = EXCLUDED.marks,
+        items = EXCLUDED.items,
+        updated_at = now()
+    WHERE inspection_reports.source = 'encar'
+    """
+).bindparams(
+    bindparam("marks", type_=JSONB),
+    bindparam("items", type_=JSONB),
+)
+
 
 class SqlAlchemyListingsWriter:
     """Пишет объявления пачкой: upsert, история цен, raw_key, stale."""
@@ -128,6 +149,7 @@ class SqlAlchemyListingsWriter:
         """
         outcomes: list[ItemOutcome] = []
         uploads: list[PendingRawUpload] = []
+        inspections: list[tuple[int, dict[str, Any]]] = []
         for item in items:
             params = self._params(item)
             row = (await self._session.execute(_UPSERT_SQL, params)).mappings().first()
@@ -140,6 +162,8 @@ class SqlAlchemyListingsWriter:
                 previous=ExistingState.from_row(row),
             )
             outcomes.append(outcome)
+            if item.inspection:
+                inspections.append((outcome.listing_id, item.inspection))
             if outcome.price_point:
                 await self._session.execute(
                     _PRICE_POINT_SQL,
@@ -165,11 +189,41 @@ class SqlAlchemyListingsWriter:
                 )
         if raw_keys:
             await self._apply_raw_keys(raw_keys)
+        if inspections:
+            await self._upsert_inspections(inspections)
         await self._session.commit()
         stats = summarize(outcomes, uploads=uploads)
         if stats.touched:
             logger.info("listings_saved: %s", _counters(stats))
         return stats
+
+    async def _upsert_inspections(
+        self, rows: Sequence[tuple[int, dict[str, Any]]]
+    ) -> None:
+        """Записать отчёты осмотра источника (без commit — транзакция вызывающего).
+
+        Ручные отчёты (source != 'encar') не перетираются — см. WHERE в
+        `_INSPECTION_SQL`. Ошибка пачки не должна ронять сохранение
+        объявлений: выполняется в SAVEPOINT, при сбое откатывается только он.
+        """
+        params = [
+            {
+                "listing_id": listing_id,
+                "source": str(report.get("source") or "encar"),
+                "grade": report.get("grade"),
+                "summary": report.get("summary"),
+                "marks": report.get("marks") or [],
+                "items": report.get("items") or [],
+            }
+            for listing_id, report in rows
+        ]
+        try:
+            async with self._session.begin_nested():
+                await self._session.execute(_INSPECTION_SQL, params)
+        except Exception:
+            logger.warning(
+                "inspection_upsert_failed: %d rows skipped", len(params), exc_info=True
+            )
 
     async def attach_raw_keys(self, raw_keys: Mapping[int, str]) -> None:
         """Записать `raw_key` после успешной загрузки raw в S3."""

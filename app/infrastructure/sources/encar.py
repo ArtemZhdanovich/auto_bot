@@ -13,7 +13,9 @@ Encar Search API возвращает JSON вида:
 detail_url_template).
 """
 
+import asyncio
 import logging
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -33,6 +35,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://api.encar.com/search/car/list/general"
 DEFAULT_PHOTO_PREFIX = "https://ci.encar.com"
 DEFAULT_DETAIL_TEMPLATE = "https://fem.encar.com/car/detail/{source_id}"
+# Детальный карточный API (окт 2026, анонимно): VIN (у заполненных), полный
+# spec (объём в см³), ПОЛНЫЙ набор фото (search отдаёт только часть),
+# diagnosisCar/осмотр/обременения. Удалённое с площадки объявление → 404.
+DEFAULT_DETAIL_API = "https://api.encar.com/v1/readside/vehicle/{source_id}"
+# Флаг «безаварийности» (Clean Encar): {"vehicleId": N, "cleaned": bool}.
+DEFAULT_CLEAN_API = "https://api.encar.com/v1/readside/clean-encar/vehicle/{source_id}"
+# Параллельные detail-запросы на страницу выдачи (вежливость к API).
+_DETAIL_CONCURRENCY = 5
+# VIN: 17 знаков без I/O/Q (ISO 3779). Корейские VIN соответствуют; мусор
+# («수입차», госномер) не должен попадать в listings.vin.
+_VIN_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
 DEFAULT_PAGE_SIZE = 20
 DEFAULT_SORT = "ModifiedDate"
 DEFAULT_USD_KRW = 1400  # запасной курс, если criteria.price в USD
@@ -219,6 +232,9 @@ class EncarApiAdapter(BaseApiAdapter):
             ) from exc
         if self._usd_krw <= 0:
             raise ValueError(f"encar: usd_krw must be > 0, got {self._usd_krw}")
+        self._detail_api = self.config.get("detail_api_template", DEFAULT_DETAIL_API)
+        self._clean_api = self.config.get("clean_api_template", DEFAULT_CLEAN_API)
+        self._enrich_details = bool(self.config.get("enrich_details", True))
 
     # --- fetch ---------------------------------------------------------
 
@@ -270,6 +286,12 @@ class EncarApiAdapter(BaseApiAdapter):
         # Cap: не уходим в бесконечную пагинацию, если API врёт с Count.
         effective_total = min(total, MAX_TOTAL_ITEMS)
         has_more = bool(items) and (page + 1) * self._page_size < effective_total
+
+        # Обогащение детальными карточками (VIN, объём, фото, осмотр).
+        # Ошибка/404 отдельной карточки не роняет страницу: у объявления
+        # остаются данные search-выдачи.
+        if items and self._enrich_details:
+            await self._enrich_from_details(items)
 
         return FetchResult(
             items=items,
@@ -472,6 +494,156 @@ class EncarApiAdapter(BaseApiAdapter):
         lo = to_man(Decimal(str(c.price_min))) if c.price_min is not None else 0
         hi = to_man(Decimal(str(c.price_max))) if c.price_max is not None else 99_999_999
         return max(lo, 0), max(hi, 0)
+
+    # --- обогащение детальными карточками -------------------------------
+
+    async def _enrich_from_details(self, items: list[UnifiedListing]) -> None:
+        """Догрузить `/v1/readside/vehicle/{id}` для каждого объявления.
+
+        Search-выдача не содержит VIN и показывает часть фото; детальный
+        API (анонимно, окт 2026) отдаёт VIN, полный spec и полный набор
+        фото, плюс флаги состояния (диагностика/осмотр/обременения).
+        Ошибки отдельных карточек логируются и не роняют страницу.
+
+        Args:
+            items: Объявления страницы (мутируются in-place).
+        """
+        semaphore = asyncio.Semaphore(_DETAIL_CONCURRENCY)
+
+        async def enrich_one(item: UnifiedListing) -> None:
+            async with semaphore:
+                try:
+                    detail = await self.http.get_json(
+                        self._detail_api.format(source_id=item.source_id)
+                    )
+                    cleaned: bool | None = None
+                    try:
+                        clean = await self.http.get_json(
+                            self._clean_api.format(source_id=item.source_id)
+                        )
+                        if isinstance(clean, dict):
+                            cleaned = bool(clean.get("cleaned"))
+                    except Exception as exc:  # флаг безаварийности не критичен
+                        logger.debug(
+                            "encar_clean_failed id=%s: %s", item.source_id, exc
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "encar_detail_failed id=%s: %s", item.source_id, exc
+                    )
+                    return
+                if isinstance(detail, dict):
+                    self._apply_detail(item, detail, cleaned)
+
+        await asyncio.gather(*(enrich_one(item) for item in items))
+
+    def _apply_detail(
+        self,
+        item: UnifiedListing,
+        detail: dict[str, Any],
+        cleaned: bool | None,
+    ) -> None:
+        """Наложить данные детальной карточки на объявление (in-place).
+
+        Args:
+            item: Объявление из search-выдачи.
+            detail: JSON ответа `/v1/readside/vehicle/{id}`.
+            cleaned: Флаг Clean Encar (`None` — не удалось получить).
+        """
+        vin_raw = detail.get("vin")
+        vin = vin_raw.strip().upper() if isinstance(vin_raw, str) else ""
+        if _VIN_RE.match(vin):
+            item.vin = vin
+        elif vin:
+            logger.warning(
+                "encar_bad_vin id=%s: %r — оставляю search-значение",
+                item.source_id,
+                vin_raw,
+            )
+
+        spec = detail.get("spec") if isinstance(detail.get("spec"), dict) else {}
+        displacement = spec.get("displacement")
+        if isinstance(displacement, (int, float)) and displacement > 0:
+            # см³; normalize_engine_volume в writer'е приводит к литрам.
+            item.engine_volume = float(displacement)
+
+        # Полный набор фото (OUTER+INNER): search отдаёт лишь часть.
+        photos = detail.get("photos")
+        if isinstance(photos, list) and photos:
+            urls = [
+                f"{self._photo_prefix}/{str(p.get('path', '')).lstrip('/')}"
+                for p in photos
+                if isinstance(p, dict) and p.get("path")
+            ]
+            if urls:
+                item.images = urls
+
+        item.inspection = self._build_inspection(detail, cleaned)
+
+    @staticmethod
+    def _build_inspection(
+        detail: dict[str, Any], cleaned: bool | None
+    ) -> dict[str, Any]:
+        """Собрать отчёт осмотра из доступных анонимно фактов карточки.
+
+        Полная диагностическая таблица (엔카진단: оценки зон кузова/салона)
+        живёт в `/v1/readside/diagnosis/vehicle/{id}` и требует авторизацию
+        Encar — анонимно она отдаёт 404. Поэтому marks/items остаются
+        пустыми (рукопашная осмотра поверх — PUT /listings/{id}/inspection),
+        а факты состояния попадают в `summary`.
+
+        Args:
+            detail: JSON детальной карточки.
+            cleaned: Флаг Clean Encar (`None` — неизвестен).
+
+        Returns:
+            Словарь для `inspection_reports` (формат InspectionReport).
+        """
+        advertisement = (
+            detail.get("advertisement")
+            if isinstance(detail.get("advertisement"), dict)
+            else {}
+        )
+        condition = (
+            detail.get("condition") if isinstance(detail.get("condition"), dict) else {}
+        )
+        seizing_block = (
+            condition.get("seizing") if isinstance(condition.get("seizing"), dict) else {}
+        )
+        inspection_block = (
+            condition.get("inspection")
+            if isinstance(condition.get("inspection"), dict)
+            else {}
+        )
+
+        diagnosis_done = bool(advertisement.get("diagnosisCar"))
+        record_formats = inspection_block.get("formats") or []
+        seizing_count = seizing_block.get("seizingCount") or 0
+        pledge_count = seizing_block.get("pledgeCount") or 0
+
+        facts: list[str] = [
+            "Диагностика Encar (엔카진단): пройдена"
+            if diagnosis_done
+            else "Диагностика Encar: не проводилась"
+        ]
+        if "TABLE" in record_formats:
+            facts.append("запись осмотра доступна у источника")
+        if cleaned is True:
+            facts.append("Clean Encar: безаварийная")
+        elif cleaned is False:
+            facts.append("Clean Encar: статус не подтверждён")
+        if seizing_count or pledge_count:
+            facts.append(f"обременения: залог={seizing_count}, пледж={pledge_count}")
+
+        return {
+            "source": "encar",
+            "inspector": None,
+            "inspected_at": None,
+            "grade": None,
+            "summary": " · ".join(facts),
+            "marks": [],
+            "items": [],
+        }
 
     def _map_item(self, raw: dict[str, Any]) -> UnifiedListing | None:
         """Преобразует один элемент `SearchResults` в `UnifiedListing`.

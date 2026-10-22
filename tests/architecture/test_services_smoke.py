@@ -37,7 +37,7 @@ SERVICES = {
 # Ровно те префиксы API, которые обязан обслуживать каждый сервис
 EXPECTED_PREFIXES: dict[str, set[str]] = {
     "identity": {"/api/auth", "/api/users", "/api/me"},
-    "catalog": {"/api/listings", "/api/favorites", "/api/filters", "/api/notifications"},
+    "catalog": {"/api/listings", "/api/favorites", "/api/filters", "/api/notifications", "/api/calc", "/api/bot"},
     "billing": {"/api/payments", "/api/subscription", "/api/users"},
     "partners": {"/api/partner", "/api/admin", "/api/leads"},
     "dialog": {"/api/dialog", "/api/ai"},
