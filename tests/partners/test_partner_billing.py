@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from partners_helpers import (
+from tests.partners.helpers import (
     claim_batch,
     claim_lead,
     cpl_cost,

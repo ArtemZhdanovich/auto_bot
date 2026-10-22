@@ -51,7 +51,7 @@ from app.main_api import app
 from app.transport.http.schemas.partner import PartnerLeadOwnedOut, PartnerLeadPublicOut
 from app.infrastructure.services import analytics
 from conftest import FakeRedis, install_test_container
-from partners_helpers import (
+from tests.partners.helpers import (
     available_leads,
     claim_batch,
     claim_lead,

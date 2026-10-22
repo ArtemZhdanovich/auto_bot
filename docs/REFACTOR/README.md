@@ -1,5 +1,13 @@
 # Рефакторинг bot-encar: Clean Architecture + Dishka + FastStream
 
+> **⚠️ Документы пакета зафиксированы на момент завершения рефакторинга
+> слоёв (21.10.2026).** Более поздние изменения: HTTP-слой переведён на dishka
+> без `FastAPI.Depends` (22.10), прикладной слой сгруппирован в 6 сервисов
+> `identity / catalog / billing / partners / dialog / admin` с явными
+> `ports.py`/`dto.py` (22.10). Актуальная архитектура —
+> [../ARCHITECTURE.md](../ARCHITECTURE.md); правила слоёв в живом виде —
+> `tests/architecture/test_layers.py`.
+
 Пакет проектных документов по переводу `auto_bot` (`bot-encar`) с текущей
 слоистой структуры на Clean Architecture с DI-контейнером Dishka и очередями
 на FastStream. Документы составлены **по фактическому коду** рабочего дерева

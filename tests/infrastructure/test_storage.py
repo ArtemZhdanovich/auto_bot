@@ -16,7 +16,7 @@ from app.transport.http.routers import admin as admin_mod
 from app.infrastructure.services.fetch import compute_content_hash, save_listings
 from app.infrastructure.services.storage import S3Storage, build_raw_key
 from tests.conftest import FakeSession
-from tests.test_fetch import NEW_ROW, UpsertSession, _item, _row
+from tests.infrastructure.test_fetch import NEW_ROW, UpsertSession, _item, _row
 
 
 class StubStorage:

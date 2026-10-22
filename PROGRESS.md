@@ -1825,3 +1825,68 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   ruff ok. bot/miniapp пересобраны, polling запущен.
 - Ручной шаг: inline-режим бота должен быть включён в BotFather (`/setinline`),
   иначе switchInlineQuery из вебаппа ничего не откроет.
+
+## 2026-10-21: Clean Architecture — домен/сценарии/инфраструктура + Dishka + FastStream
+
+- `app/` переложен по слоям: `domain/` (чистая логика) → `application/`
+  (сценарии) → `infrastructure/` (db, cache, security, sources, storage,
+  workers, messaging) → `transport/` (http, bot, messaging) + `di/`
+  (dishka-контейнер: settings/database/redis/broker/security/adapters/
+  repositories/use_cases). Правила зависимостей закреплены тестом
+  `tests/architecture/test_layers.py`; `domain` не импортирует `app/*`.
+- DI: все сценарии и зависимости — через dishka; HTTP-роутеры принимают
+  зависимости в сигнатурах.
+- Очереди: добавлен FastStream-контур — строгие контракты команд
+  (`extra="forbid"` + обязательный `idempotency_key`), обработчик `enrich`
+  (догрузка спеков лота), publisher + outbox-релей с идемпотентностью
+  доставки; legacy aio-pika TaskWorker/CronSpec остался в fetch/send.
+- Пакет проектных документов — `docs/REFACTOR/` (аудит, blueprint, миграция,
+  финал). Suite на момент фиксации: 1119 passed, 3 skipped.
+
+## 2026-10-22: HTTP-слой на dishka — FastAPI Depends выпилен
+
+- `deps/providers.py`: HttpDepsProvider строит `CurrentUser` (Bearer → порт
+  `AccessTokenVerifier` → `GetCurrentUser`) и `PartnerAuthState` (X-API-Key →
+  `AuthenticateApiKey`); HTTP-маппинг ошибок (401/403) и audit-лог сохранены
+  1:1.
+- `InternalDishkaRoute` заменяет router-level `Depends(check_internal_token)`:
+  X-Internal-Token — Header-параметр сигнатуры (OpenAPI-паритет), проверка до
+  dishka-резолва сценариев; константное сравнение сохранено.
+- Удалён мёртвый юзкейс `VerifyAccessToken` (+ биндинги DI) — его роль играет
+  порт `AccessTokenVerifier` в провайдере.
+- Suite: 908 passed, 257 skipped (Postgres-скипы), ruff clean.
+
+## 2026-10-22 (позже): application → 6 микросервисов (ports/dto) + тесты и документация
+
+### Прикладной слой: контракты по сервисам
+- Внутри `identity / catalog / billing / partners / dialog / admin` — явные
+  `ports.py` (Protocol) и `dto.py` (DTO/команды); все порты вытащены из
+  use_cases/queries/settings ~22 модулей, команды/результаты сценариев
+  переехали из use_cases в `<service>/dto.py`.
+- Старые общие каталоги `app/application/dto/` (18 файлов) и
+  `app/application/ports/` расформированы; кросс-сервисные порты
+  (CachePort, LLMPort, ClockPort) — в `shared/ports.py`.
+- Коллизии имён: `users.ports.UserRepository` → `UserUpsertRepository`;
+  партнёрский `LeadView` → `PartnerLeadView` (не путать с CRM-`LeadView`).
+- Порты и inline-DTO вырезаны скриптами (`.zwork/refactor_phase*`), глобальный
+  рерайт импортов — 66 файлов (app/ services/ tests/). Suite: 908 passed,
+  257 skipped, ruff по `app/application` чист.
+
+### Тесты: раскладка по сервисам
+- Плоские тесты разложены зеркально архитектуре: `tests/identity/`,
+  `catalog/`, `billing/`, `partners/` (+ `helpers.py` вместо
+  `partners_helpers.py`), `dialog/`, `admin/`, `bot/`, `security/`,
+  `transport/`; инфра-тесты — в `tests/infrastructure/`, смоук
+  микросервисов — в `tests/architecture/`. Описание — `docs/TESTING.md`.
+
+### Документация: README → пакет docs/
+- `README.md` сокращён до обзора + карты документации; по разделам собраны
+  `docs/ARCHITECTURE.md` (слои, 6 сервисов, DI, очередь, micro-профиль, БД),
+  `API.md`, `SOURCES.md`, `AI.md`, `MONETIZATION.md`, `OPERATIONS.md`,
+  `TESTING.md`, `SECURITY.md` (модель + свод угроз).
+- Неактуальное ТЗ (`TZ.md`, 112 КБ: бот/сайт/архитектура до рефакторинга)
+  удалено; `docs/REFACTOR/README.md` помечен баннером «зафиксировано» со
+  ссылкой на актуальную архитектуру.
+- `INCIDENTS.md`: заведён свод из 23 устранённых угроз (initData, секреты,
+  SSRF, IDOR, инъекции, rate limits, ПД, ключи партнёров, PQ-шифрование…)
+  с контрмерами и тестами; дата аудита актуализирована.
