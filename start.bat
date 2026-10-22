@@ -21,7 +21,9 @@ if /i "%PROFILE%"=="mono" (
 ) else (
   set PROFILE=micro
   set API_SVC=gateway
-  set CORE=postgres redis rabbitmq gateway bot miniapp worker_fetch worker_send
+  rem gateway роутит /api/* в доменные сервисы — без них фронт получает
+  rem 502 на каждый вызов (HTML при этом отдаётся, потому и неочевидно)
+  set CORE=postgres redis rabbitmq gateway identity catalog billing partners dialog admin bot miniapp worker_fetch worker_send
 )
 rem Перекрывает COMPOSE_PROFILES из .env: CLI --profile объединяется с
 rem переменной из .env (получили бы два API на одном порту), а переменная
