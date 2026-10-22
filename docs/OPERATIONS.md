@@ -22,24 +22,40 @@ gateway+6 сервисов (профиль micro), qdrant, minio, rag (api/worke
 translate.
 
 ```bash
-docker compose up -d                     # профиль из COMPOSE_PROFILES (.env; по умолчанию mono)
+docker compose up -d                     # профиль из COMPOSE_PROFILES (.env; по умолчанию micro)
 docker compose --profile mono up -d      # монолит
 docker compose --profile micro up -d     # gateway + доменные сервисы
-start.bat [mono|micro]                   # то же + миграции + ожидание health (Windows)
+start.bat [mono|micro]                   # то же + миграции + ожидание health (Windows);
+                                         # по умолчанию micro, при переключении сам
+                                         # прибивает API-контейнер чужого профиля
 ```
 
-Оба профиля работают ОДИНАКОВО: API на хосте всегда `:8000` (mono — backend,
-micro — gateway; порт общий, поэтому оба API-контейнера одновременно жить
+Оба профиля работают ОДИНАКОВО: API на хосте всегда `:8000` (micro — gateway,
+mono — backend; порт общий, поэтому оба API-контейнера одновременно жить
 не могут), сайт на `:8080`/`:8443`, миграции:
-`docker compose exec -T backend alembic upgrade head` (mono) или
-`docker compose exec -T gateway alembic upgrade head` (micro).
+`docker compose exec -T gateway alembic upgrade head` (micro) или
+`docker compose exec -T backend alembic upgrade head` (mono).
+
+Горячее переключение профиля (без остановки остального стека):
+
+```bash
+# mono -> micro: прибить backend, поднять gateway (compose пересоздаст
+# только то, чей конфиг разнится с файлом)
+docker compose rm -sf backend && COMPOSE_PROFILES=micro docker compose up -d
+# micro -> mono
+docker compose rm -sf gateway && COMPOSE_PROFILES=mono docker compose up -d
+# миграции из нового API-сервиса
+docker compose exec -T gateway alembic upgrade head   # (или backend)
+```
+
+`start.bat [mono|micro]` делает всё это автоматически.
 
 ⚠️ Профили не смешивать: gateway имеет сетевой алиас `backend` — при двух
-профилях одновременно DNS отдаёт два IP и половина запросов ловит 502
+API-контейнерах одновременно DNS отдаёт два IP и половина запросов ловит 502
 (DNS round-robin). CLI-флаг `--profile` ОБЪЕДИНЯЕТСЯ с `COMPOSE_PROFILES`
-из `.env` — переключать профиль меняйте переменную в `.env` или запускайте
-через `start.bat` (он выставляет `COMPOSE_PROFILES` окружением, что имеет
-приоритет). Погасить чужой API-контейнер: `docker compose stop gateway`.
+из `.env` — переключать профиль меняйте переменную в `.env`, запускайте
+`start.bat` или используйте команды горячего переключения выше (они гасят
+чужой API-контейнер перед подъёмом).
 
 Боевой развёртывание (Caddy + Let's Encrypt, bootstrap VPS) —
 [deploy/DEPLOY.md](../deploy/DEPLOY.md).

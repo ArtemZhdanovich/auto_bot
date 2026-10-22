@@ -1,36 +1,46 @@
 @echo off
 rem ============================================================
 rem auto_bot — запуск стека на Windows (Docker Desktop).
-rem Использование: start.bat [mono|micro]   (по умолчанию mono)
+rem Использование: start.bat [mono|micro]   (по умолчанию micro)
 rem
 rem Профили работают ОДИНАКОВО: API всегда на :8000, сайт на
 rem :8080/:8443, миграции и healthcheck идут через API-сервис
-rem профиля (backend или gateway).
-rem Запускает ядро (без qdrant/minio — зеркало часто отдаёт 403,
-rem монолиту они не нужны), ждёт health, гонит миграции,
-rem печатает ссылки localhost и из локальной сети.
+rem профиля (backend или gateway). При переключении на горячую
+rem чужой API-контейнер прибивается автоматически (общие порт
+rem :8000 и алиас backend — владелец всегда один), свой стек
+rem пересоздаётся compose'ом только если конфиг разнится.
 rem ============================================================
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
 set PROFILE=%1
-if "%PROFILE%"=="" set PROFILE=mono
-if /i "%PROFILE%"=="micro" (
-  set API_SVC=gateway
-  set CORE=postgres redis rabbitmq gateway bot miniapp worker_fetch worker_send
-) else (
+if "%PROFILE%"=="" set PROFILE=micro
+if /i "%PROFILE%"=="mono" (
   set PROFILE=mono
   set API_SVC=backend
   set CORE=postgres redis rabbitmq backend bot miniapp worker_fetch worker_send
+) else (
+  set PROFILE=micro
+  set API_SVC=gateway
+  set CORE=postgres redis rabbitmq gateway bot miniapp worker_fetch worker_send
 )
 rem Перекрывает COMPOSE_PROFILES из .env: CLI --profile объединяется с
-rem переменной из .env (получили бы mono+micro и конфликт порта :8000),
-rem а переменная окружения процесса имеет приоритет над .env.
+rem переменной из .env (получили бы два API на одном порту), а переменная
+rem окружения процесса имеет приоритет над .env.
 set COMPOSE_PROFILES=%PROFILE%
 
 for /f "delims=" %%i in ('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -match '^10\.' -or $_.IPAddress -match '^192\.168\.' -or $_.IPAddress -match '^172\.(1[6-9]|2[0-9]|3[01])\.' } | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|WSL|vEthernet|Docker' } | Select-Object -First 1 -ExpandProperty IPAddress)"') do set LAN_IP=%%i
 
 echo [1/5] Инфраструктура...
 docker compose up -d postgres redis rabbitmq >nul 2>&1 || goto :err
+
+rem Горячее переключение профиля: прибить API-контейнер чужого профиля.
+rem Свой поднимется на шаге [2/5]; compose пересоздаст его сам, только
+rem если его конфиг разнится с файлом (иначе просто оставит жить).
+if /i "%PROFILE%"=="micro" (
+  docker compose rm -sf backend >nul 2>&1
+) else (
+  docker compose rm -sf gateway >nul 2>&1
+)
 
 echo [2/5] Сборка и запуск (%PROFILE%)...
 docker compose up -d --build %CORE% 2>nul || docker compose up -d %CORE% || goto :err
