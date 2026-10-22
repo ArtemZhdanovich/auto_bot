@@ -18,6 +18,24 @@ if (-not (Test-Path $ssh)) { $ssh = 'ssh' }
 # .env и docker-compose.yml лежат в корне проекта (на уровень выше scripts/)
 Push-Location (Join-Path $PSScriptRoot '..')
 $root = (Get-Location).Path
+
+# Один экземпляр на машину. Повторный запуск (планировщик + вручную)
+# давал ДВА цикла: второй затирал .miniapp_tunnel.log первого, оба
+# держали свои ssh-сессии, .env указывал на мёртвый URL. Диагностика
+# осложнялась тем, что «probe -> 200» в логе был мусором из чужой
+# итерации. Mutex снимает целый класс таких поломок.
+$mutex = New-Object System.Threading.Mutex($false, 'auto_bot_miniapp_tunnel_mutex')
+if (-not $mutex.WaitOne(0)) {
+  Write-Output 'miniapp_tunnel уже запущен (mutex занят) — второй экземпляр завершается.'
+  exit 0
+}
+
+# Лог без таймстампов не отвечает на вопрос «когда это произошло» —
+# все события пишем через Log.
+function Log([string]$msg) {
+  Write-Output ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg)
+}
+
 # Пишем свой PID: и bat, и планировщик в итоге убивают дерево по этому файлу.
 $PID | Set-Content (Join-Path $root '.miniapp_tunnel.pid')
 
@@ -27,7 +45,7 @@ function Update-MiniappUrl([string]$url) {
   $cur = (Select-String -Path $envPath -Pattern '^MINIAPP_URL=(.+)$').Matches.Groups |
          Where-Object { $_.Name -eq '1' } | Select-Object -First 1 -ExpandProperty Value
   if ($cur -eq $url) { return }
-  Write-Output "URL сменился: $cur -> $url — обновляю .env и пересоздаю бота..."
+  Log "URL сменился: $cur -> $url — обновляю .env и пересоздаю бота..."
   $lines = Get-Content $envPath
   $found = $false
   $new = foreach ($l in $lines) {
@@ -39,7 +57,7 @@ function Update-MiniappUrl([string]$url) {
   # и без compose — тогда URL просто ляжет в .env до старта стека).
   if (& docker compose ps -q bot 2>$null) {
     & docker compose up -d --force-recreate --no-deps bot 2>$null | Out-Null
-    Write-Output "Бот пересоздан с MINIAPP_URL=$url"
+    Log "Бот пересоздан с MINIAPP_URL=$url"
   }
 }
 
@@ -63,7 +81,7 @@ while ($true) {
         '-R', '80:localhost:8080',
         "$sshUser@localhost.run"
       ) -RedirectStandardOutput $log -RedirectStandardError $err -NoNewWindow -PassThru
-  Write-Output "ssh запущен (pid $($p.Id))"
+  Log "ssh запущен (pid $($p.Id))"
 
   # Ждём URL в логе (баннер localhost.run) до 30с.
   $url = $null
@@ -76,12 +94,12 @@ while ($true) {
     if ($m) { $url = $m.Matches[0].Value }
   }
   if (-not $url) {
-    Write-Output "ssh не выдал URL за 30с — реконнект через 5с"
+    Log "ssh не выдал URL за 30с — реконнект через 5с"
     if (-not $p.HasExited) { try { $p.Kill() } catch {} }
     Start-Sleep -Seconds 5
     continue
   }
-  Write-Output "Туннель: $url"
+  Log "Туннель: $url"
   Update-MiniappUrl $url
 
   # Health-probe: два не-200 подряд считаем потерей туннеля на edge.
@@ -97,15 +115,15 @@ while ($true) {
     } catch {
       if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
     }
-    Write-Output "probe -> $code"
+    Log "probe -> $code"
     if ($code -eq 200) { $fails = 0 } else { $fails++ }
     if ($fails -ge 2) {
-      Write-Output "edge потерял туннель — принудительный реконнект"
+      Log "edge потерял туннель — принудительный реконнект"
       try { $p.Kill() } catch {}
       Start-Sleep -Seconds 2
       break
     }
   }
-  if ($p.HasExited) { Write-Output "ssh завершился — реконнект через 5с" }
+  if ($p.HasExited) { Log "ssh завершился — реконнект через 5с" }
   Start-Sleep -Seconds 5
 }
