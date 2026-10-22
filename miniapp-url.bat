@@ -24,12 +24,17 @@ setlocal enabledelayedexpansion
 
 echo [1/4] Завершаю прошлый туннель (если был)...
 if exist .miniapp_tunnel.pid (
-  for /f %%p in (.miniapp_tunnel.pid) do taskkill /PID %%p /F >nul 2>&1
+  for /f %%p in (.miniapp_tunnel.pid) do taskkill /PID %%p /T /F >nul 2>&1
   del .miniapp_tunnel.pid >nul 2>&1
 )
+rem лог чистим всегда: парсер берёт ПЕРВЫЙ URL в файле, а старые
+rem записи указывают на уже убитые туннели
+del .miniapp_tunnel.log >nul 2>&1
 
 echo [2/4] Поднимаю туннель localhost.run (проброс на nginx :8080)...
-powershell -NoProfile -Command "$p = Start-Process -FilePath 'ssh' -ArgumentList '-o','StrictHostKeyChecking=accept-new','-o','ServerAliveInterval=30','-o','ExitOnForwardFailure=yes','-o','ConnectTimeout=15','-R','80:localhost:8080','nokey@localhost.run' -RedirectStandardOutput '.miniapp_tunnel.log' -RedirectStandardError '.miniapp_tunnel.err' -PassThru -WindowStyle Hidden; $p.Id | Set-Content .miniapp_tunnel.pid" || goto :err
+rem Туннель в отдельном ps1: цикл с автоперезапуском ssh (git-овский),
+rem лог/ошибки в .miniapp_tunnel.log/.err, PID в .miniapp_tunnel.pid.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\miniapp_tunnel.ps1' -RedirectStandardOutput '.miniapp_tunnel.log' -RedirectStandardError '.miniapp_tunnel.err' -WindowStyle Hidden -PassThru; $p.Id | Set-Content .miniapp_tunnel.pid" || goto :err
 
 echo [3/4] Ожидание URL (до ~60с)...
 set URL=
