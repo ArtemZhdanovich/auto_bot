@@ -103,18 +103,21 @@ while ($true) {
   Update-MiniappUrl $url
 
   # Health-probe: два не-200 подряд считаем потерей туннеля на edge.
+  # ВАЖНО: probe через git-curl, а не Invoke-WebRequest. Длинноживущий
+  # PS-процесс кэширует DNS + держит keep-alive к ОДНОЙ ноде ELB
+  # localhost.run и видит вечный 200, тогда как новые соединения
+  # (телефон, curl) попадают на ноды без регистрации сессии и получают
+  # 502 «no tunnel». curl = новое соединение на каждую пробу — видит то
+  # же, что и реальный пользователь.
+  $curl = 'C:\Program Files\Git\mingw64\bin\curl.exe'
+  if (-not (Test-Path $curl)) { $curl = 'curl' }
   Start-Sleep -Seconds 8   # даём edge дорегистрировать маршрут после баннера
   $fails = 0
   while (-not $p.HasExited) {
     Start-Sleep -Seconds 25
     if ($p.HasExited) { break }
-    $code = 0
-    try {
-      $r = Invoke-WebRequest -Uri $url -Method Head -TimeoutSec 10 -UseBasicParsing
-      $code = [int]$r.StatusCode
-    } catch {
-      if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
-    }
+    $code = (& $curl -s -o NUL -w '%{http_code}' --max-time 10 $url)
+    if (-not $code -match '^\d{3}$') { $code = 0 } else { $code = [int]$code }
     Log "probe -> $code"
     if ($code -eq 200) { $fails = 0 } else { $fails++ }
     if ($fails -ge 2) {
