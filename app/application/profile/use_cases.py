@@ -8,25 +8,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol
 
-from app.application.dto.profile import OnboardingResult, UserProfile
 from app.application.errors import NotFound
+from app.application.identity.dto import OnboardingResult, UserProfile
+from app.application.identity.ports import ProfileRepository
 
 logger = logging.getLogger(__name__)
-
-
-class ProfileRepository(Protocol):
-    """Хранилище профиля: только публичная проекция, без ORM."""
-
-    async def get(self, user_id: int) -> UserProfile | None:
-        """Профиль пользователя или `None`, если его нет."""
-
-    async def mark_onboarded(self, user_id: int) -> OnboardingResult | None:
-        """Идемпотентно проставить `onboarded_at`.
-
-        `None` — пользователя нет; `first_time=False` — флаг уже стоял.
-        """
 
 
 class GetProfile:

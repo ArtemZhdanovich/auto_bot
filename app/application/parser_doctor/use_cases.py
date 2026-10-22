@@ -20,15 +20,18 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from app.application.dto.doctor import DoctorResult, ListPage
-from app.application.parser_doctor.ports import (
+from app.application.admin.dto import (
+    DoctorResult,
+    ListPage,
+)
+from app.application.admin.ports import (
     AlertPort,
     LockPort,
     ParserProbe,
     SourceConfigRepository,
     SourceRegistryPort,
 )
-from app.application.ports import LLMPort
+from app.application.shared.ports import LLMPort
 from app.application.shared.ports import UnitOfWork
 from app.domain.health.triage import (
     MARKUP_CHANGE,

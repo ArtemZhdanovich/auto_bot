@@ -19,7 +19,7 @@ from app.application.dialog.use_cases import (
     RestoreDialog,
     TriggerFetch,
 )
-from app.application.dto.dialog import DialogFinalizeCommand
+from app.application.dialog.dto import DialogFinalizeCommand
 from app.domain.dialog.state import Message, new_state
 from app.domain.search.criteria import SearchCriteria
 from app.infrastructure.cache.dialog_store import RedisDialogStore, dialog_key

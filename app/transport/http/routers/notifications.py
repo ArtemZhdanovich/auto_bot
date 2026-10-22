@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from app.application.errors import AppError
-from app.application.notifications.settings import NotifySettingsCommand
+from app.application.catalog.dto import NotifySettingsCommand
 from app.transport.http.deps.use_cases import (
     TriggerScanDep,
     UpdateNotifySettingsDep,

@@ -14,7 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel
 
-from app.application.favorites.use_cases import (
+from app.application.catalog.dto import (
     ListFavoritesQuery,
     ToggleFavoriteCommand,
 )

@@ -14,7 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.leads import LeadPatch, LeadView
+from app.application.partners.dto import (
+    LeadPatch,
+    LeadView,
+)
 from app.application.errors import Conflict
 from app.infrastructure.db.models import Lead, Listing, User
 

@@ -12,9 +12,8 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Protocol
 
-from app.application.dto.listings import (
+from app.application.catalog.dto import (
     FeedCursor,
     InspectionUpdate,
     InspectionView,
@@ -22,8 +21,8 @@ from app.application.dto.listings import (
     ListingDetail,
     ListingFeedQuery,
     ListingPageResult,
-    PricePoint,
 )
+from app.application.catalog.ports import ListingReadRepository
 from app.application.errors import Conflict, InvalidInput, NotFound
 from app.application.shared.pagination import CursorCodec
 from app.application.shared.ports import UnitOfWork
@@ -39,46 +38,6 @@ def normalize_url(url: str) -> str:
     u = re.sub(r"^https?://", "", u)
     u = re.sub(r"^(www|m)\.", "", u)
     return u.rstrip("/")
-
-
-class ListingReadRepository(Protocol):
-    """Чтение объявлений для сценариев (реализация — SQLAlchemy)."""
-
-    async def page(
-        self, query: ListingFeedQuery, cursor: FeedCursor | None
-    ) -> tuple[list[ListingCard], int | None, bool]:
-        """Страница ленты, `total` (None — не считался) и флаг продолжения."""
-
-    async def record_search(
-        self, user_id: int | None, *, results: int, filters: int
-    ) -> None:
-        """Записать событие завершённого поиска (analytics)."""
-
-    async def facets(self, make: str | None) -> dict[str, list[str]]:
-        """Марки или модели выбранной марки для селектов."""
-
-    async def find_by_url(self, needle: str) -> list[ListingCard]:
-        """До двух активных объявлений по нормализованному хвосту URL."""
-
-    async def get_active(self, listing_id: int) -> ListingCard | None:
-        """Активное объявление или None."""
-
-    async def enrich(self, listing_id: int) -> ListingCard | None:
-        """Догрузить спеки из detail источника и вернуть карточку."""
-
-    async def price_history(self, listing_id: int) -> list[PricePoint]:
-        """История цен объявления (хронологически)."""
-
-    async def exists(self, listing_id: int) -> bool:
-        """Есть ли объявление с таким id (в любом статусе)."""
-
-    async def get_report(self, listing_id: int) -> InspectionView | None:
-        """Отчёт осмотра или None."""
-
-    async def upsert_report(
-        self, listing_id: int, update: InspectionUpdate
-    ) -> InspectionView:
-        """Создать/заменить отчёт осмотра."""
 
 
 def decode_feed_cursor(raw: str) -> FeedCursor:

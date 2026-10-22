@@ -15,7 +15,7 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, HTTPException, Path, status
 from pydantic import BaseModel, Field
 
-from app.application.dto.analysis import AnalysisCommand
+from app.application.catalog.dto import AnalysisCommand
 from app.application.errors import AppError, Forbidden, NotFound
 from app.application.dialog.use_cases import AiUnavailable
 from app.transport.http.deps.auth import CurrentUserDep

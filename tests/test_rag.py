@@ -8,7 +8,10 @@ import pytest
 from app.infrastructure.ai.agent import run_agent
 from app.infrastructure.ai.llm_client import LLMResult, MockLLMClient, ToolCall
 from app.infrastructure.ai.rag_client import RAGClient, RAGUnavailable
-from app.application.dto.rag import RAGAnswer, RAGSource
+from app.application.dialog.dto import (
+    RAGAnswer,
+    RAGSource,
+)
 
 from conftest import FakeRedis
 

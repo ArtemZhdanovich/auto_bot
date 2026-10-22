@@ -14,7 +14,10 @@ from datetime import UTC, datetime
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.profile import OnboardingResult, UserProfile
+from app.application.identity.dto import (
+    OnboardingResult,
+    UserProfile,
+)
 from app.infrastructure.db.models import User
 
 

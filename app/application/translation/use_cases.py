@@ -11,7 +11,7 @@ import logging
 import time
 from collections.abc import Callable
 
-from app.application.ports import TranslationPort
+from app.application.catalog.ports import TranslationPort
 from app.domain.translation.errors import TranslationUnavailable
 
 logger = logging.getLogger(__name__)

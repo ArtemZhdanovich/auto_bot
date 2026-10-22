@@ -9,8 +9,9 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.analytics.use_cases import TrackEvent
-from app.application.dto.users import UserProfile
-from app.application.users.use_cases import UpsertUser, UpsertUserCommand
+from app.application.identity.dto import UserProfile
+from app.application.users.use_cases import UpsertUser
+from app.application.identity.dto import UpsertUserCommand
 from app.infrastructure.db.repositories.analytics import (
     SqlAlchemyAnalyticsRepository,
 )

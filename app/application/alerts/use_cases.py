@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import logging
 
-from app.application.ports import CachePort, NotifierPort
+from app.application.admin.ports import NotifierPort
+from app.application.shared.ports import CachePort
 
 logger = logging.getLogger(__name__)
 

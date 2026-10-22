@@ -17,7 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.listings.ingest import IngestListings
-from app.application.ports import ObjectStoragePort
+from app.application.catalog.ports import ObjectStoragePort
 from app.domain.listings.ingestion import IngestStats, compute_content_hash
 from app.domain.listings.ports import DuplicateGuard
 from app.domain.listings.unified import UnifiedListing

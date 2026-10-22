@@ -6,37 +6,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from app.application.catalog.dto import ListFavoritesQuery, ToggleFavoriteCommand
 from app.application.shared.dto import FavoriteState
 from app.application.shared.pagination import CursorCodec, Page
 from app.application.shared.ports import UnitOfWork
-from app.domain.favorites.ports import FavoriteCursor, FavoriteItem, FavoriteRepository
+from app.domain.favorites.ports import FavoriteItem, FavoriteRepository
 from dataclasses import replace
 
-from app.application.dto.listings import ListingCard
+from app.application.catalog.dto import ListingCard
 from app.application.errors import NotFound
 from app.domain.listings.ports import ListingRepository
 
 FAVORITES_MAX_LIMIT = 100
-
-
-@dataclass(frozen=True, slots=True)
-class ToggleFavoriteCommand:
-    """Вход сценария toggle."""
-
-    user_id: int
-    listing_id: int
-
-
-@dataclass(frozen=True, slots=True)
-class ListFavoritesQuery:
-    """Вход сценария списка избранного."""
-
-    user_id: int
-    limit: int = 50
-    cursor: FavoriteCursor | None = None
-    offset: int = 0
 
 
 class ToggleFavorite:

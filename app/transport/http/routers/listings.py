@@ -16,7 +16,10 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
-from app.application.dto.listings import InspectionUpdate, ListingFeedQuery
+from app.application.catalog.dto import (
+    InspectionUpdate,
+    ListingFeedQuery,
+)
 from app.application.errors import (
     AppError,
     Conflict,

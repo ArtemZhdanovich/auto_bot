@@ -14,7 +14,10 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel
 
-from app.application.dto.filters import FilterDraft, FilterPatch
+from app.application.catalog.dto import (
+    FilterDraft,
+    FilterPatch,
+)
 from app.application.errors import (
     AppError,
     Conflict,
@@ -22,7 +25,7 @@ from app.application.errors import (
     InvalidInput,
     NotFound,
 )
-from app.application.filters.use_cases import (
+from app.application.catalog.dto import (
     CreateFilterCommand,
     DeleteFilterCommand,
     ListFiltersQuery,

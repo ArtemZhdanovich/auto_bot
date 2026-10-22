@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from app.application.ports import ObjectStoragePort
+from app.application.catalog.ports import ObjectStoragePort
 from app.domain.listings.ingestion import (
     IngestStats,
     PendingRawUpload,

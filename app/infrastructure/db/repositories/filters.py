@@ -11,7 +11,11 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.filters import FilterDraft, FilterPatch, FilterRecord
+from app.application.catalog.dto import (
+    FilterDraft,
+    FilterPatch,
+    FilterRecord,
+)
 from app.infrastructure.db.models import User, UserFilter
 
 

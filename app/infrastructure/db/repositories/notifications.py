@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.notifications.settings import NotifyTarget
+from app.application.catalog.dto import NotifyTarget
 from app.infrastructure.db.models import User, UserFilter
 
 

@@ -43,21 +43,23 @@ from pydantic import BaseModel, Field
 
 from app.application.auth.use_cases import (
     BotNotConfigured,
-    ConfirmLoginCommand,
     EmailConflict,
     InvalidCredentials,
     InvalidEmail,
     InvalidInitData,
     InvalidToken,
-    LoginCommand,
     LoginLinkExpired,
     LoginStateMismatch,
-    RegisterCommand,
     UserDeactivated,
     UserIdAllocationFailed,
     UserNotFound,
 )
-from app.application.dto.auth import AuthResult
+from app.application.identity.dto import (
+    ConfirmLoginCommand,
+    LoginCommand,
+    RegisterCommand,
+)
+from app.application.identity.dto import AuthResult
 from app.application.errors import AppError
 from app.config import get_settings
 from app.transport.http.deps.auth_use_cases import (

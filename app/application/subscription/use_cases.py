@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 
 from app.domain.subscription.policies import (
     PAID_TIERS,
@@ -13,13 +13,6 @@ from app.domain.subscription.policies import (
     effective_tier,
     tier_config,
 )
-
-
-class SubscriptionSubject(Protocol):
-    """Минимальный контракт субъекта подписки (ORM удовлетворяет)."""
-
-    subscription_tier: str | None
-    subscription_until: datetime | None
 
 
 def current_tier(user: Any) -> str:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.listings import ListingCard
+from app.application.catalog.dto import ListingCard
 from app.infrastructure.db.models import Listing
 
 

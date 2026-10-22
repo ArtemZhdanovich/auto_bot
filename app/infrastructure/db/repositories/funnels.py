@@ -13,7 +13,10 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.analytics import CohortRow, EventCount
+from app.application.admin.dto import (
+    CohortRow,
+    EventCount,
+)
 
 _FUNNEL_SQL = text("""
     SELECT name, COUNT(DISTINCT user_id) AS users

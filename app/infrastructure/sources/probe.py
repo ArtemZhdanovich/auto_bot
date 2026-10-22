@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.application.dto.doctor import ListPage
+from app.application.admin.dto import ListPage
 from app.infrastructure.sources.che168 import HEADERS
 
 logger = logging.getLogger(__name__)

@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from app.application.admin.ports import AdminStatsPort, SourceHealthPort
-from app.application.ports import LLMPort
+from app.application.shared.ports import LLMPort
 
 logger = logging.getLogger(__name__)
 

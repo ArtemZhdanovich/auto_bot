@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.application.partners.queries import PartnerRateLimiter
+from app.application.partners.ports import PartnerRateLimiter
 from app.config import Settings
 
 logger = logging.getLogger(__name__)

@@ -17,7 +17,7 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from app.application.errors import AppError
-from app.application.users.use_cases import UpsertUserCommand
+from app.application.identity.dto import UpsertUserCommand
 from app.transport.http.deps.use_cases import UpsertUserDep
 from app.transport.http.schemas.user import UserOut, UserUpsert
 

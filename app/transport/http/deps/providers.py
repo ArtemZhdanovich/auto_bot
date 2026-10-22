@@ -28,9 +28,11 @@ from dishka.integrations.fastapi import FastapiProvider
 from fastapi import HTTPException, Request, status
 
 from app.application.auth.errors import InvalidToken, UserDeactivated, UserNotFound
-from app.application.auth.use_cases import AccessTokenVerifier, GetCurrentUser
-from app.application.dto.users import CurrentUser
-from app.application.partners.queries import AuthenticateApiKey, PartnerAuthState
+from app.application.identity.ports import AccessTokenVerifier
+from app.application.auth.use_cases import GetCurrentUser
+from app.application.identity.dto import CurrentUser
+from app.application.partners.queries import AuthenticateApiKey
+from app.application.partners.dto import PartnerAuthState
 
 logger = logging.getLogger(__name__)
 

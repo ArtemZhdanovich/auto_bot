@@ -24,7 +24,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from app.application.errors import Conflict, InvalidInput, NotFound
-from app.application.partners.queries import LeadView
+from app.application.partners.dto import PartnerLeadView
 from app.transport.http.deps.partner import (
     PartnerAuthDep,
     RateLimitDep,
@@ -86,7 +86,7 @@ def _not_found(exc: NotFound) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, exc.public_message)
 
 
-def _claim_out(partner_id: int, lead: LeadView) -> ClaimOut:
+def _claim_out(partner_id: int, lead: PartnerLeadView) -> ClaimOut:
     """Лид после claim → схема ответа (PII отдаётся только владельцу)."""
     return ClaimOut(
         lead_id=lead.id,

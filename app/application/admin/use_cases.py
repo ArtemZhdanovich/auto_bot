@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Collection
-from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from dataclasses import asdict
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -25,18 +25,27 @@ from app.application.admin.errors import (
     SourceNotFound,
     StorageUnavailable,
 )
-from app.application.admin.ports import AdminStatsPort, SourceHealthPort
-from app.application.analytics.use_cases import FunnelDashboard, RetentionDashboard
-from app.application.dto.admin import (
+from app.application.admin.dto import (
     ALLOWED_CREDENTIAL_PREFIXES,
     SOURCE_URL_KEYS,
+    AssistantQuery,
     LeadsQuery,
     SourceConfigDTO,
     SourceState,
+    TriggerFetchCommand,
+    UpsertSourceCommand,
     is_allowed_credentials_ref,
     is_safe_external_url,
 )
-from app.application.ports import LLMPort
+from app.application.admin.ports import (
+    AdminSourcesPort,
+    AdminStatsPort,
+    AuditPort,
+    RawPayloadStoragePort,
+    SourceHealthPort,
+)
+from app.application.analytics.use_cases import FunnelDashboard, RetentionDashboard
+from app.application.shared.ports import LLMPort
 from app.domain.audit.ports import AuditEntry
 from app.domain.search.criteria import SearchCriteria
 
@@ -48,79 +57,6 @@ EnqueueTask = Callable[[str, str, dict[str, Any] | None, int], Awaitable[str]]
 LLMFactory = Callable[[], LLMPort]
 # Каталог доступных классов адаптеров.
 AdapterClasses = Callable[[], Collection[str]]
-
-
-# ---------------------------------------------------------------------------
-# Порты
-# ---------------------------------------------------------------------------
-
-
-class AdminSourcesPort(Protocol):
-    """Админский read-model: источники, их здоровье, лиды, raw-ключи."""
-
-    async def list_sources(self) -> list[SourceConfigDTO]:
-        """Все источники, включая выключенные."""
-
-    async def get_source(self, name: str) -> SourceState | None:
-        """Словари источника по имени или `None`."""
-
-    async def save_source(self, config: SourceConfigDTO) -> SourceConfigDTO:
-        """Создать/обновить источник и зафиксировать транзакцию."""
-
-    async def source_health(self, name: str) -> dict[str, Any] | None:
-        """Здоровье источника или `None`, если данных ещё нет."""
-
-    async def list_leads(self, query: LeadsQuery) -> list[dict[str, Any]]:
-        """Лиды для админ-панели (read-only)."""
-
-    async def raw_payload_key(self, listing_id: int) -> str | None:
-        """Ключ сырого payload объявления или `None`."""
-
-
-class RawPayloadStoragePort(Protocol):
-    """Object storage: короткоживущая ссылка на сырой payload."""
-
-    async def presign_raw(self, key: str, ttl: int) -> str | None:
-        """Presigned GET или `None`, если хранилище недоступно/выключено."""
-
-
-class AuditPort(Protocol):
-    """Журнал админ-действий (UI/UX ТЗ §3.9)."""
-
-    async def record(self, entry: AuditEntry) -> None:
-        """Записать действие; политику «не ломать поток» задаёт сценарий."""
-
-
-# ---------------------------------------------------------------------------
-# Команды и запросы
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class UpsertSourceCommand:
-    """Создать/обновить источник."""
-
-    name: str
-    config: SourceConfigDTO
-
-
-@dataclass(frozen=True, slots=True)
-class TriggerFetchCommand:
-    """Поставить задачу парсинга источника в очередь."""
-
-    source_name: str
-    criteria: dict[str, Any] | None
-    max_pages: int
-    enqueue: EnqueueTask
-
-
-@dataclass(frozen=True, slots=True)
-class AssistantQuery:
-    """Один ход AI-помощника админа."""
-
-    message: str
-    history: list[dict[str, str]]
-    llm_factory: LLMFactory
 
 
 # ---------------------------------------------------------------------------

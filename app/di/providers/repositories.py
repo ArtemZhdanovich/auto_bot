@@ -14,28 +14,34 @@ from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.admin.ports import AdminStatsPort, SourceHealthPort
-from app.application.admin.use_cases import AdminSourcesPort, AuditPort
-from app.application.analytics.ports import AnalyticsRepository, FunnelRepository
+from app.application.admin.ports import (
+    AdminSourcesPort,
+    AuditPort,
+)
+from app.application.admin.ports import (
+    AnalyticsRepository,
+    FunnelRepository,
+)
 from app.application.audit.use_cases import LogAdminAction
-from app.application.auth.use_cases import UserRepository as AuthUserRepository
-from app.application.dialog.use_cases import (
+from app.application.identity.ports import UserRepository as AuthUserRepository
+from app.application.dialog.ports import (
     DialogRepositoryPort,
     EnabledSourcesPort,
 )
-from app.application.filters.use_cases import FilterRepository
-from app.application.leads.use_cases import LeadRepository
-from app.application.listings.use_cases import ListingReadRepository
-from app.application.metrics.use_cases import MetricsPort
-from app.application.notifications.settings import NotifySettingsRepository
+from app.application.catalog.ports import FilterRepository
+from app.application.partners.ports import LeadRepository
+from app.application.catalog.ports import ListingReadRepository
+from app.application.admin.ports import MetricsPort
+from app.application.catalog.ports import NotifySettingsRepository
 from app.application.partners.ports import PartnerRepository
-from app.application.partners.queries import (
+from app.application.partners.ports import (
     PartnerAdminRepository,
     PartnerQueryRepository,
 )
-from app.application.payments.use_cases import PaymentRepository
-from app.application.profile.use_cases import ProfileRepository
+from app.application.billing.ports import PaymentRepository
+from app.application.identity.ports import ProfileRepository
 from app.application.shared.ports import AuditLog, UnitOfWork
-from app.application.users.ports import UserRepository as UsersRepository
+from app.application.identity.ports import UserUpsertRepository as UsersRepository
 from app.domain.audit.ports import AuditRepository
 from app.domain.favorites.ports import FavoriteRepository
 from app.domain.listings.ports import ListingRepository

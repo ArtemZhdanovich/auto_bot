@@ -14,25 +14,35 @@ from dishka import Provider, Scope, provide
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.admin.use_cases import (
-    AdapterClasses,
-    RawPayloadStoragePort,
-)
+from app.application.admin.use_cases import AdapterClasses
+from app.application.admin.ports import RawPayloadStoragePort
 from app.application.analytics.use_cases import TrackEvent
-from app.application.analysis.use_cases import LLMFactory, UserLookupPort
+from app.application.catalog.ports import (
+    LLMFactory,
+    UserLookupPort,
+)
 from app.application.dialog.use_cases import (
     AiUnavailable,
+    TriggerFetch,
+)
+from app.application.dialog.ports import (
     DialogAgentPort,
     DialogAnalyticsPort,
     DialogStorePort,
     FetchQueuePort,
-    TriggerFetch,
     UserProfilePort,
 )
-from app.application.dto.dialog import DialogReply, UserProfile
-from app.application.notifications.settings import Enqueuer
-from app.application.partners.queries import PartnerRateLimiter
-from app.application.ports import CachePort, LLMPort, QuotaStore
+from app.application.dialog.dto import (
+    DialogReply,
+    UserProfile,
+)
+from app.application.catalog.ports import Enqueuer
+from app.application.partners.ports import PartnerRateLimiter
+from app.application.shared.ports import (
+    CachePort,
+    LLMPort,
+)
+from app.application.dialog.ports import QuotaStore
 from app.application.shared.ports import EventTracker, IdempotencyGuard
 from app.config import Settings, get_settings
 from app.domain.subscription.policies import effective_tier

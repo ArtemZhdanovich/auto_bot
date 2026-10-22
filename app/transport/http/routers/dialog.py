@@ -16,7 +16,7 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.application.dto.dialog import (
+from app.application.dialog.dto import (
     DialogFinalizeCommand,
     DialogMessageCommand,
     DialogReply,

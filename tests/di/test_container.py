@@ -15,7 +15,8 @@ from dishka.exceptions import NoFactoryError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.application.favorites.use_cases import ToggleFavorite, ToggleFavoriteCommand
+from app.application.favorites.use_cases import ToggleFavorite
+from app.application.catalog.dto import ToggleFavoriteCommand
 from app.config import Settings
 from app.di.container import make_container
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork

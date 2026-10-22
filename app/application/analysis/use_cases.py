@@ -12,19 +12,19 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
 
-from app.application.dto.analysis import (
+from app.application.catalog.dto import (
     GUEST_FORBIDDEN_MESSAGE,
     QUOTA_EXCEEDED_MESSAGE,
     AnalysisCommand,
+    ListingSnapshot,
+    PriceAnalysisResult,
 )
-from app.application.dto.dialog import UserProfile
-from app.application.dto.pricing import ListingSnapshot, PriceAnalysisResult
+from app.application.catalog.ports import LLMFactory, UserLookupPort
 from app.application.dialog.use_cases import AiUnavailable
 from app.application.errors import Forbidden, NotFound
-from app.application.ports import LLMPort
-from app.application.pricing.use_cases import AnalyzePrice, AnalyzePriceCommand
+from app.application.pricing.use_cases import AnalyzePrice
+from app.application.catalog.dto import AnalyzePriceCommand
 from app.application.shared.ports import UnitOfWork
 from app.domain.listings.ports import ListingRepository
 from app.domain.pricing.ports import PriceAnalysisRepository
@@ -36,24 +36,6 @@ from app.domain.pricing.rules import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class UserLookupPort(Protocol):
-    """Профиль пользователя для сценария анализа."""
-
-    async def get(self, user_id: int) -> UserProfile | None:
-        """Профиль или `None`."""
-
-
-class LLMFactory(Protocol):
-    """Фабрика LLM-клиента (`LLMPort`)."""
-
-    def __call__(self) -> LLMPort:
-        """Создать/получить клиент.
-
-        Raises:
-            AiUnavailable: Провайдер не сконфигурирован.
-        """
 
 
 def _snapshot(card: object) -> ListingSnapshot:

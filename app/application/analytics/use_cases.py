@@ -9,7 +9,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.application.analytics.ports import AnalyticsRepository, FunnelRepository
+from app.application.admin.ports import (
+    AnalyticsRepository,
+    FunnelRepository,
+)
 from app.domain.analytics import funnels
 
 logger = logging.getLogger(__name__)

@@ -83,3 +83,41 @@ class IdempotencyGuard(Protocol):
     async def acquire(self, key: str, ttl_sec: int) -> bool: ...
 
     async def release(self, key: str) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Кросс-сервисные порты внешних систем (нужны 2+ сервисам)
+# ---------------------------------------------------------------------------
+
+
+class CachePort(Protocol):
+    """Key-value кэш (Redis)."""
+
+    async def get(self, key: str) -> bytes | str | None: ...
+
+    async def get_many(self, keys: list[str]) -> list[bytes | str | None]: ...
+
+    async def set(self, key: str, value: str, ttl_sec: int | None = None) -> None: ...
+
+    async def set_if_absent(self, key: str, value: str, ttl_sec: int) -> bool: ...
+
+    async def delete(self, key: str) -> None: ...
+
+    async def incr(self, key: str) -> int: ...
+
+    async def expire(self, key: str, ttl_sec: int) -> None: ...
+
+
+class LLMPort(Protocol):
+    """Один вызов языковой модели."""
+
+    async def complete(
+        self, messages: list[dict], tools: list[dict] | None = None
+    ) -> object: ...
+
+
+class ClockPort(Protocol):
+    """Источник времени (детерминированные тесты)."""
+
+    def now(self) -> object: ...
+

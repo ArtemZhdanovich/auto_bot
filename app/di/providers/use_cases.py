@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from dishka import Provider, Scope, provide, provide_all
 
-from app.application.notifications.settings import Enqueuer
-from app.application.ports import CachePort
+from app.application.catalog.ports import Enqueuer
+from app.application.shared.ports import CachePort
 from app.application.shared.ports import IdempotencyGuard
 
 from app.application.admin.use_cases import (
@@ -26,7 +26,7 @@ from app.application.admin.use_cases import (
     TriggerFetch as TriggerSourceFetch,
     UpsertSource,
 )
-from app.application.admin.use_cases import (
+from app.application.admin.ports import (
     AdminSourcesPort,
     RawPayloadStoragePort,
 )

@@ -12,6 +12,6 @@ from __future__ import annotations
 
 from dishka.integrations.fastapi import FromDishka
 
-from app.application.dto.users import CurrentUser
+from app.application.identity.dto import CurrentUser
 
 CurrentUserDep = FromDishka[CurrentUser]

@@ -14,7 +14,7 @@ from decimal import Decimal
 from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.listings import (
+from app.application.catalog.dto import (
     FeedCursor,
     InspectionUpdate,
     InspectionView,

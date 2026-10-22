@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from app.application.ports import QuotaStore
+from app.application.dialog.ports import QuotaStore
 
 logger = logging.getLogger(__name__)
 

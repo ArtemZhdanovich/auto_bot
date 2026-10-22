@@ -9,7 +9,8 @@ from typing import Any
 
 import httpx
 
-from app.application.ports import CachePort, TranslationPort
+from app.application.shared.ports import CachePort
+from app.application.catalog.ports import TranslationPort
 from app.domain.translation.errors import TranslationUnavailable
 
 logger = logging.getLogger(__name__)

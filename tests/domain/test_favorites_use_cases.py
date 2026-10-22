@@ -8,8 +8,10 @@ import pytest
 
 from app.application.favorites.use_cases import (
     ListFavorites,
-    ListFavoritesQuery,
     ToggleFavorite,
+)
+from app.application.catalog.dto import (
+    ListFavoritesQuery,
     ToggleFavoriteCommand,
 )
 from app.application.shared.pagination import CursorCodec, Page

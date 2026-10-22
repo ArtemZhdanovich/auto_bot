@@ -13,17 +13,19 @@ from __future__ import annotations
 
 import logging
 
-from app.application.dto.ai_search import (
+from app.application.dialog.dto import (
     AI_MESSAGE_RATE_LIMIT,
     AI_MESSAGE_RATE_PREFIX,
     AI_MESSAGE_RATE_WINDOW_SEC,
     AiMessageCommand,
+    DialogMessageCommand,
+    DialogReply,
 )
-from app.application.dto.dialog import DialogMessageCommand, DialogReply
+from app.application.dialog.ports import QuotaStore
 from app.application.dialog.use_cases import SendDialogMessage
 from app.application.errors import AppError
-from app.application.ports import CachePort, QuotaStore
 from app.application.quota.use_cases import quota_used
+from app.application.shared.ports import CachePort
 
 logger = logging.getLogger(__name__)
 

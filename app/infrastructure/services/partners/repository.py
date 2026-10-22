@@ -15,9 +15,9 @@ from decimal import Decimal
 from sqlalchemy import Select, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.partners.queries import (
+from app.application.partners.dto import (
     IssuedKey,
-    LeadView,
+    PartnerLeadView,
     PartnerAdminView,
     PartnerAuthState,
 )
@@ -94,9 +94,9 @@ def _lead_state(lead: Lead) -> PartnerLead:
     )
 
 
-def _lead_view(lead: Lead) -> LeadView:
+def _lead_view(lead: Lead) -> PartnerLeadView:
     """ORM-лид → read-модель партнёрского API."""
-    return LeadView(
+    return PartnerLeadView(
         id=lead.id,
         source=lead.source,
         status=lead.status,
@@ -301,7 +301,7 @@ class SqlAlchemyPartnerRepository:
         ).scalars().all()
         return [_lead_state(row) for row in rows]
 
-    async def pool_leads(self, *, limit: int, offset: int) -> list[LeadView]:
+    async def pool_leads(self, *, limit: int, offset: int) -> list[PartnerLeadView]:
         rows = (
             await self._session.execute(_pool_stmt(limit, offset))
         ).scalars().all()
@@ -309,7 +309,7 @@ class SqlAlchemyPartnerRepository:
 
     async def partner_leads(
         self, partner_id: int, *, limit: int, offset: int
-    ) -> list[LeadView]:
+    ) -> list[PartnerLeadView]:
         rows = (
             await self._session.execute(
                 _my_leads_stmt(partner_id, limit, offset)
@@ -319,7 +319,7 @@ class SqlAlchemyPartnerRepository:
 
     async def leads_by_ids(
         self, lead_ids: Sequence[int]
-    ) -> list[LeadView]:
+    ) -> list[PartnerLeadView]:
         if not lead_ids:
             return []
         rows = (
@@ -332,7 +332,7 @@ class SqlAlchemyPartnerRepository:
 
     async def set_feedback(
         self, partner_id: int, lead_id: int, status: str
-    ) -> LeadView | None:
+    ) -> PartnerLeadView | None:
         lead = (
             await self._session.execute(
                 select(Lead)

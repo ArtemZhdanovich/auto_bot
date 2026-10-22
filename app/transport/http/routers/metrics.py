@@ -24,10 +24,8 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.application.metrics.use_cases import (
-    GetMetricsSnapshot,
-    MetricsSnapshot,
-)
+from app.application.metrics.use_cases import GetMetricsSnapshot
+from app.application.admin.dto import MetricsSnapshot
 from app.transport.http.deps.internal import RedisDep
 from app.transport.http.deps.use_cases import MetricsSnapshotDep
 

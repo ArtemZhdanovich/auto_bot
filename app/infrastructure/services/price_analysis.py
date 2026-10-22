@@ -11,13 +11,13 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.pricing import ListingSnapshot
+from app.application.catalog.dto import ListingSnapshot
 from app.application.pricing.use_cases import (
     AnalyzePrice,
-    AnalyzePriceCommand,
     parse_verdict_json,
 )
-from app.application.ports import LLMPort
+from app.application.catalog.dto import AnalyzePriceCommand
+from app.application.shared.ports import LLMPort
 from app.domain.pricing.rules import (
     FREE_QUOTA_WINDOW_DAYS,
     QuotaExceeded,

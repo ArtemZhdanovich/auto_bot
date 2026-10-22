@@ -16,22 +16,21 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
 
-from app.application.dto.payments import (
+from app.application.billing.dto import (
     PaymentConfirmation,
     PaymentDraft,
-    PaymentRecord,
     SubscriptionSnapshot,
-    SubscriptionState,
     UserSubscriptionView,
 )
 
 # Константы провайдера живут в dto (их юзает и репозиторий).
-from app.application.dto.payments import (  # noqa: F401 — ре-экспорт
+from app.application.billing.dto import (  # noqa: F401 — ре-экспорт
     STARS_CURRENCY,
     STARS_PROVIDER,
 )
+from app.application.billing.ports import PaymentRepository
 from app.application.errors import Conflict, InvalidInput, NotFound
 from app.application.shared.ports import EventTracker
 from app.domain.analytics.events import EVENT_SUBSCRIPTION_ACTIVATED
@@ -43,44 +42,6 @@ from app.domain.subscription.policies import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-
-class PaymentRepository(Protocol):
-    """Хранилище платежей и подписки пользователя."""
-
-    async def create_pending(
-        self,
-        *,
-        user_id: int,
-        amount: int,
-        tier: str,
-        period_days: int,
-    ) -> int:
-        """Создать pending-платёж и вернуть его id (фиксирует строку)."""
-
-    async def get_payment(self, payment_id: int) -> PaymentRecord | None:
-        """Снимок платежа или `None`, если платежа нет."""
-
-    async def get_subscription(self, user_id: int) -> SubscriptionState | None:
-        """Подписка пользователя или `None`, если пользователя нет."""
-
-    async def mark_paid(
-        self,
-        payment_id: int,
-        *,
-        provider_payment_id: str,
-        paid_at: datetime,
-    ) -> None:
-        """Пометить платёж оплаченным (в текущей транзакции)."""
-
-    async def save_subscription(
-        self, user_id: int, *, tier: str, until: datetime
-    ) -> None:
-        """Записать тариф и срок подписки (в текущей транзакции)."""
-
-    async def commit(self) -> None:
-        """Зафиксировать платёж и подписку одной транзакцией."""
 
 
 @dataclass(slots=True)

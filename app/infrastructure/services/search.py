@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.search import ListingPreview
+from app.application.catalog.dto import ListingPreview
 from app.application.search.use_cases import (
     PREVIEW_LIMIT_DEFAULT,
     PreviewListings,
-    PreviewListingsQuery,
 )
+from app.application.catalog.dto import PreviewListingsQuery
 from app.domain.search.criteria import SearchCriteria
 from app.infrastructure.db.repositories.listings_search import (
     SqlAlchemyListingSearchRepository,

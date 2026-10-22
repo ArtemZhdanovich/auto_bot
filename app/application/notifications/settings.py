@@ -17,10 +17,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Protocol
 
+from app.application.catalog.dto import (
+    NotifySettingsCommand,
+    NotifySettingsResult,
+    ScanResult,
+)
+from app.application.catalog.ports import Enqueuer, NotifySettingsRepository
 from app.application.errors import AppError, Conflict, Forbidden, InvalidInput, NotFound
 from app.application.shared.ports import IdempotencyGuard
 from app.domain.subscription.policies import tier_config
@@ -37,66 +40,6 @@ class QueueUnavailable(AppError):
 
     code = "queue_unavailable"
     default_message = "Queue unavailable, retry later"
-
-
-class Enqueuer(Protocol):
-    """Порт постановки фонового задания."""
-
-    async def enqueue(self, job: str) -> str:
-        """Поставить задание и вернуть его `job_id`; ошибка — наружу."""
-
-
-class NotifySettingsRepository(Protocol):
-    """Хранилище настроек уведомлений (bulk-обновление фильтров)."""
-
-    async def target(self, user_id: int) -> NotifyTarget | None:
-        """Пользователь с полями тарифа или `None`, если его нет."""
-
-    async def update_filters(
-        self,
-        user_id: int,
-        *,
-        notify_mode: str | None = None,
-        quiet_hours: str | None = None,
-        clear_quiet_hours: bool = False,
-    ) -> int:
-        """Применить настройки ко всем фильтрам пользователя, вернуть число строк."""
-
-
-@dataclass(frozen=True, slots=True)
-class NotifyTarget:
-    """Минимум о пользователе для проверок настроек."""
-
-    user_id: int
-    is_active: bool
-    subscription_tier: str
-    subscription_until: datetime | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class NotifySettingsCommand:
-    """Вход сценария настроек; `None` = поле не передано."""
-
-    user_id: int
-    notify_mode: str | None = None
-    quiet_hours: str | None = None
-    quiet_hours_clear: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class NotifySettingsResult:
-    """Итог настроек: сколько фильтров обновлено и пометка no-op."""
-
-    user_id: int
-    updated: int
-    detail: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ScanResult:
-    """Итог ручного скана."""
-
-    job_id: str
 
 
 class UpdateNotifySettings:

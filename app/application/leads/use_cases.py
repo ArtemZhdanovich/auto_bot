@@ -13,57 +13,14 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Protocol
 
 from app.application.analytics.use_cases import TrackEvent
-from app.application.dto.leads import LeadPatch, LeadView
 from app.application.errors import InvalidInput, NotFound
+from app.application.partners.dto import CreateLeadCommand, LeadPatch, LeadView
+from app.application.partners.ports import LeadRepository
 from app.domain.analytics.events import EVENT_LEAD_CREATED
 
 logger = logging.getLogger(__name__)
-
-
-class LeadRepository(Protocol):
-    """Хранилище лидов: сценарий не знает про SQL и транзакции.
-
-    `create` сама разрешает гонку по `idempotency_key` (partial unique):
-    при конфликте возвращает уже существующую строку.
-    """
-
-    async def user_exists(self, user_id: int) -> bool:
-        """Есть ли пользователь (менеджер) с таким `telegram_id`."""
-
-    async def listing_exists(self, listing_id: int) -> bool:
-        """Есть ли объявление с таким `id`."""
-
-    async def find_by_idempotency_key(self, key: str) -> LeadView | None:
-        """Лид, созданный с этим ключом идемпотентности, или `None`."""
-
-    async def create(
-        self,
-        *,
-        user_id: int,
-        listing_id: int | None,
-        source: str | None,
-        comment: str | None,
-        idempotency_key: str | None,
-    ) -> LeadView:
-        """Вставить лид (или вернуть существующий по ключу) и закоммитить."""
-
-    async def patch(self, lead_id: int, changes: LeadPatch) -> LeadView | None:
-        """Применить патч под блокировкой строки; `None` — лида нет."""
-
-
-@dataclass(frozen=True, slots=True)
-class CreateLeadCommand:
-    """Вход сценария создания лида."""
-
-    user_id: int
-    listing_id: int | None = None
-    source: str | None = None
-    comment: str | None = None
-    idempotency_key: str | None = None
 
 
 class CreateLead:

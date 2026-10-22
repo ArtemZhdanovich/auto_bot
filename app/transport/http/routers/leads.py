@@ -16,9 +16,9 @@ import logging
 
 from fastapi import APIRouter, Header, HTTPException, Path, status
 
-from app.application.dto.leads import LeadPatch
+from app.application.partners.dto import LeadPatch
 from app.application.errors import AppError
-from app.application.leads.use_cases import CreateLeadCommand
+from app.application.partners.dto import CreateLeadCommand
 from app.transport.http.deps.use_cases import CreateLeadDep, UpdateLeadDep
 from app.transport.http.schemas.lead import LeadCreateIn, LeadOut, LeadStatusIn
 

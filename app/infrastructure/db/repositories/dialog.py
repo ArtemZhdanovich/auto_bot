@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.dialog import DialogSessionRecord
+from app.application.dialog.dto import DialogSessionRecord
 from app.domain.dialog.state import DialogState
 from app.infrastructure.db.models import DialogSession, Source, UserFilter
 

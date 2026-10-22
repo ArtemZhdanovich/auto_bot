@@ -30,7 +30,11 @@ import httpx
 from pydantic import SecretStr
 from redis.asyncio import Redis
 
-from app.application.dto.rag import RAGAnswer, RAGAskRequest, RAGIngestResult
+from app.application.dialog.dto import (
+    RAGAnswer,
+    RAGAskRequest,
+    RAGIngestResult,
+)
 from app.infrastructure.services.alerting import fire, send_alert
 
 logger = logging.getLogger(__name__)

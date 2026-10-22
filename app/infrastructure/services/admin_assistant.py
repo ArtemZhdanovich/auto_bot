@@ -9,7 +9,7 @@ from app.application.admin.assistant import (
     SYSTEM_PROMPT,
     AdminAssistant,
 )
-from app.application.ports import LLMPort
+from app.application.shared.ports import LLMPort
 from app.infrastructure.db.repositories.admin_stats import (
     SqlAlchemyAdminStatsRepository,
 )

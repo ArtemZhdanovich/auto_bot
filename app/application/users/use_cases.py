@@ -2,30 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from app.application.analytics.use_cases import TrackEvent
-from app.application.dto.users import UserProfile
-from app.application.users.ports import UserRepository
+from app.application.identity.dto import UpsertUserCommand, UserProfile
+from app.application.identity.ports import UserUpsertRepository
 from app.domain.analytics.events import EVENT_USER_REGISTERED
-
-
-@dataclass(frozen=True, slots=True)
-class UpsertUserCommand:
-    """Вход сценария: профильные поля из Telegram и канал регистрации."""
-
-    telegram_id: int
-    username: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    language_code: str | None = None
-    source: str | None = None
 
 
 class UpsertUser:
     """Создать/обновить пользователя и отметить регистрацию в воронке."""
 
-    def __init__(self, users: UserRepository, track: TrackEvent) -> None:
+    def __init__(self, users: UserUpsertRepository, track: TrackEvent) -> None:
         self._users = users
         self._track = track
 

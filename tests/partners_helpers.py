@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.partners.ports import PartnerRepository
-from app.application.partners.queries import LeadView, SetLeadFeedback
+from app.application.partners.dto import PartnerLeadView
+from app.application.partners.queries import SetLeadFeedback
 from app.application.partners.use_cases import ClaimBatch, ClaimLead, TopUp
 from app.domain.partners.pricing import PLAN_CATALOG
 from app.domain.partners.pricing import cpl_cost as _plan_cpl_cost
@@ -156,6 +157,6 @@ async def set_feedback(
     account: PartnerAccount,
     lead_id: int,
     status: str,
-) -> LeadView | None:
+) -> PartnerLeadView | None:
     """Обёртка над use case `SetLeadFeedback` (событие фидбека там)."""
     return await SetLeadFeedback(_repo(session)).execute(account.id, lead_id, status)

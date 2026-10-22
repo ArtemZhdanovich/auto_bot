@@ -13,7 +13,8 @@ from __future__ import annotations
 from dishka.integrations.fastapi import FromDishka
 from fastapi import HTTPException, status
 
-from app.application.partners.queries import PartnerAuthState, PartnerRateLimiter
+from app.application.partners.dto import PartnerAuthState
+from app.application.partners.ports import PartnerRateLimiter
 
 PartnerAuthDep = FromDishka[PartnerAuthState]
 

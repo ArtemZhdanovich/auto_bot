@@ -20,8 +20,8 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.application.ai_search.use_cases import RateLimited
-from app.application.dto.ai_search import AiMessageCommand
-from app.application.dto.dialog import DialogFinalizeCommand
+from app.application.dialog.dto import AiMessageCommand
+from app.application.dialog.dto import DialogFinalizeCommand
 from app.application.errors import AppError, Forbidden, InvalidInput, NotFound
 from app.application.dialog.use_cases import AiUnavailable
 from app.transport.http.deps.auth import CurrentUserDep

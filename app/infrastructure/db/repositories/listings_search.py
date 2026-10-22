@@ -10,7 +10,7 @@ from __future__ import annotations
 from sqlalchemy import ColumnElement, Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.search import ListingPreview
+from app.application.catalog.dto import ListingPreview
 from app.domain.search.criteria import SearchCriteria
 from app.domain.search.query import (
     OP_GTE,

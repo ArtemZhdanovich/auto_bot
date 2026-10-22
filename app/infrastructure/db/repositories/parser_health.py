@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.doctor import SourceConfig
+from app.application.admin.dto import SourceConfig
 from app.infrastructure.db.models import Source, SourceHealth
 
 

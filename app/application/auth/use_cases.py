@@ -40,24 +40,30 @@ import logging
 import re
 import secrets
 import time
-from dataclasses import dataclass
-from typing import Protocol
 
 from app.application.analytics.use_cases import TrackEvent
-from app.application.dto.auth import (
+from app.application.identity.dto import (
     LOGIN_EXPIRED,
     LOGIN_OK,
     LOGIN_PENDING,
     AuthResult,
-    AuthUser,
-    LoginCode,
+    ConfirmLoginCommand,
+    CurrentUser,
+    LoginCommand,
     LoginContext,
     LoginLink,
     LoginPollResult,
-    TelegramIdentity,
+    RegisterCommand,
     TokenPair,
+    UserProfile,
 )
-from app.application.dto.users import CurrentUser, UpsertOutcome, UserProfile
+from app.application.identity.ports import (
+    InitDataVerifier,
+    LoginCodeStore,
+    PasswordHasher,
+    TokenIssuer,
+    UserRepository,
+)
 # Ошибки сценариев живут в нейтральном модуле контекста (errors), чтобы
 # инфраструктура (реализации портов) не зависела от сценариев.
 from app.application.auth.errors import (  # noqa: F401 — ре-экспорт
@@ -86,188 +92,6 @@ _ID_ATTEMPTS = 5               # попытки выделить синтети�
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _EMAIL_MAX_LEN = 254  # RFC 5321
-
-
-# ---------------------------------------------------------------------------
-# Порты
-# ---------------------------------------------------------------------------
-
-
-class UserRepository(Protocol):
-    """Поиск, создание и обновление пользователя.
-
-    Реализация коммитит и обновляет объект сама: наружу отдаётся DTO профиля,
-    а не «грязный» ORM-объект.
-    """
-
-    async def find(self, telegram_id: int) -> UserProfile | None:
-        """Найти профиль по `telegram_id`."""
-
-    async def find_by_email(self, email: str) -> AuthUser | None:
-        """Найти аккаунт по нормализованному email (с хешем пароля)."""
-
-    async def create(
-        self,
-        *,
-        telegram_id: int,
-        email: str | None = None,
-        password_hash: str | None = None,
-        first_name: str | None = None,
-        username: str | None = None,
-        role: str = "buyer",
-        subscription_tier: str = "free",
-    ) -> UserProfile:
-        """Создать пользователя.
-
-        Raises:
-            EmailConflict: email уже занят.
-            DuplicateUserId: синтетический id занят, нужна новая попытка.
-        """
-
-    async def update_profile(
-        self,
-        telegram_id: int,
-        *,
-        username: str | None = None,
-        first_name: str | None = None,
-        last_name: str | None = None,
-        language_code: str | None = None,
-    ) -> UserProfile | None:
-        """Обновить профильные поля; `None`, если пользователя нет."""
-
-    async def upsert(
-        self,
-        *,
-        telegram_id: int,
-        username: str | None = None,
-        first_name: str | None = None,
-        last_name: str | None = None,
-        language_code: str | None = None,
-    ) -> UpsertOutcome:
-        """Найти или создать пользователя и обновить профиль из Telegram."""
-
-
-class LoginCodeStore(Protocol):
-    """Одноразовые коды входа в Redis (TTL, привязка к браузеру)."""
-
-    async def save_pending(
-        self,
-        code: str,
-        *,
-        state_hash: str,
-        initiator_ip: str | None,
-        initiator_ua: str,
-        created_at: int,
-        ttl_sec: int,
-    ) -> None:
-        """Сохранить новый код в статусе `pending`."""
-
-    async def load(self, code: str) -> LoginCode | None:
-        """Прочитать запись; `None` — кода нет или он повреждён."""
-
-    async def touch(self, code: str, ttl_sec: int) -> None:
-        """Продлить TTL (sliding window, пока пользователь в боте)."""
-
-    async def claim(self, code: str) -> LoginCode | None:
-        """Атомарно забрать запись: второй вызов вернёт `None`."""
-
-    async def confirm(
-        self,
-        code: str,
-        *,
-        telegram_id: int,
-        username: str | None,
-        first_name: str | None,
-        last_name: str | None,
-        language_code: str | None,
-        ttl_sec: int,
-    ) -> LoginCode | None:
-        """Пометить код подтверждённым; вернуть прежнюю запись или `None`."""
-
-    async def delete(self, code: str) -> bool:
-        """Удалить код; `False` — его уже нет."""
-
-
-class TokenIssuer(Protocol):
-    """Выпуск JWT и разбор refresh-токена (с проверкой `type`)."""
-
-    def issue(self, user_id: int) -> TokenPair:
-        """Выпустить access + refresh для пользователя."""
-
-    def refresh_subject(self, token: str) -> int:
-        """Вернуть `sub` refresh-токена.
-
-        Raises:
-            InvalidToken: подпись/срок/тип не в порядке.
-        """
-
-
-class AccessTokenVerifier(Protocol):
-    """Проверка access-JWT из заголовка `Authorization` (транспорт auth)."""
-
-    def verify(self, token: str) -> int:
-        """Вернуть `telegram_id` из валидного access-токена.
-
-        Raises:
-            InvalidToken: подпись/срок/тип (`type == "access"`) не в порядке.
-        """
-
-
-class InitDataVerifier(Protocol):
-    """HMAC-проверка `Telegram.WebApp.initData`."""
-
-    def verify(self, init_data: str) -> TelegramIdentity:
-        """Проверить подпись и срок, вернуть профиль.
-
-        Raises:
-            InvalidInitData: подпись/срок/структура не в порядке.
-            BotNotConfigured: не задан `BOT_TOKEN`.
-        """
-
-
-class PasswordHasher(Protocol):
-    """PBKDF2: хеширование и проверка пароля (blocking — внутри адаптера)."""
-
-    async def hash(self, password: str) -> str:
-        """Посчитать хеш для нового пароля."""
-
-    async def verify(self, password: str, stored_hash: str | None) -> bool:
-        """Сверить пароль; `None` — пользователя нет (тайминг выравнивается)."""
-
-
-# ---------------------------------------------------------------------------
-# Команды
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class RegisterCommand:
-    """Регистрация с сайта."""
-
-    email: str
-    password: str
-    first_name: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class LoginCommand:
-    """Вход по email и паролю."""
-
-    email: str
-    password: str
-
-
-@dataclass(frozen=True, slots=True)
-class ConfirmLoginCommand:
-    """Подтверждение кода ботом (после явного «✅ Это я»)."""
-
-    code: str
-    telegram_id: int
-    username: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    language_code: str | None = None
-    acknowledged_at: int | None = None
 
 
 # ---------------------------------------------------------------------------

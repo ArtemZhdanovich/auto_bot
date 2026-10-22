@@ -29,7 +29,7 @@ from app.application.auth.errors import (
     InvalidInitData,
     InvalidToken,
 )
-from app.application.dto.auth import (
+from app.application.identity.dto import (
     LOGIN_OK,
     LOGIN_PENDING,
     LoginCode,

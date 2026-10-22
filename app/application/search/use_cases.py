@@ -6,22 +6,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 
-from app.application.dto.search import PreviewOutcome
-from app.application.search.ports import ListingSearchRepository
-from app.domain.search.criteria import SearchCriteria
+from app.application.catalog.dto import PreviewOutcome
+from app.application.catalog.dto import PreviewListingsQuery
+from app.application.catalog.ports import ListingSearchRepository
 from app.domain.search.query import RELAX_STEPS, relaxed
 
 PREVIEW_LIMIT_DEFAULT = 3
-
-
-@dataclass(frozen=True, slots=True)
-class PreviewListingsQuery:
-    """Вход сценария превью."""
-
-    criteria: SearchCriteria
-    limit: int = PREVIEW_LIMIT_DEFAULT
 
 
 class PreviewListings:

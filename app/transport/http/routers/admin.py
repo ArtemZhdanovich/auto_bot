@@ -22,8 +22,12 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
-from app.application.admin.use_cases import (
+from app.application.admin.dto import (
     AssistantQuery,
+    TriggerFetchCommand,
+    UpsertSourceCommand,
+)
+from app.application.admin.use_cases import (
     InvalidSourceConfig,
     LeadsQuery,
     LLMUnavailable,
@@ -32,10 +36,8 @@ from app.application.admin.use_cases import (
     SourceConflict,
     SourceNotFound,
     StorageUnavailable,
-    TriggerFetchCommand,
-    UpsertSourceCommand,
 )
-from app.application.dto.admin import (
+from app.application.admin.dto import (
     SOURCE_NAME_PATTERN,
     SourceConfigDTO,
     is_safe_external_url,

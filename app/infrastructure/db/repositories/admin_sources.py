@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.admin.errors import SourceConflict
-from app.application.dto.admin import (
+from app.application.admin.dto import (
     LeadsQuery,
     SourceConfigDTO,
     SourceState,

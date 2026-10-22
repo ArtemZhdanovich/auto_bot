@@ -15,7 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.parser_doctor.use_cases import RepairParser, extract_json
-from app.application.ports import LLMPort
+from app.application.shared.ports import LLMPort
 from app.config import get_settings
 from app.domain.health.triage import classify_fetch_error, classify_page
 from app.infrastructure.ai.llm_client import build_llm_client

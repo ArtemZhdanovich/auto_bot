@@ -10,12 +10,15 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from app.application.dto.pricing import ListingSnapshot, PriceAnalysisResult
-from app.application.ports import LLMPort
+from app.application.catalog.dto import (
+    AnalyzePriceCommand,
+    ListingSnapshot,
+    PriceAnalysisResult,
+)
+from app.application.shared.ports import LLMPort
 from app.application.shared.ports import UnitOfWork
 from app.domain.pricing.ports import (
     ListingQuery,
@@ -25,7 +28,6 @@ from app.domain.pricing.ports import (
 )
 from app.domain.pricing.rules import (
     FACTORS_LIMIT,
-    FREE_TIER,
     VERDICTS,
     ensure_quota,
     fair_range,
@@ -110,16 +112,6 @@ def _factors(value: Any, comps: dict[str, Any] | None) -> tuple[str, ...]:
     items = value if isinstance(value, (list, tuple)) else ()
     result = tuple(str(item) for item in items[:FACTORS_LIMIT])
     return result or tuple(stats_factor(comps))
-
-
-@dataclass(frozen=True, slots=True)
-class AnalyzePriceCommand:
-    """Вход сценария: объявление, пользователь и остаток бесплатной квоты."""
-
-    listing: ListingSnapshot
-    user_id: int
-    tier: str = FREE_TIER
-    free_quota_left: int | None = None
 
 
 class AnalyzePrice:

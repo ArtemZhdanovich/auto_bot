@@ -15,7 +15,11 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from app.application.dto.partners import ClaimResult, PartnerView, TxView
+from app.application.partners.dto import (
+    ClaimResult,
+    PartnerView,
+    TxView,
+)
 from app.application.errors import NotFound
 from app.application.partners.ports import PartnerRepository
 from app.application.shared.ports import AuditLog, EventTracker, UnitOfWork

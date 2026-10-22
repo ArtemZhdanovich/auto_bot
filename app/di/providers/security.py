@@ -10,7 +10,7 @@ from __future__ import annotations
 from dishka import Provider, Scope, provide
 from redis.asyncio import Redis
 
-from app.application.auth.use_cases import (
+from app.application.identity.ports import (
     AccessTokenVerifier,
     InitDataVerifier,
     LoginCodeStore,

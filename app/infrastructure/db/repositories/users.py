@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.users import UpsertOutcome, UserProfile
+from app.application.identity.dto import (
+    UpsertOutcome,
+    UserProfile,
+)
 from app.infrastructure.db.models import User
 
 

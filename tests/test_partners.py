@@ -28,7 +28,7 @@ from app.infrastructure.security.partner_keys import (
     hash_api_key,
     key_prefix,
 )
-from app.application.dto.partners import TxView
+from app.application.partners.dto import TxView
 from app.application.partners.use_cases import ClaimLead
 from app.domain.partners.ports import (
     CLAIM_OK,

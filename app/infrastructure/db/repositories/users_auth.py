@@ -12,8 +12,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.auth.errors import DuplicateUserId, EmailConflict
-from app.application.dto.auth import AuthUser
-from app.application.dto.users import UpsertOutcome, UserProfile
+from app.application.identity.dto import AuthUser
+from app.application.identity.dto import (
+    UpsertOutcome,
+    UserProfile,
+)
 from app.infrastructure.db.models import User
 from app.infrastructure.db.repositories.users import _to_profile
 

@@ -8,11 +8,17 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
 
-from app.application.dto.filters import FilterDraft, FilterPatch, FilterRecord
+from app.application.catalog.dto import (
+    CreateFilterCommand,
+    DeleteFilterCommand,
+    FilterRecord,
+    ListFiltersQuery,
+    UpdateFilterCommand,
+)
+from app.application.catalog.ports import FilterRepository
 from app.application.errors import Conflict, Forbidden, NotFound
 from app.application.shared.ports import UnitOfWork
 from app.domain.subscription.policies import tier_config
@@ -23,74 +29,6 @@ FILTERS_LIST_MAX = 200
 _INSTANT_FORBIDDEN = (
     "Instant notifications are a Pro feature — upgrade via /subscribe"
 )
-
-
-class FilterRepository(Protocol):
-    """Хранилище фильтров пользователя."""
-
-    async def list_for_user(
-        self, user_id: int, *, limit: int, offset: int
-    ) -> list[FilterRecord]:
-        """Фильтры пользователя по `created_at`."""
-
-    async def create(
-        self,
-        user_id: int,
-        draft: FilterDraft,
-        *,
-        max_filters: int | None,
-    ) -> FilterRecord | None:
-        """Создать фильтр; `None` — исчерпан лимит тарифа."""
-
-    async def get_owned(self, user_id: int, filter_id: int) -> FilterRecord | None:
-        """Фильтр владельца или None (чужой неотличим от отсутствующего)."""
-
-    async def update_owned(
-        self,
-        user_id: int,
-        filter_id: int,
-        patch: FilterPatch,
-        *,
-        updated_at: datetime,
-    ) -> FilterRecord | None:
-        """Применить патч к фильтру владельца."""
-
-    async def delete_owned(self, user_id: int, filter_id: int) -> bool:
-        """Удалить фильтр владельца; `False`, если не найден/чужой."""
-
-
-@dataclass(frozen=True, slots=True)
-class ListFiltersQuery:
-    """Вход сценария списка фильтров."""
-
-    user_id: int
-    limit: int = 50
-    offset: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class CreateFilterCommand:
-    """Вход сценария создания фильтра."""
-
-    user: Any
-    draft: FilterDraft
-
-
-@dataclass(frozen=True, slots=True)
-class UpdateFilterCommand:
-    """Вход сценария обновления фильтра."""
-
-    user: Any
-    filter_id: int
-    patch: FilterPatch
-
-
-@dataclass(frozen=True, slots=True)
-class DeleteFilterCommand:
-    """Вход сценария удаления фильтра."""
-
-    user: Any
-    filter_id: int
 
 
 def _require_active(user: Any) -> None:

@@ -39,16 +39,22 @@ def test_favorites_transport_is_decoupled() -> None:
 
 def test_application_ports_are_protocols() -> None:
     """Порты объявлены через Protocol, а не конкретные клиенты."""
-    text = _text(APP / "application/ports/__init__.py")
+    shared = _text(APP / "application/shared/ports.py")
+    for name in ("CachePort", "LLMPort", "ClockPort", "UnitOfWork"):
+        assert f"class {name}(Protocol)" in shared
+    service_ports = "\n".join(
+        _text(APP / "application" / svc / "ports.py")
+        for svc in ("identity", "catalog", "billing", "partners", "dialog", "admin")
+    )
     for name in (
-        "CachePort",
-        "ObjectStoragePort",
-        "LLMPort",
-        "RAGPort",
-        "NotifierPort",
-        "ClockPort",
+        "UserRepository",
+        "ListingReadRepository",
+        "PaymentRepository",
+        "PartnerRepository",
+        "DialogAgentPort",
+        "MetricsPort",
     ):
-        assert f"class {name}(Protocol)" in text
+        assert f"class {name}(Protocol)" in service_ports
 
 
 def test_application_has_no_orm_or_http_imports() -> None:

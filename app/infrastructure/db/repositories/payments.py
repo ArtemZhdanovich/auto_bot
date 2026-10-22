@@ -16,8 +16,14 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.payments import PaymentRecord, SubscriptionState
-from app.application.dto.payments import STARS_CURRENCY, STARS_PROVIDER
+from app.application.billing.dto import (
+    PaymentRecord,
+    SubscriptionState,
+)
+from app.application.billing.dto import (
+    STARS_CURRENCY,
+    STARS_PROVIDER,
+)
 from app.infrastructure.db.models import Payment, User
 
 
