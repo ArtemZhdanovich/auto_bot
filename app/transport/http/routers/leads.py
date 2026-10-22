@@ -10,25 +10,23 @@
 же лид (201 с тем же телом), а не дубль.
 """
 
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import InternalDishkaRoute
 
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
+from fastapi import APIRouter, Header, HTTPException, Path, status
 
 from app.application.dto.leads import LeadPatch
 from app.application.errors import AppError
 from app.application.leads.use_cases import CreateLeadCommand
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.use_cases import CreateLeadDep, UpdateLeadDep
 from app.transport.http.schemas.lead import LeadCreateIn, LeadOut, LeadStatusIn
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(route_class=DishkaRoute, 
+router = APIRouter(route_class=InternalDishkaRoute,
     prefix="/api/leads",
     tags=["leads"],
-    dependencies=[Depends(check_internal_token)],
 )
 
 _STATUS_BY_CODE = {

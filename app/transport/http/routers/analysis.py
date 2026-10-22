@@ -7,28 +7,26 @@ POST запускает разбор (квота: free — 1 разбор маш
 
 
 from __future__ import annotations
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import DishkaRoute, InternalDishkaRoute
 
 import logging
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, HTTPException, Path, status
 from pydantic import BaseModel, Field
 
 from app.application.dto.analysis import AnalysisCommand
 from app.application.errors import AppError, Forbidden, NotFound
 from app.application.dialog.use_cases import AiUnavailable
 from app.transport.http.deps.auth import CurrentUserDep
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.use_cases import GetLatestAnalysisDep, RunAnalysisDep
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(route_class=DishkaRoute, prefix="/api/listings", tags=["analysis"])
-bot_router = APIRouter(route_class=DishkaRoute, 
+bot_router = APIRouter(route_class=InternalDishkaRoute,
     prefix="/api/bot/listings",
     tags=["analysis"],
-    dependencies=[Depends(check_internal_token)],
 )
 
 

@@ -8,12 +8,12 @@
 
 
 from __future__ import annotations
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import InternalDishkaRoute
 
 import logging
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.application.dto.dialog import (
@@ -24,7 +24,6 @@ from app.application.dto.dialog import (
 )
 from app.application.errors import AppError, Forbidden, InvalidInput, NotFound
 from app.application.dialog.use_cases import AiUnavailable
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.use_cases import (
     FinalizeDialogDep,
     ResetDialogDep,
@@ -34,10 +33,9 @@ from app.transport.http.deps.use_cases import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(route_class=DishkaRoute, 
+router = APIRouter(route_class=InternalDishkaRoute,
     prefix="/api/dialog",
     tags=["dialog"],
-    dependencies=[Depends(check_internal_token)],
 )
 
 _TEXT_MAX_LEN = 4000

@@ -52,23 +52,26 @@ def _headers(user_id: int = 111111) -> dict[str, str]:
     }
 
 
-def _iter_api_paths(routes) -> list[str]:
+def _iter_api_paths(routes, prefix: str = "") -> list[str]:
     """Все пути API-роутов приложения.
 
     Версионно-толерантно: свежий FastAPI кладёт include_router в
-    `_IncludedRouter` (оригинальный роутер — в `.original_router`),
-    старый разворачивает пути в app.routes; Mount хранит `.routes`.
+    `_IncludedRouter` (оригинальный роутер — в `.original_router`,
+    префикс включения — в `.include_context.prefix`), старый
+    разворачивает пути в app.routes; Mount хранит `.routes`.
     """
     paths: list[str] = []
     for route in routes:
         path = getattr(route, "path", None)
         if path is not None:
-            paths.append(path)
+            paths.append(prefix + path)
         original = getattr(route, "original_router", None)
         if original is not None:  # FastAPI с _IncludedRouter
-            paths.extend(_iter_api_paths(original.routes))
+            context = getattr(route, "include_context", None)
+            sub_prefix = prefix + (getattr(context, "prefix", "") or "")
+            paths.extend(_iter_api_paths(original.routes, sub_prefix))
         elif getattr(route, "routes", None) is not None:  # Mount
-            paths.extend(_iter_api_paths(route.routes))
+            paths.extend(_iter_api_paths(route.routes, prefix))
     return paths
 
 

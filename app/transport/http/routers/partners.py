@@ -16,16 +16,15 @@ Partner (X-API-Key): /me (ЛК), пул лидов, эксклюзивный cla
 
 
 from __future__ import annotations
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import DishkaRoute, InternalDishkaRoute
 
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from app.application.errors import Conflict, InvalidInput, NotFound
 from app.application.partners.queries import LeadView
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.partner import (
     PartnerAuthDep,
     RateLimitDep,
@@ -103,10 +102,9 @@ def _claim_out(partner_id: int, lead: LeadView) -> ClaimOut:
 # Admin: /api/admin/partners
 # =========================================================================
 
-admin_router = APIRouter(route_class=DishkaRoute, 
+admin_router = APIRouter(route_class=InternalDishkaRoute,
     prefix="/api/admin/partners",
     tags=["partners-admin"],
-    dependencies=[Depends(check_internal_token)],
 )
 
 

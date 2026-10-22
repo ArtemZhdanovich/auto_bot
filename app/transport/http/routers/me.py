@@ -44,7 +44,7 @@ async def me(user: CurrentUserDep, use_case: GetProfileDep) -> UserOut:
     """Профиль текущего пользователя из JWT.
 
     Args:
-        user: Текущий пользователь (из `get_current_user`).
+        user: Текущий пользователь (dishka: `CurrentUserDep`).
         use_case: Сценарий чтения профиля.
 
     Returns:
@@ -70,7 +70,7 @@ async def me_onboarded(
     отражает **первый** факт прохождения (для когорт/retention).
 
     Args:
-        user: Текущий пользователь (из `get_current_user`).
+        user: Текущий пользователь (dishka: `CurrentUserDep`).
         use_case: Сценарий онбординга.
 
     Returns:

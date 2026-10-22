@@ -33,7 +33,6 @@ def test_admin_leads_empty():
     """GET /api/admin/leads (UI/UX ТЗ §3.6) — пустой список без данных в БД."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.transport.http.deps.auth import get_current_user  # noqa: F401
     from conftest import FakeSession, install_test_container
 
     async def _run():

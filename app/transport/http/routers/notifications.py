@@ -10,18 +10,17 @@
 семантика (взаимоисключение с `quiet_hours_clear`, tier-bypass) — в сценарии.
 """
 
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import InternalDishkaRoute
 
 import logging
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from app.application.errors import AppError
 from app.application.notifications.settings import NotifySettingsCommand
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.use_cases import (
     TriggerScanDep,
     UpdateNotifySettingsDep,
@@ -29,10 +28,9 @@ from app.transport.http.deps.use_cases import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(route_class=DishkaRoute, 
+router = APIRouter(route_class=InternalDishkaRoute,
     prefix="/api/notifications",
     tags=["notifications"],
-    dependencies=[Depends(check_internal_token)],
 )
 
 _QUIET_HOURS_RE = r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$"

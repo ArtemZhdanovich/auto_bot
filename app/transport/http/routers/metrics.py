@@ -17,23 +17,23 @@
 
 
 from __future__ import annotations
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import InternalDishkaRoute
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.application.metrics.use_cases import (
     GetMetricsSnapshot,
     MetricsSnapshot,
 )
-from app.transport.http.deps.internal import RedisDep, check_internal_token
+from app.transport.http.deps.internal import RedisDep
 from app.transport.http.deps.use_cases import MetricsSnapshotDep
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(route_class=DishkaRoute, tags=["system"])
+router = APIRouter(route_class=InternalDishkaRoute, tags=["system"])
 
 _METRICS_CACHE_KEY = "metrics:snapshot:v1"
 _METRICS_CACHE_TTL_SEC = 30
@@ -133,7 +133,6 @@ def _to_response(snapshot: MetricsSnapshot) -> MetricsOut:
 @router.get(
     "/metrics",
     response_model=MetricsOut,
-    dependencies=[Depends(check_internal_token)],
 )
 async def metrics(use_case: MetricsSnapshotDep, redis: RedisDep) -> MetricsOut:
     """Базовые метрики для мониторинга (этап 8).

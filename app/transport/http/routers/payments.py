@@ -12,18 +12,17 @@
 
 
 from __future__ import annotations
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import DishkaRoute, InternalDishkaRoute
 
 import logging
 from dataclasses import asdict
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
 from app.application.errors import Conflict, NotFound
 from app.config import get_settings
 from app.transport.http.deps.auth import CurrentUserDep
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.use_cases import (
     ConfirmPaymentDep,
     PendingPaymentDep,
@@ -43,6 +42,10 @@ from app.transport.http.schemas.payment import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(route_class=DishkaRoute, prefix="/api", tags=["payments"])
+
+# Внутренние эндпоинты (бот): X-Internal-Token проверяет route-класс
+# InternalDishkaRoute — router-level `Depends` больше не используется.
+internal_router = APIRouter(route_class=InternalDishkaRoute)
 
 TELEGRAM_API = "https://api.telegram.org"
 
@@ -125,10 +128,9 @@ async def create_stars_invoice(
     )
 
 
-@router.get(
+@internal_router.get(
     "/users/{user_id}/subscription",
     response_model=UserSubscriptionOut,
-    dependencies=[Depends(check_internal_token)],
 )
 async def get_user_subscription(
     user_id: int, use_case: UserSubscriptionDep
@@ -146,10 +148,9 @@ async def get_user_subscription(
     )
 
 
-@router.post(
+@internal_router.post(
     "/payments/prepare",
     response_model=PaymentPrepareOut,
-    dependencies=[Depends(check_internal_token)],
 )
 async def prepare_payment(
     body: PaymentPrepareIn, use_case: PendingPaymentDep
@@ -173,9 +174,8 @@ async def prepare_payment(
     )
 
 
-@router.post(
+@internal_router.post(
     "/payments/success",
-    dependencies=[Depends(check_internal_token)],
 )
 async def payment_success(
     body: PaymentSuccessIn, use_case: ConfirmPaymentDep
@@ -200,3 +200,8 @@ async def payment_success(
         "tier": result.tier,
         "subscription_until": result.subscription_until,
     }
+
+
+# Внутренние маршруты включаются в основной роутер (префикс /api
+# применяется при include).
+router.include_router(internal_router)

@@ -5,7 +5,7 @@ HTTP-коды. SQL, коммиты, очередь и storage живут в сц
 поэтому здесь нет ни `SessionDep`, ни импортов infrastructure/domain.
 
 Безопасность (сохранена в сценариях и DTO):
-- все эндпоинты защищены router-level `Depends(check_internal_token)`;
+- все эндпоинты защищены `InternalDishkaRoute` (X-Internal-Token);
 - `config.base_url` валидируется: http(s), не private/loopback/link-local;
 - `credentials_ref` должен начинаться с разрешённого префикса;
 - `trigger_fetch.criteria` валидируется как SearchCriteria;
@@ -14,12 +14,12 @@ HTTP-коды. SQL, коммиты, очередь и storage живут в сц
 
 
 from __future__ import annotations
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import InternalDishkaRoute
 
 import logging
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
 from app.application.admin.use_cases import (
@@ -41,7 +41,6 @@ from app.application.dto.admin import (
     is_safe_external_url,
 )
 from app.config import get_settings
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.use_cases import (
     AskAssistantDep,
     GetFunnelDep,
@@ -59,12 +58,11 @@ from app.infrastructure.messaging.legacy_worker import enqueue_task
 
 logger = logging.getLogger(__name__)
 
-# Router-level auth: ни один эндпоинт не может «забыть» проверку токена.
+# Auth в route-классе: ни один эндпоинт не может «забыть» проверку токена.
 router = APIRouter(
-        route_class=DishkaRoute,
+    route_class=InternalDishkaRoute,
     prefix="/api/admin",
     tags=["admin"],
-    dependencies=[Depends(check_internal_token)],
 )
 
 SourceName = Annotated[str, Path(pattern=SOURCE_NAME_PATTERN)]

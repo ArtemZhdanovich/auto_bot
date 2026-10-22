@@ -17,6 +17,7 @@ from app.di.providers.repositories import RepositoryProvider
 from app.di.providers.security import SecurityProvider
 from app.di.providers.settings import SettingsProvider
 from app.di.providers.use_cases import UseCaseProvider
+from app.transport.http.deps.providers import HttpDepsProvider
 
 
 def make_container(*extra: Provider) -> AsyncContainer:
@@ -38,6 +39,7 @@ def make_container(*extra: Provider) -> AsyncContainer:
         AdapterProvider(),
         SecurityProvider(),
         UseCaseProvider(),
+        HttpDepsProvider(),  # аутентификация HTTP (Request из dishka-контекста)
         *extra,
         start_scope=Scope.APP,
     )

@@ -1,44 +1,21 @@
 """Партнёрская аутентификация (`X-API-Key`) и rate-limit: тонкий transport-слой.
 
-Сборка — в Dishka-контейнере: сценарий `AuthenticateApiKey` и порт
-`PartnerRateLimiter` приходят через `FromDishka` (правило «ключ active И
-аккаунт active» — в `SqlAlchemyPartnerRepository`, окно запросов —
-`RedisRateLimiter`). Здесь только HTTP-маппинг:
-
-- нет заголовка → 401; сценарий вернул `None` (не найден / отозван /
-  suspended / чужой формат) → тот же 401 «Invalid API key»;
-- превышение лимита → 429 (`PartnerRateLimiter.check` → `False`).
+Сборка — в Dishka-контейнере (`deps/providers.py::HttpDepsProvider`):
+снимок `PartnerAuthState` — REQUEST-скоуп фабрика над сценарием
+`AuthenticateApiKey` (правило «ключ active И аккаунт active» — в
+`SqlAlchemyPartnerRepository`); окно запросов — порт `PartnerRateLimiter`
+(`RedisRateLimiter`). Здесь только алиасы для роутеров и маппинг
+превышения лимита в 429. FastAPI `Depends` не используется.
 """
 
 from __future__ import annotations
 
-from typing import Annotated
+from dishka.integrations.fastapi import FromDishka
+from fastapi import HTTPException, status
 
-from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import Depends, Header, HTTPException, status
+from app.application.partners.queries import PartnerAuthState, PartnerRateLimiter
 
-from app.application.partners.queries import (
-    AuthenticateApiKey,
-    PartnerAuthState,
-    PartnerRateLimiter,
-)
-
-
-@inject
-async def get_partner_auth(
-    auth: FromDishka[AuthenticateApiKey],
-    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
-) -> PartnerAuthState:
-    """FastAPI-зависимость: снимок аутентификации из `X-API-Key` (иначе 401)."""
-    if not x_api_key:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing X-API-Key")
-    state = await auth.execute(x_api_key)
-    if state is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API key")
-    return state
-
-
-PartnerAuthDep = Annotated[PartnerAuthState, Depends(get_partner_auth)]
+PartnerAuthDep = FromDishka[PartnerAuthState]
 
 RateLimitDep = FromDishka[PartnerRateLimiter]
 

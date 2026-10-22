@@ -61,8 +61,10 @@ app = FastAPI(
 app.add_middleware(TraceIdMiddleware)
 
 # Dishka-контейнер: единая сборка графа (сессия → репозитории → сценарии).
-# Роутеры получают use case-ы через `FromDishka` (route_class=DishkaRoute),
-# Depends остался только на парсинге заголовков аутентификации.
+# FastAPI `Depends` не используется вовсе: use case-ы роутеры получают через
+# `FromDishka` (route_class=DishkaRoute), аутентификация — dishka-провайдеры
+# (`HttpDepsProvider`, Request из dishka-контекста), внутренние API —
+# `InternalDishkaRoute` (X-Internal-Token до выполнения эндпоинта).
 from dishka.integrations.fastapi import setup_dishka  # noqa: E402
 
 from app.di.container import make_container  # noqa: E402

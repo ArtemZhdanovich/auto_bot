@@ -27,13 +27,12 @@ Session fixation в flow «вход через Telegram-бота»: `state_hash`
 
 
 from __future__ import annotations
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import DishkaRoute, InternalDishkaRoute
 
 import logging
 
 from fastapi import (
     APIRouter,
-    Depends,
     HTTPException,
     Path,
     Request,
@@ -73,7 +72,6 @@ from app.transport.http.deps.auth_use_cases import (
     RefreshSessionDep,
     RegisterWebUserDep,
 )
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.schemas.user import (
     AuthResponse,
     MagicLinkRequest,
@@ -86,6 +84,10 @@ from app.transport.http.schemas.user import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(route_class=DishkaRoute, prefix="/api/auth", tags=["auth"])
+
+# Внутренние эндпоинты (бот): X-Internal-Token проверяет route-класс
+# InternalDishkaRoute — router-level `Depends` больше не используется.
+internal_router = APIRouter(route_class=InternalDishkaRoute)
 
 _STATE_COOKIE_NAME = "tglogin_state"
 _STATE_COOKIE_PATH = "/api/auth/telegram/link"  # покрывает GET /{code}
@@ -289,9 +291,8 @@ async def telegram_login_status(
     return _auth_response(poll.auth).model_dump()
 
 
-@router.get(
+@internal_router.get(
     "/telegram/link/{code}/context",
-    dependencies=[Depends(check_internal_token)],
 )
 async def telegram_login_context(
     use_case: GetLoginContextDep,
@@ -319,9 +320,8 @@ async def telegram_login_context(
     }
 
 
-@router.delete(
+@internal_router.delete(
     "/telegram/link/{code}",
-    dependencies=[Depends(check_internal_token)],
 )
 async def cancel_telegram_login(
     use_case: CancelTelegramLoginDep,
@@ -342,9 +342,8 @@ async def cancel_telegram_login(
     return {"status": "cancelled"}
 
 
-@router.post(
+@internal_router.post(
     "/telegram/link/confirm",
-    dependencies=[Depends(check_internal_token)],
 )
 async def confirm_telegram_login(
     body: TelegramLoginConfirmRequest, use_case: ConfirmTelegramLoginDep
@@ -488,3 +487,8 @@ async def auth_login(
     except AppError as exc:
         raise _http_error(exc) from exc
     return _auth_response(result)
+
+
+# Внутренние маршруты включаются в основной роутер (префикс /api/auth
+# применяется при include).
+router.include_router(internal_router)

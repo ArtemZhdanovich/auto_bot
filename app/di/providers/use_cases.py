@@ -44,7 +44,6 @@ from app.application.auth.use_cases import (
     CreateTelegramLoginLink,
     GetCurrentUser,
     GetLoginContext,
-    VerifyAccessToken,
     LoginWebUser,
     PollTelegramLogin,
     RefreshSession,
@@ -196,7 +195,6 @@ _AUTO_WIRED = (
     CreateGuestSession,
     LoginWebUser,
     GetCurrentUser,
-    VerifyAccessToken,
 )
 
 

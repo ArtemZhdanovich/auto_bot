@@ -701,25 +701,6 @@ class LoginWebUser:
         return _auth_result(account.profile, self._tokens)
 
 
-class VerifyAccessToken:
-    """Разобрать Bearer access-JWT в `telegram_id` (до открытия сессии БД).
-
-    Транспорт вызывает первым: мусорные запросы без валидного токена не
-    должны занимать соединения пула. Ошибку `InvalidToken` маппит транспорт.
-    """
-
-    def __init__(self, verifier: AccessTokenVerifier) -> None:
-        self._verifier = verifier
-
-    def execute(self, token: str) -> int:
-        """Вернуть `telegram_id` из валидного access-токена.
-
-        Raises:
-            InvalidToken: подпись/срок/тип не в порядке.
-        """
-        return self._verifier.verify(token)
-
-
 class GetCurrentUser:
     """Активный пользователь по `telegram_id` из access-токена (auth HTTP).
 

@@ -1,8 +1,8 @@
 """Внутренние эндпоинты для бота (бот не ходит в БД напрямую — ТЗ п. 4.1).
 
-Router-level `Depends(check_internal_token)` — ни один эндпоинт этого
-роутера не может «забыть» проверку токена. OpenAPI показывает
-security scheme `X-Internal-Token`.
+`InternalDishkaRoute` — ни один эндпоинт этого роутера не может
+«забыть» проверку `X-Internal-Token`: она выполняется в route-классе
+до выполнения эндпоинта, OpenAPI показывает header `X-Internal-Token`.
 
 `POST /api/users/upsert` идемпотентен по `telegram_id`: сценарий
 `UpsertUser` обновляет профильные поля, но не трогает `is_active`
@@ -10,24 +10,22 @@ security scheme `X-Internal-Token`.
 бот не создаёт — это канал веб-регистрации.
 """
 
-from app.transport.http.deps.dishka import DishkaRoute
+from app.transport.http.deps.dishka import InternalDishkaRoute
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
 from app.application.errors import AppError
 from app.application.users.use_cases import UpsertUserCommand
-from app.transport.http.deps.internal import check_internal_token
 from app.transport.http.deps.use_cases import UpsertUserDep
 from app.transport.http.schemas.user import UserOut, UserUpsert
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(route_class=DishkaRoute, 
+router = APIRouter(route_class=InternalDishkaRoute,
     prefix="/api/users",
     tags=["users"],
-    dependencies=[Depends(check_internal_token)],
 )
 
 
