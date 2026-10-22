@@ -50,6 +50,10 @@ while ($true) {
 
   # ssh в фоне: лог стримится в файл, URL парсим из него же (так же его
   # видит miniapp-url.bat — берёт ПЕРВЫЙ URL в файле).
+  # SSH_USER: 'nokey' = анонимный туннель (новый поддомен на каждый
+  # реконнект); логин аккаунта localhost.run = стабильный поддомен
+  # (нужен SSH-ключ, загруженный в admin.localhost.run).
+  $sshUser = if ($env:SSH_USER) { $env:SSH_USER } else { 'nokey' }
   $p = Start-Process -FilePath $ssh -ArgumentList @(
         '-o', 'StrictHostKeyChecking=accept-new',
         '-o', 'ServerAliveInterval=10',
@@ -57,7 +61,7 @@ while ($true) {
         '-o', 'ExitOnForwardFailure=yes',
         '-o', 'ConnectTimeout=15',
         '-R', '80:localhost:8080',
-        'nokey@localhost.run'
+        "$sshUser@localhost.run"
       ) -RedirectStandardOutput $log -RedirectStandardError $err -NoNewWindow -PassThru
   Write-Output "ssh запущен (pid $($p.Id))"
 
