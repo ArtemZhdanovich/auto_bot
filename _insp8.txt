@@ -1,0 +1,4 @@
+underBodyPhotos: [{"photoType": "UNDER_BODY", "photoPath": "/diagnosis/evaluation/carphoto/car9/car59/insp/4516159/33f3481e-39d4-48a0-b9da-4257b2f4eb9a.jpg", "photoUrl": "http://imgcar.encar.com/diagnosis/evaluation/carphoto/car9/car59/insp/4516159/33f3481e-39d4-48a0-b9da-4257b2f4eb9a.jpg"}, {"photoType": "UNDER_BODY_FRONT_LEFT", "photoPath": "/diagnosis/evaluation/carphoto/car9/car59/insp/4516159/b3e9a087-5cce-43
+condition.inspection: {"formats": ["TABLE"]}
+inspection 43009007 200 {"vehicleId":43009007,"formats":["TABLE"],"master":{"supplyNum":"202610031583","accdient":false,"simpleRepair":false,"registrationDate":"2026-10-23T19:20:07","detail":{"recordNo":"0126104772","modelYe
+diagnosis 43009007 200 {"vehicleId":43009007,"diagnosisDate":"2026-10-23T00:00:00","diagnosisNo":2420,"realDiagnosisDate":"2026-10-23T16:58:20","ordNo":26798363,"centerCode":"165","reservationCenterName":"천안 구성","items":[{"

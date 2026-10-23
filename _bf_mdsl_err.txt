@@ -1,0 +1,25 @@
+e-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 871, in _async_ping
+    await tr.start()
+  File "/usr/local/lib/python3.13/site-packages/asyncpg/transaction.py", line 146, in start
+    await self._connection.execute(query)
+  File "/usr/local/lib/python3.13/site-packages/asyncpg/connection.py", line 377, in execute
+    result = await self._protocol.query(query, timeout)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 332, in query
+    waiter = self._new_waiter(timeout)
+  File "asyncpg/protocol/protocol.pyx", line 791, in asyncpg.protocol.protocol.BaseProtocol._new_waiter
+    self.timeout_handle = self.loop.call_later(
+  File "/usr/local/lib/python3.13/asyncio/base_events.py", line 800, in call_later
+    timer = self.call_at(self.time() + delay, callback, *args,
+                         context=context)
+  File "/usr/local/lib/python3.13/asyncio/base_events.py", line 813, in call_at
+    self._check_closed()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "/usr/local/lib/python3.13/asyncio/base_events.py", line 557, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+<sys>:0: RuntimeWarning: coroutine 'Connection._cancel' was never awaited
+Future exception was never retrieved
+future: <Future finished exception=ConnectionDoesNotExistError('connection was closed in the middle of operation')>
+asyncpg.exceptions.ConnectionDoesNotExistError: connection was closed in the middle of operation
+

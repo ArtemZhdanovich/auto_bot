@@ -1,0 +1,10 @@
+ad 41339509 -> vehicleId 41339509
+outers: 0 | inners: 8 | images: 0
+ I: {"type": {"code": "S00", "title": "자기진단"}, "price": null, "children": [{"type": {"code": "s001", "title": "원동기"}, "statusType": {"code": "1", "title": "양호"}, "s
+ I: {"type": {"code": "S01", "title": "원동기"}, "price": null, "children": [{"type": {"code": "s003", "title": "작동상태(공회전)"}, "statusType": {"code": "1", "title": "양호"
+ I: {"type": {"code": "S02", "title": "변속기"}, "price": null, "children": [{"type": {"code": "s0201", "title": "자동변속기(A/T)"}, "statusType": null, "statusItemTypes": 
+ I: {"type": {"code": "S03", "title": "동력전달"}, "price": null, "children": [{"type": {"code": "s020", "title": "클러치 어셈블리"}, "statusType": null, "statusItemTypes": [{
+ I: {"type": {"code": "S04", "title": "조향"}, "price": null, "children": [{"type": {"code": "s023", "title": "동력조향 작동 오일 누유"}, "statusType": {"code": "3", "title": "
+ I: {"type": {"code": "S05", "title": "제동"}, "price": null, "children": [{"type": {"code": "s027", "title": "브레이크 마스터 실린더오일 누유"}, "statusType": {"code": "3", "title
+ I: {"type": {"code": "S06", "title": "전기"}, "price": null, "children": [{"type": {"code": "s030", "title": "발전기 출력"}, "statusType": {"code": "1", "title": "양호"}, "
+ I: {"type": {"code": "S07", "title": "연료"}, "price": null, "children": [{"type": {"code": "s036", "title": "연료누출(LP가스포함)"}, "statusType": {"code": "3", "title": "없

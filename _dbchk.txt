@@ -1,0 +1,9 @@
+ total | with_marks | with_items | with_photos | with_inspector 
+-------+------------+------------+-------------+----------------
+  1947 |          0 |          0 |           0 |              0
+(1 row)
+
+ listing_id | source_id | marks | items | rows 
+------------+-----------+-------+-------+------
+(0 rows)
+

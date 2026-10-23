@@ -1,0 +1,69 @@
+td class="border_top"></td>
+					</tr>
+					<tr>
+						<th scope="row" colspan="2" class="th_left">윈도우 모터</th>
+						<td class="td_left">
+							<span class="txt_state on">양호</span>
+							<span class="txt_state state2">불량</span>
+						</td>
+						<td class="border_top"></td>
+					</tr>
+					
+					<tr>
+						<th scope="row" class="border_top border_left_none">연료</th>
+						<th scope="row" colspan="2" class="th_left border_top">연료누출(LP가스포함)</th>
+						<td class="td_left border_top">
+							<span class="txt_state on">없음</span>
+							<span class="txt_state state2">있음</span>
+						</td>
+						<td class="border_top"></td>
+						<td class="border_top"></td>
+					</tr>
+					</tbody>
+				</table>
+			</div>
+
+			
+
+			<div class="section_opinion">
+				
+
+				<table summary="" class="tbl_opinion">
+					<caption>특기사항 및 점검자 의견 표</caption>
+					<colgroup>
+						<col width="149px" /><col width="118px" /><col width="*" />
+					</colgroup>
+					<tbody>
+					<tr>
+						<th scope="row" rowspan="2">특기사항 및<br />점검자의 의견</th>
+						<th scope="row" class="th_sub">성능 &middot; 상태점검자</th>
+						<td class="td_left">좌우쿼터패널 미세판금</td>
+					</tr>
+					
+					</tbody>
+				</table>
+			</div>
+
+			
+
+			<div class="inspc_sign">
+				<p class="ckmss">「자동차관리법」 제58조 제1항 및 같은법 시행규칙 제120조에 따라 중고자동차의 성능 · 상태를 점검, 자동차가격조사 &middot; 산정하였음을 확인합니다.</p>
+				<div class="boxst">
+					<p class="sign"><strong><em class="txt_left">중고자동차 성능 · 상태 점검자</em> <em class="txt_right">:</em></strong> <span>엠파크오토서비스(주)타워 박기현 (인)</span></p>
+					
+					<p class="sign"><strong><em class="txt_left">중고자동차 성능 · 상태 고지자</em> <em class="txt_right">:</em></strong> <span>황소모터스 (인)</span></p>
+					<p class="date">2026년 08월 05일 </p>
+				</div>
+			</div>
+
+			<div class="inspc_tiptxt">
+				<h4>성능·상태 점검의 보증에 관한 사항 등 </h4>
+				<!-- 2016/02/18 [손]성능점검개정 : 내용변경 -->
+				<ol class="info_notice">
+					<li>1. 자동차 매매업자는 성능·상태점검기록부(가격조사·산정 부분 제외)에 기재된 내용을 고지하지 아니하거나 거짓으로 고지함으로써 매수인에게
+						재산상 손해가 발생한 경우에는 그 손해를 배상할 책임을 집니다.<br />
+						자동차성능상태점검자가 거짓 또는 오류가 있는 성능상태점검 내용을 제공하여 아래의 보증기간 또는 보증거리 이내에 자동차의
+						실제 성능·상태가 다른 경우, 자동차매매업자는 매수인의 재산상 손해를 배상할 책임을 지며, 자동차성능상태점검자에게 이를 구상할 수 있습니다.<br />
+						(매수인이 성능상태점검자가 가입한 책임보험 등을 통해 별도로 배상받는 경우는 제외함.)<br />
+						자동차인도일부터 보증기간은 (30)일, 보증거리는 (2천)킬로미터로 합니다.<br />
+						(보증기간은 30일 이상, 보증거리는 2천킬로미터 이상이어야 하며, 그 

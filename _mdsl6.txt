@@ -1,0 +1,13 @@
+> 						<li class="first"> 							<strong class="tit_canv">외판</strong> 							<span class="txt_dir">앞(전방)</span> 							<div class="canvasDiv"> 								<div class="imgarea_a" id="outfrm"> 									<img class="carimg_a" alt="외판" src="/images/pop/check
+---
+> 						</li> 						<li> 							<strong class="tit_canv">주요골격</strong> 							<span class="txt_dir">앞(전방)</span> 							<div class="canvasDiv"> 								<div class="imgarea_b" id="innfrm"> 									<img class="carimg_b" alt="주요골격" src="/images/pop/che
+---
+, 		{ 			code: '029', 			name: 'pillarPanelFrontLeft', 			value: '필러 패널 A(좌)', 			value_old: '필러 패널(앞)(좌)', 			lank: 'B', 			has_old: true 		}, 		{ 			code: '030', 			name: 'pillarPanelMiddleLeft', 			value: '필러 패널 B(좌)', 			value_old: '필러 패널(중간)(좌)'
+---
+ 		{ 			code: '032', 			name: 'pillarPanelFrontRight', 			value: '필러 패널 A(우)', 			value_old: '필러 패널(앞)(우)', 			lank: 'B', 			has_old: true 		}, 		{ 			code: '033', 			name: 'pillarPanelMiddleRight', 			value: '필러 패널 B(우)', 			value_old: '필러 패널(중간)(우)
+---
+illarPanelFrontLeft"){ 				opt = { pos:'left:455px;top:112px', name:'필러 패널 A(좌)', name201806:'필러 패널(앞)(좌)' }; 			}else if (key == "030" || key == "pillarPanelMiddleLeft"){ 				opt = { pos:'left:450px;top:142px', name:'필러 패널 B(좌)', name201806:'필러 패널(중
+---
+llarPanelFrontRight"){ 				opt = { pos:'left:573px;top:112px', name:'필러 패널 A(우)', name201806:'필러 패널(앞)(우)' }; 			}else if (key == "033" || key == "pillarPanelMiddleRight"){ 				opt = { pos:'left:575px;top:142px', name:'필러 패널 B(우)', name201806:'필러 패널(
+---
+LEN 44832

@@ -1,0 +1,41 @@
+=== 7300 (교환 있음 region):
+</table>
+			</div>
+
+			<div class="section_repair">
+				<h3>
+					사고 &middot; 교환 &middot; 수리 등 이력
+					<em class="txt_sub">가격조사 &middot; 산정액 및 특기사항은 매수인이 자동차 가격조사&middot;산정을 원하는 경우에만 기재합니다.</em>
+				</h3>
+				<table summary="" class="tbl_repair">
+					<caption>자동차 종합상태 표</caption>
+					<colgroup>
+						<col width="149px" /><col width="245px" /><col />
+					</colgroup>
+					<tbody>
+					<tr>
+						<th scope="row">사고이력 <a class="uibtn_q uitooltip_btn" href="#uitooltip_performance_notice1" onmouseover="uiTooltip.init({obj:'.uitooltip_performance_notice1',btn:this,hover:true,baseDiv:'.section_repair'});" onfocus="uiTooltip.init({obj:'.uitooltip_performance_notice1',btn:this,hover:true,baseDiv:'.section_repair'});">자세히보기</a></th>
+						<td colspan="2" class="td_left">
+							<span class="txt_state">있음</span>
+							<span class="txt_state on">없음</span>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">단순수리 <a class="uibtn_q uitooltip_btn" href="#uitooltip_performance_notice2" onmouseover="uiTooltip.init({obj:'.uitooltip_performance_notice2',btn:this,hover:true,baseDiv:'.section_repair'});" onfocus="uiTooltip.init({obj:'.uitooltip_performance_notice2',btn:this,hover:true,baseDiv:'.section_repair'});">자세히보기</a></th>
+						<td colspan="2" class="td_left">
+							<span class="txt_state">있음</span>
+							<span class="txt_state on">없음</span>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">가격조사 산정액<br/>및 특기사항</th>
+						<td class="td_left"></td>
+						<td class="td_left"></td>
+					</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="detail_inspection_view">
+				<div class="box_explan">
+					<div class="state_explan">

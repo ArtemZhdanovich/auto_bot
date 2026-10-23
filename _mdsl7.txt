@@ -1,0 +1,2 @@
+carid >> ndow.enlogInitJson = { 		"dataTalkView": { 			"screenName": "성능점검기록부", 			"param": { 				"carid": "41339509" 			} 		} 	} 	function print_page() { 		window.print(); 	} </script> <!-- popup size 870 * .
+---

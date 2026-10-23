@@ -1,0 +1,12 @@
+lank: >> nction($){  //성능점검 (구,신) var performanceCheck = { 	dataGroup: [ 		{ 			code: '002', 			name: 'hood', 			value: '후드', 			lank: '1', 			has_old: false 		}, 		{ 			code: '003', 			name: 'frontFenderLeft', 			value: '프론트 휀더(좌)', 			lank: '1', 	
+---
+lank: >> e: '후드', 			lank: '1', 			has_old: false 		}, 		{ 			code: '003', 			name: 'frontFenderLeft', 			value: '프론트 휀더(좌)', 			lank: '1', 			has_old: false 		}, 		{ 			code: '004', 			name: 'frontFenderRight', 			value: '프론트 휀더(우)', 			lank: '1', 
+---
+lank: >> 휀더(좌)', 			lank: '1', 			has_old: false 		}, 		{ 			code: '004', 			name: 'frontFenderRight', 			value: '프론트 휀더(우)', 			lank: '1', 			has_old: false 		}, 		{ 			code: '005', 			name: 'frontDoorLeft', 			value: '프론트 도어(좌)', 			lank: '1', 			
+---
+lank" >> iv> 							</div> 							<span class="txt_dir_back">뒤(후방)</span> 							<div class="box_state"> 								<ul class="list_lank"> 									<li> 										<strong class="tit_lank">1랭크</strong> 										<ul class="list_state uiListLank1"> 					
+---
+lank" >> ">뒤(후방)</span> 							<div class="box_state"> 								<ul class="list_lank"> 									<li> 										<strong class="tit_lank">1랭크</strong> 										<ul class="list_state uiListLank1"> 											<li class="uiLankNone">없음</li> 										</u
+---
+lank" >> 1"> 											<li class="uiLankNone">없음</li> 										</ul> 									</li> 									<li> 										<strong class="tit_lank">2랭크</strong> 										<ul class="list_state uiListLank2"> 											<li class="uiLankNone">없음</li> 										</u
+---
