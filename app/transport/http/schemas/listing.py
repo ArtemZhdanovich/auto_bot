@@ -86,10 +86,23 @@ BODY_ZONES = (
     "fender_fl", "fender_fr", "fender_rl", "fender_rr",
     "door_fl", "door_fr", "door_rl", "door_rr",
     "rocker_l", "rocker_r",
+    # Силовая структура (주요골격 классического чека mdsl_regcar.do)
+    "frame_front",          # передняя панель / телевизор / лонжероны
+    "frame_inside_l", "frame_inside_r",   # брызговики-апроны
+    "wheelhouse_fl", "wheelhouse_fr",     # стаканы передних колёс
+    "wheelhouse_rl", "wheelhouse_rr",     # арки задних колёс
+    "frame_floor",          # пол
+    "frame_rear",           # задняя панель / пол багажника / задние лонжероны
+    "pillar_a_l", "pillar_b_l", "pillar_c_l",
+    "pillar_a_r", "pillar_b_r", "pillar_c_r",
 )
 
 # Типы повреждений на карте.
-MARK_TYPES = ("scratch", "dent", "repaint", "replace", "rust", "crack", "glass")
+MARK_TYPES = (
+    "scratch", "dent", "repaint", "replace", "rust", "crack", "glass",
+    "repair",  # 2-й ранг внешней панели классического чека: был ремонт/окраска
+    "frame",   # дефект силовой структуры (ранк B/C 주요골격)
+)
 
 # Агрегаты чек-листа.
 ITEM_KEYS = (

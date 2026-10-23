@@ -5,10 +5,18 @@ export type BodyZone =
   | "front_bumper" | "hood" | "roof" | "trunk"
   | "fender_fl" | "fender_fr" | "fender_rl" | "fender_rr"
   | "door_fl" | "door_fr" | "door_rl" | "door_rr"
-  | "rocker_l" | "rocker_r";
+  | "rocker_l" | "rocker_r"
+  // Силовая структура (주요골격 классического чека Encar)
+  | "frame_front" | "frame_inside_l" | "frame_inside_r"
+  | "wheelhouse_fl" | "wheelhouse_fr" | "wheelhouse_rl" | "wheelhouse_rr"
+  | "frame_floor" | "frame_rear"
+  | "pillar_a_l" | "pillar_b_l" | "pillar_c_l"
+  | "pillar_a_r" | "pillar_b_r" | "pillar_c_r";
 
 export type MarkType =
-  | "scratch" | "dent" | "repaint" | "replace" | "rust" | "crack" | "glass";
+  | "scratch" | "dent" | "repaint" | "replace" | "rust" | "crack" | "glass"
+  | "repair"  // 2-й ранг внешней панели: был ремонт/окраска
+  | "frame";  // дефект силовой структуры
 
 export type ItemKey =
   | "engine" | "transmission" | "suspension" | "brakes" | "steering"
@@ -43,7 +51,7 @@ export interface InspectionReport {
 
 /** Порядок важности: чем левее, тем «сильнее» дефект — зона красится им. */
 export const MARK_SEVERITY: MarkType[] = [
-  "replace", "crack", "dent", "rust", "repaint", "glass", "scratch",
+  "replace", "frame", "crack", "dent", "rust", "repair", "repaint", "glass", "scratch",
 ];
 
 export const ZONE_LABEL: Record<BodyZone, string> = {
@@ -61,6 +69,21 @@ export const ZONE_LABEL: Record<BodyZone, string> = {
   door_rr: "Дверь задняя, правая",
   rocker_l: "Порог, левый",
   rocker_r: "Порог, правый",
+  frame_front: "Передняя панель / лонжероны",
+  frame_inside_l: "Брызговик (апрон), левый",
+  frame_inside_r: "Брызговик (апрон), правый",
+  wheelhouse_fl: "Стакан переднего колеса, левый",
+  wheelhouse_fr: "Стакан переднего колеса, правый",
+  wheelhouse_rl: "Арка заднего колеса, левая",
+  wheelhouse_rr: "Арка заднего колеса, правая",
+  frame_floor: "Пол кузова",
+  frame_rear: "Задняя панель / пол багажника",
+  pillar_a_l: "Стойка A, левая",
+  pillar_b_l: "Стойка B, левая",
+  pillar_c_l: "Стойка C, левая",
+  pillar_a_r: "Стойка A, правая",
+  pillar_b_r: "Стойка B, правая",
+  pillar_c_r: "Стойка C, правая",
 };
 
 export const MARK_LABEL: Record<MarkType, string> = {
@@ -71,6 +94,8 @@ export const MARK_LABEL: Record<MarkType, string> = {
   rust: "Коррозия",
   crack: "Трещина",
   glass: "Повреждение стекла/оптики",
+  repair: "Ремонт / окраска панели",
+  frame: "Дефект силовой структуры",
 };
 
 /** Цвет заливки зоны на схеме по типу дефекта. */
@@ -82,6 +107,8 @@ export const MARK_COLOR: Record<MarkType, string> = {
   rust: "#b45309",
   crack: "#dc2626",
   glass: "#06b6d4",
+  repair: "#f97316",   // оранжевый: внешний ремонт/окраска (2-й ранг)
+  frame: "#991b1b",    // тёмно-красный: силовая структура
 };
 
 export const ITEM_LABEL: Record<ItemKey, string> = {

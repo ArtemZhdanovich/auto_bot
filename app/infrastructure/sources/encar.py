@@ -55,6 +55,15 @@ DEFAULT_RECORD_API = "https://api.encar.com/v1/readside/record/vehicle/{source_i
 # 엔ка진단 — вердикт диагностики: зоны кузова NORMAL/дефект + комментарии
 # (CHECKER_COMMENT «무사고» и пр.). Анонимно 200, без диагностики — 404.
 DEFAULT_DIAGNOSIS_API = "https://api.encar.com/v1/readside/diagnosis/vehicle/{source_id}"
+# Классическая страница чека (www.encar.com, EUC-KR): серверный JS-блок
+# `performanceCheck = {dataGroup: [...]}` — ранки ВСЕХ панелей кузова
+# (외판 1/2 и 주요골격 A/B/C), из которых рисуют «две машинки» с отметками.
+# JSON-чек (`outers`) у большинства авто пуст — карта повреждений живёт
+# только здесь. Доступна из контейнера (окт 2026, проверено).
+DEFAULT_MDSL_RECORD_API = (
+    "https://www.encar.com/md/sl/mdsl_regcar.do"
+    "?method=inspectionViewNew&carid={source_id}"
+)
 # Параллельные detail-запросы на страницу выдачи (вежливость к API).
 _DETAIL_CONCURRENCY = 5
 # VIN: 17 знаков без I/O/Q (ISO 3779). Корейские VIN соответствуют; мусор
@@ -454,6 +463,91 @@ def _outer_zone(title: Any) -> str | None:
     return None
 
 
+# --- классический чек (mdsl_regcar.do): панели dataGroup → зоны -------------
+
+# 외판 (внешние панели): ранк «1» = без дефектов, «2» = был ремонт/окраска.
+_MDSL_OUTER_ZONE: dict[str, str] = {
+    "hood": "hood",
+    "frontFenderLeft": "fender_fl",
+    "frontFenderRight": "fender_fr",
+    "frontDoorLeft": "door_fl",
+    "rearDoorLeft": "door_rl",
+    "frontDoorRight": "door_fr",
+    "rearDoorRight": "door_rr",
+    "trunkLead": "trunk",
+    "roofPanel": "roof",
+    "quarterPanelLeft": "fender_rl",
+    "quarterPanelRight": "fender_rr",
+    "sideSillPanelLeft": "rocker_l",
+    "sideSillPanelRight": "rocker_r",
+}
+
+# 주요골격 (силовая структура): ранки A (норма) / B / C (дефекты).
+_MDSL_FRAME_ZONE: dict[str, str] = {
+    "frontPanel": "frame_front",
+    "radiatorSupport": "frame_front",
+    "crossMember": "frame_front",
+    "frontSideMemberLeft": "frame_front",
+    "frontSideMemberRight": "frame_front",
+    "insidePanelLeft": "frame_inside_l",
+    "insidePanelRight": "frame_inside_r",
+    "frontWheelHouseLeft": "wheelhouse_fl",
+    "frontWheelHouseRight": "wheelhouse_fr",
+    "rearWheelHouseLeft": "wheelhouse_rl",
+    "rearWheelHouseRight": "wheelhouse_rr",
+    "floorPanel": "frame_floor",
+    "trunkFloor": "frame_rear",
+    "rearPanel": "frame_rear",
+    "packageTray": "frame_rear",
+    "rearSideMemberLeft": "frame_rear",
+    "rearSideMemberRight": "frame_rear",
+    "pillarPanelFrontLeft": "pillar_a_l",
+    "pillarPanelMiddleLeft": "pillar_b_l",
+    "pillarPanelRearLeft": "pillar_c_l",
+    "pillarPanelFrontRight": "pillar_a_r",
+    "pillarPanelMiddleRight": "pillar_b_r",
+    "pillarPanelRearRight": "pillar_c_r",
+}
+
+# Панель dataGroup: code/name/value (+ value_old у «старых») и lank.
+_MDSL_PANEL_RE = re.compile(
+    r"code:\s*'(\d+)',\s*name:\s*'(\w+)',\s*value:\s*'([^']*)'"
+    r"(?:,\s*value_old:\s*'[^']*')?,\s*lank:\s*'(\w+)'"
+)
+
+
+def _parse_mdsl_panels(html: str) -> list[dict[str, Any]]:
+    """Достать панели с дефектами из блока `performanceCheck` страницы чека.
+
+    Args:
+        html: HTML страницы (EUC-KR, уже декодирован в str).
+
+    Returns:
+        Список InspectionMark-словарей: внешняя панель с рank «2» →
+        `type="repair"`, панель скелета с ранком B/C → `type="frame"`
+        (note — исходный ранк). Панели без дефектов пропускаются.
+    """
+    marks: list[dict[str, Any]] = []
+    for _code, name, _value, lank in _MDSL_PANEL_RE.findall(html):
+        outer_zone = _MDSL_OUTER_ZONE.get(name)
+        if outer_zone is not None:
+            if lank == "2":  # 2랭크: был ремонт/окраска панели
+                marks.append(
+                    {"zone": outer_zone, "type": "repair", "note": None}
+                )
+            continue
+        frame_zone = _MDSL_FRAME_ZONE.get(name)
+        if frame_zone is not None and lank in ("B", "C"):
+            marks.append(
+                {
+                    "zone": frame_zone,
+                    "type": "frame",
+                    "note": lank if lank == "C" else None,
+                }
+            )
+    return marks
+
+
 class EncarApiAdapter(BaseApiAdapter):
     """Адаптер Encar Search API.
 
@@ -499,6 +593,9 @@ class EncarApiAdapter(BaseApiAdapter):
         self._record_api = self.config.get("record_api_template", DEFAULT_RECORD_API)
         self._diagnosis_api = self.config.get(
             "diagnosis_api_template", DEFAULT_DIAGNOSIS_API
+        )
+        self._mdsl_api = self.config.get(
+            "mdsl_record_api_template", DEFAULT_MDSL_RECORD_API
         )
         self._enrich_details = bool(self.config.get("enrich_details", True))
 
@@ -779,6 +876,32 @@ class EncarApiAdapter(BaseApiAdapter):
             return None
         return data if isinstance(data, dict) else None
 
+    async def _fetch_legacy_marks(
+        self, source_id: str
+    ) -> list[dict[str, Any]] | None:
+        """Ранки панелей из классической страницы чека (mdsl_regcar.do).
+
+        Страница в EUC-KR; карта повреждений «двух машинок» (외판 1/2,
+        주요골격 A/B/C) — серверный JS-блок `performanceCheck`. Best-effort:
+        любой сбой → `None` (чек есть не у всех авто).
+
+        Args:
+            source_id: ID объявления (в URL параметр `carid`).
+
+        Returns:
+            Список mark-словарей (`_parse_mdsl_panels`) или `None`.
+        """
+        try:
+            resp = await self.http.get(self._mdsl_api.format(source_id=source_id))
+        except Exception as exc:  # нет чека/сеть — не критично
+            logger.debug("encar_mdsl_failed id=%s: %s", source_id, exc)
+            return None
+        if resp.status_code != 200:
+            return None
+        html = resp.content.decode("euc-kr", errors="replace")
+        panels = _parse_mdsl_panels(html)
+        return panels or None
+
     async def _enrich_from_details(self, items: list[UnifiedListing]) -> None:
         """Догрузить детальные данные для каждого объявления.
 
@@ -818,23 +941,28 @@ class EncarApiAdapter(BaseApiAdapter):
                     return
                 if not isinstance(detail, dict):
                     return
-                sid = item.source_id
+                # Чек/диагностика/страховая живут под ВНУТРЕННИМ vehicleId
+                # (например ad 43013519 -> vehicle 43009007): по id объявления
+                # эти API отдают 404 (окт 2026). Fallback — на всякий случай.
+                vid = str(detail.get("vehicleId") or item.source_id)
                 inspection = await self._fetch_optional(
-                    self._inspection_api.format(source_id=sid)
+                    self._inspection_api.format(source_id=vid)
                 )
                 insp_summary = (
                     await self._fetch_optional(
-                        self._inspection_summary_api.format(source_id=sid)
+                        self._inspection_summary_api.format(source_id=vid)
                     )
                     if inspection is not None
                     else None
                 )
                 record = await self._fetch_optional(
-                    self._record_api.format(source_id=sid)
+                    self._record_api.format(source_id=vid)
                 )
                 diagnosis = await self._fetch_optional(
-                    self._diagnosis_api.format(source_id=sid)
+                    self._diagnosis_api.format(source_id=vid)
                 )
+                # Классическая страница чека живёт по id ОБЪЯВЛЕНИЯ (carid).
+                legacy = await self._fetch_legacy_marks(item.source_id)
                 self._apply_detail(
                     item,
                     detail,
@@ -843,6 +971,7 @@ class EncarApiAdapter(BaseApiAdapter):
                     insp_summary=insp_summary,
                     record=record,
                     diagnosis=diagnosis,
+                    legacy_marks=legacy,
                 )
 
         await asyncio.gather(*(enrich_one(item) for item in items))
@@ -856,6 +985,7 @@ class EncarApiAdapter(BaseApiAdapter):
         insp_summary: dict[str, Any] | None = None,
         record: dict[str, Any] | None = None,
         diagnosis: dict[str, Any] | None = None,
+        legacy_marks: list[dict[str, Any]] | None = None,
     ) -> None:
         """Наложить данные детальной карточки на объявление (in-place).
 
@@ -886,37 +1016,72 @@ class EncarApiAdapter(BaseApiAdapter):
             item.engine_volume = float(displacement)
 
         # Полный набор фото (OUTER+INNER): search отдаёт лишь часть.
+        # DIAG/DIAG2 — сканы чека (성능기록부_사진) — в отчёт, не в галерею.
         photos = detail.get("photos")
+        check_photos: list[str] = []
         if isinstance(photos, list) and photos:
+            # Галерея — всё, кроме сканов чека (DIAG/DIAG2): они идут в отчёт.
             urls = [
                 f"{self._photo_prefix}/{str(p.get('path', '')).lstrip('/')}"
                 for p in photos
-                if isinstance(p, dict) and p.get("path")
+                if isinstance(p, dict)
+                and p.get("path")
+                and str(p.get("type") or "").upper() not in ("DIAG", "DIAG2")
             ]
             if urls:
                 item.images = urls
+            check_photos = [
+                f"{self._photo_prefix}/{str(p.get('path', '')).lstrip('/')}"
+                for p in photos
+                if isinstance(p, dict)
+                and p.get("path")
+                and str(p.get("type") or "").upper() in ("DIAG", "DIAG2")
+            ]
 
         # Комплектация (миграция 0023): коды опций → RU-названия.
         item.options = self._extract_options(detail)
 
-        # Фото из чека (днище/салон и т.п.) — в отчёт осмотра, не в галерею.
+        # Фото чека: сканы (DIAG2) + днище (advertisement.underBodyPhotos,
+        # там готовый абсолютный photoUrl на imgcar.encar.com) + images
+        # из JSON-чека. Всё это — отчёт осмотра, не галерея объявления.
+        advertisement_block = (
+            detail.get("advertisement")
+            if isinstance(detail.get("advertisement"), dict)
+            else {}
+        )
+        underbody = advertisement_block.get("underBodyPhotos")
+        if isinstance(underbody, list):
+            for p in underbody:
+                if not isinstance(p, dict):
+                    continue
+                url = p.get("photoUrl") or (
+                    f"{self._photo_prefix}/{str(p.get('photoPath', '')).lstrip('/')}"
+                    if p.get("photoPath")
+                    else None
+                )
+                if url and url not in check_photos:
+                    check_photos.append(url)
         insp_images = inspection.get("images") if isinstance(inspection, dict) else None
-        check_photos: list[str] = []
         if isinstance(insp_images, list) and insp_images:
-            for p in insp_images[:20]:  # лимит InspectionReportIn.images
+            for p in insp_images:  # лимит InspectionReportIn.images ниже
                 path = p.get("path") or p.get("location") if isinstance(p, dict) else p
                 if isinstance(path, str) and path.strip():
                     path = path.strip()
-                    check_photos.append(
-                        path if path.startswith("http") else
-                        f"{self._photo_prefix}/{path.lstrip('/')}"
+                    url = (
+                        path
+                        if path.startswith("http")
+                        else f"{self._photo_prefix}/{path.lstrip('/')}"
                     )
+                    if url not in check_photos:
+                        check_photos.append(url)
+        check_photos = check_photos[:20]
 
         item.inspection = self._build_inspection(
             detail, cleaned,
             inspection=inspection, insp_summary=insp_summary,
             record=record, diagnosis=diagnosis,
             photos=check_photos,
+            legacy_marks=legacy_marks,
         )
 
     @staticmethod
@@ -959,6 +1124,7 @@ class EncarApiAdapter(BaseApiAdapter):
         record: dict[str, Any] | None = None,
         diagnosis: dict[str, Any] | None = None,
         photos: list[str] | None = None,
+        legacy_marks: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Собрать отчёт осмотра из анонимных API Encar.
 
@@ -1156,6 +1322,16 @@ class EncarApiAdapter(BaseApiAdapter):
             ) else None
             if isinstance(insp_name, str) and insp_name.strip():
                 inspector = insp_name.strip()[:120]
+
+        # --- классический чек (mdsl_regcar.do): ранки панелей ----------------
+        # Карта повреждений «двух машинок» живёт только там (окт 2026).
+        # JSON-чек с типами дефектов приоритетнее — его зоны не дублируем.
+        if legacy_marks:
+            seen = {m["zone"] for m in marks}
+            for legacy in legacy_marks:
+                if legacy["zone"] not in seen:
+                    marks.append(legacy)
+                    seen.add(legacy["zone"])
 
         # --- страховая история (보험이력) ------------------------------------
         if record is not None:

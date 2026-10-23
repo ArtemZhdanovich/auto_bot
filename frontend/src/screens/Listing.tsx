@@ -1,6 +1,6 @@
 /** Карточка объявления (UI/UX ТЗ §2.3): галерея, характеристики, избранное. */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Heart, ExternalLink, Truck, Share2 } from "lucide-react";
 
@@ -30,6 +30,12 @@ export function ListingScreen() {
   const navigate = useNavigate();
   const toast = useToast();
   const loginPrompt = useLoginPrompt();
+
+  // Фото осмотра добавляются в конец общей галереи (карточка ТЗ §2.3)
+  const galleryImages = useMemo(
+    () => [...(listing?.images ?? []), ...(inspection?.images ?? [])],
+    [listing, inspection],
+  );
 
   useEffect(() => {
     api<Listing>(`/listings/${id}`)
@@ -174,9 +180,10 @@ export function ListingScreen() {
         ‹
       </button>
       <div className="listing-page__main">
-        {/* Галерея: свайп + счётчик + фуллскрин по клику (ТЗ §2.3) */}
-        {listing.images.length > 0 ? (
-          <Gallery images={listing.images} alt={title} />
+        {/* Галерея: свайп + счётчик + фуллскрин по клику (ТЗ §2.3).
+            Фото осмотра (чек) — в конце галереи, отдельный блок не нужен */}
+        {galleryImages.length > 0 ? (
+          <Gallery images={galleryImages} alt={title} />
         ) : (
           <div className="state">
             <div className="state__emoji">📷</div>
@@ -262,6 +269,29 @@ export function ListingScreen() {
             </div>
           )}
         </section>
+
+        {/* Комплектация (миграция 0023) и Осмотр (0018/0022) — в ЛЕВОЙ колонке:
+            sticky-карточка справа ограничена высотой грида-ряда и не наезжает
+            на эти секции при прокрутке */}
+        {listing.options && listing.options.length > 0 && (
+          <section className="panel">
+            <h3>🧰 Комплектация</h3>
+            <div className="options-chips">
+              {listing.options.map((o) => (
+                <span className="options-chips__item" key={o}>
+                  {o}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {inspection && (
+          <section className="panel">
+            <h3>🔍 Осмотр</h3>
+            <InspectionSection report={inspection} />
+          </section>
+        )}
 
       </div>
 
@@ -490,30 +520,6 @@ export function ListingScreen() {
         Назад
       </button>
       </div>
-
-      {/* Комплектация (миграция 0023): русифицированные опции источника —
-          отдельная секция на всю ширину, ниже карточек */}
-      {listing.options && listing.options.length > 0 && (
-        <section className="panel">
-          <h3>🧰 Комплектация</h3>
-          <div className="options-chips">
-            {listing.options.map((o) => (
-              <span className="options-chips__item" key={o}>
-                {o}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Осмотр (миграция 0018/0022): факты, карта повреждений, чек-лист и
-          фото чека — отдельная секция на всю ширину */}
-      {inspection && (
-        <section className="panel">
-          <h3>🔍 Осмотр</h3>
-          <InspectionSection report={inspection} />
-        </section>
-      )}
 
       {/* Sticky-CTA на мобиле: цена + избранное + главное действие под пальцем */}
       <div className="listing-cta-bar">

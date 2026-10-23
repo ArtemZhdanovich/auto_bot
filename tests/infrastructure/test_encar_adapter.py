@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from app.infrastructure.sources.common.http import FetchError, HttpClient
-from app.infrastructure.sources.encar import EncarApiAdapter
+from app.infrastructure.sources.encar import EncarApiAdapter, _parse_mdsl_panels
 from app.domain.search.criteria import SearchCriteria
 
 SAMPLE_ITEM = {
@@ -59,18 +59,29 @@ def _params_of(request: httpx.Request) -> dict[str, list[str]]:
 
 # Фрагмент реального ответа /v1/readside/vehicle/{id} (анонимно).
 DETAIL_RESPONSE = {
-    "vehicleId": 361895918,
+    # vehicleId ОТЛИЧАЕТСЯ от Id объявления (361895918): чек/диагностика/
+    # страховая живут под ним, detail — под source_id (см. тесты ниже)
+    "vehicleId": 361895919,
     "vin": " kmhsrc81abu123456",  # мусор-регистр/пробел — нормализуется
     "spec": {"type": "CAR", "mileage": 42000, "displacement": 2199, "seatCount": 7},
     "photos": [
         {"code": "001", "path": "/carpicture09/pic3618/361895918_001.jpg", "type": "OUTER"},
         {"code": "010", "path": "/carpicture09/pic3618/361895918_010.jpg", "type": "INNER"},
+        # DIAG2 — скан чека (성능기록부): в отчёт осмотра, НЕ в галерею
+        {"code": "001", "path": "/carpicture09/pic3618/361895918_027.jpg", "type": "DIAG2"},
     ],
     "advertisement": {
         "advertisementType": "NORMAL",
         "diagnosisCar": True,
         "directInspected": False,
         "hasUnderBodyPhoto": True,
+        "underBodyPhotos": [
+            {
+                "photoType": "UNDER_BODY",
+                "photoPath": "/diagnosis/evaluation/car9/insp/4516159/a.jpg",
+                "photoUrl": "http://imgcar.encar.com/diagnosis/evaluation/car9/insp/4516159/a.jpg",
+            },
+        ],
         "oneLineText": "No,paint/TAX100%",
         "verification": {"version": "V3", "reportExists": True},
     },
@@ -210,10 +221,12 @@ def make_enrich_adapter(
     insp_summary: dict | None = None,
     record: dict | None = None,
     diagnosis: dict | None = None,
+    mdsl_html: str | None = None,
 ) -> tuple[EncarApiAdapter, list[httpx.Request]]:
     """Адаптер с маршрутизацией по URL: search → выдача, detail/clean → ответы.
 
     Чек/страховая/диагностика: `None` → 404 (как у авто без этих данных).
+    `mdsl_html` — HTML классической страницы чека (www.encar.com); `None` → 404.
     """
 
     def _resp(payload: dict | None) -> httpx.Response:
@@ -230,6 +243,11 @@ def make_enrich_adapter(
             if clean is None:
                 return httpx.Response(500, json={})
             return httpx.Response(200, json=clean)
+        if "mdsl_regcar" in url:
+            if mdsl_html is None:
+                return httpx.Response(404, content=b"")
+            # как Encar: страница в EUC-KR
+            return httpx.Response(200, content=mdsl_html.encode("euc-kr"))
         if "/inspection/vehicle/" in url:
             if url.endswith("/summary"):
                 return _resp(insp_summary)
@@ -257,7 +275,8 @@ async def test_fetch_enriches_vin_spec_photos_inspection():
     item = result.items[0]
     assert item.vin == "KMHSRC81ABU123456"  # strip + upper, 17 знаков ISO 3779
     assert item.engine_volume == 2199.0  # см³ из spec.displacement
-    # Полный набор фото из detail (search-набор заменён)
+    # Полный набор фото из detail (search-набор заменён); скан чека (DIAG2)
+    # в галерею не попадает
     assert [str(i) for i in item.images] == [
         "https://ci.encar.com/carpicture09/pic3618/361895918_001.jpg",
         "https://ci.encar.com/carpicture09/pic3618/361895918_010.jpg",
@@ -272,11 +291,19 @@ async def test_fetch_enriches_vin_spec_photos_inspection():
     assert "примечание продавца: No,paint/TAX100%" in report["summary"]
     assert "осмотрена напрямую" not in report["summary"]  # directInspected=False
     assert report["grade"] is None and report["marks"] == [] and report["items"] == []
-    assert report["images"] == []  # чека нет — фото неоткуда взять
-    # Три запроса: search + detail + clean-encar
+    # Фото чека: скан 성능기록부 (DIAG2) + днище (underBodyPhotos), не галерея
+    assert report["images"] == [
+        "https://ci.encar.com/carpicture09/pic3618/361895918_027.jpg",
+        "http://imgcar.encar.com/diagnosis/evaluation/car9/insp/4516159/a.jpg",
+    ]
+    # Три запроса: search + detail + clean-encar; чек/диагностика/страховая —
+    # по ВНУТРЕННЕМУ vehicleId (361895919), не по id объявления
     urls = [str(r.url) for r in requests]
     assert any("/v1/readside/vehicle/361895918" in u for u in urls)
     assert any("/v1/readside/clean-encar/vehicle/361895918" in u for u in urls)
+    assert any("/v1/readside/inspection/vehicle/361895919" in u for u in urls)
+    assert any("/v1/readside/record/vehicle/361895919" in u for u in urls)
+    assert any("/v1/readside/diagnosis/vehicle/361895919" in u for u in urls)
     await adapter.close()
 
 
@@ -352,9 +379,12 @@ async def test_fetch_builds_full_inspection_report():
     assert "인천 엠파크타워" in summary  # центр диагностики
     assert len(summary) <= 1000  # лимит InspectionReportOut
 
-    # Фото чека → report["images"] (не в галерее объявления); мусор без path
-    # пропущен, относительный path дополнен префиксом CDN
+    # Фото чека → report["images"] (не в галерее): сперва скан DIAG2 + днище
+    # из detail, затем images из JSON-чека; мусор без path пропущен,
+    # относительный path дополнен префиксом CDN
     assert report["images"] == [
+        "https://ci.encar.com/carpicture09/pic3618/361895918_027.jpg",
+        "http://imgcar.encar.com/diagnosis/evaluation/car9/insp/4516159/a.jpg",
         "https://ci.encar.com/checkimg/2026/08/21/underbody1.jpg",
         "https://ci.encar.com/checkimg/2026/08/21/room1.jpg",
     ]
@@ -364,14 +394,14 @@ async def test_fetch_builds_full_inspection_report():
         "https://ci.encar.com/carpicture09/pic3618/361895918_010.jpg",
     ]
 
-    # Все новые эндпоинты запрошены
+    # Все новые эндпоинты запрошены по ВНУТРЕННЕМУ vehicleId (361895919)
     urls = [str(r.url) for r in requests]
-    assert any("/v1/readside/inspection/vehicle/361895918" in u for u in urls)
+    assert any("/v1/readside/inspection/vehicle/361895919" in u for u in urls)
     assert any(
-        "/v1/readside/inspection/vehicle/361895918/summary" in u for u in urls
+        "/v1/readside/inspection/vehicle/361895919/summary" in u for u in urls
     )
-    assert any("/v1/readside/record/vehicle/361895918/summary" in u for u in urls)
-    assert any("/v1/readside/diagnosis/vehicle/361895918" in u for u in urls)
+    assert any("/v1/readside/record/vehicle/361895919/summary" in u for u in urls)
+    assert any("/v1/readside/diagnosis/vehicle/361895919" in u for u in urls)
     await adapter.close()
 
 
@@ -383,9 +413,82 @@ async def test_fetch_report_without_extra_apis():
     assert report is not None
     assert report["marks"] == [] and report["items"] == []
     assert report["inspector"] is None and report["inspected_at"] is None
-    assert report["images"] == []
+    # Фото чека из detail даже без JSON-чека: скан DIAG2 + днище
+    assert report["images"] == [
+        "https://ci.encar.com/carpicture09/pic3618/361895918_027.jpg",
+        "http://imgcar.encar.com/diagnosis/evaluation/car9/insp/4516159/a.jpg",
+    ]
     assert "Диагностика Encar (엔카진단): пройдена" in report["summary"]
     assert "страховые случаи" not in report["summary"]
+    await adapter.close()
+
+
+# Классическая страница чека (www.encar.com, EUC-KR): блок performanceCheck
+# с ранками панелей (외판 1/2, 주요골격 A/B/C).
+MDSL_HTML = """<html>
+<head><meta http-equiv="Content-Type" content="text/html; charset=euc-kr" /></head>
+<body class="pop inspection_view new">
+<script type="text/javascript">
+var performanceCheck = {
+dataGroup: [
+    { code: '002', name: 'hood', value: '후드', lank: '1', has_old: false },
+    { code: '003', name: 'frontFenderLeft', value: '프론트 휀더(좌)', lank: '1', has_old: false },
+    { code: '009', name: 'trunkLead', value: '트렁크 리드', lank: '1', has_old: false },
+    { code: '011', name: 'frontPanel', value: '프론트 패널', lank: 'A' },
+    { code: '014', name: 'frontWheelHouseLeft', value: '프론트 휠하우스(좌)', lank: 'B', has_old: false },
+    { code: '018', name: 'roofPanel', value: '루프 패널', lank: '2', has_old: false },
+    { code: '019', name: 'floorPanel', value: '플로어 패널', lank: 'C', has_old: false },
+    { code: '025', name: 'quarterPanelLeft', value: '쿼터 패널(리어펜더)(좌)', lank: '2', has_old: false },
+    { code: '029', name: 'pillarPanelFrontLeft', value: '필러 패널 A(좌)', value_old: '필러 패널(앞)(좌)', lank: 'B', has_old: true },
+]
+};
+</script>
+</body></html>
+"""
+
+
+def test_parse_mdsl_panels_ranks():
+    """Ранки классического чека: 2랭크 → repair, B/C 골격 → frame; 1/A пропускаются."""
+    marks = _parse_mdsl_panels(MDSL_HTML)
+    assert marks == [
+        {"zone": "wheelhouse_fl", "type": "frame", "note": None},  # B
+        {"zone": "roof", "type": "repair", "note": None},          # 2랭크
+        {"zone": "frame_floor", "type": "frame", "note": "C"},
+        {"zone": "fender_rl", "type": "repair", "note": None},     # 쿼터 = заднее крыло
+        {"zone": "pillar_a_l", "type": "frame", "note": None},     # B, с value_old
+    ]
+
+
+async def test_fetch_merges_legacy_mdsl_marks():
+    """Классический чек дополняет marks; зоны JSON-чека не дублируются.
+
+    carid в URL — id ОБЪЯВЛЕНИЯ (361895918), не vehicleId.
+    """
+    adapter, requests = make_enrich_adapter(
+        DETAIL_RESPONSE,
+        CLEAN_RESPONSE,
+        inspection=INSPECTION_RESPONSE,
+        mdsl_html=MDSL_HTML,
+    )
+    result = await adapter.fetch(SearchCriteria())
+    report = result.items[0].inspection
+    assert report is not None
+
+    marks = report["marks"]
+    # JSON-чек (door_fl 도색) + 5 панелей классического чека
+    assert {"zone": "door_fl", "type": "repaint", "note": "도색"} in marks
+    assert {"zone": "roof", "type": "repair", "note": None} in marks
+    assert {"zone": "fender_rl", "type": "repair", "note": None} in marks
+    assert {"zone": "frame_floor", "type": "frame", "note": "C"} in marks
+    assert {"zone": "wheelhouse_fl", "type": "frame", "note": None} in marks
+    assert {"zone": "pillar_a_l", "type": "frame", "note": None} in marks
+    assert len(marks) == 6
+    assert sum(1 for m in marks if m["zone"] == "door_fl") == 1  # без дублей
+
+    urls = [str(r.url) for r in requests]
+    assert any(
+        "mdsl_regcar.do" in u and "carid=361895918" in u for u in urls
+    )
     await adapter.close()
 
 
@@ -418,7 +521,7 @@ async def test_fetch_maps_to_unified_listing():
     result = await adapter.fetch(SearchCriteria())
 
     # search + detail-карточка + clean-encar (обогащение окт 2026)
-    assert len(requests) == 7  # search + detail + clean + чек + его summary + страховая + диагностика
+    assert len(requests) == 8  # search + detail + clean + чек + его summary + страховая + диагностика + классический чек
     assert len(result.items) == 1
     item = result.items[0]
     assert item.source == "encar"

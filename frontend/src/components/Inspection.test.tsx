@@ -39,8 +39,8 @@ describe("InspectionSection", () => {
     const { container } = render(<InspectionSection report={report} />);
     const marked = container.querySelectorAll(".inspection__zone--mark");
     expect(marked.length).toBe(2);
-    // Легенда: 7 типов повреждений
-    expect(container.querySelectorAll(".inspection__legend-item").length).toBe(7);
+    // Легенда: 9 типов повреждений (включая repair/frame из классического чека)
+    expect(container.querySelectorAll(".inspection__legend-item").length).toBe(9);
   });
 
   it("тап по зоне открывает детали повреждения", () => {
