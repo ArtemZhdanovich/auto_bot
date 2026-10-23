@@ -274,6 +274,7 @@ async def upsert_inspection(
                 summary=payload.summary,
                 marks=[mark.model_dump() for mark in payload.marks],
                 items=[item.model_dump() for item in payload.items],
+                images=list(payload.images),
             ),
         )
     except AppError as exc:

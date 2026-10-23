@@ -126,6 +126,7 @@ class InspectionReportIn(BaseModel):
     summary: Optional[str] = Field(default=None, max_length=1000)
     marks: list[InspectionMark] = Field(default_factory=list, max_length=60)
     items: list[InspectionItem] = Field(default_factory=list, max_length=40)
+    images: list[str] = Field(default_factory=list, max_length=40)
 
 
 class InspectionReportOut(BaseModel):
@@ -140,3 +141,4 @@ class InspectionReportOut(BaseModel):
     summary: Optional[str] = None
     marks: list[InspectionMark] = Field(default_factory=list)
     items: list[InspectionItem] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)

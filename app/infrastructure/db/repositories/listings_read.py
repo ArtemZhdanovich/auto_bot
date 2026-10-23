@@ -100,6 +100,7 @@ def _to_inspection(row: InspectionReport) -> InspectionView:
         summary=getattr(row, "summary", None),
         marks=[dict(mark) for mark in (getattr(row, "marks", None) or [])],
         items=[dict(item) for item in (getattr(row, "items", None) or [])],
+        images=[str(u) for u in (getattr(row, "images", None) or [])],
     )
 
 
@@ -370,6 +371,7 @@ class SqlAlchemyListingReadRepository:
         row.summary = update.summary
         row.marks = [dict(mark) for mark in update.marks]
         row.items = [dict(item) for item in update.items]
+        row.images = [str(u) for u in update.images]
         row.updated_at = datetime.now(UTC)
         await self._session.flush()
         return _to_inspection(row)

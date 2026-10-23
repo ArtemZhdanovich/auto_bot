@@ -811,25 +811,24 @@ class EncarApiAdapter(BaseApiAdapter):
             if urls:
                 item.images = urls
 
-        # Фото из чека (днище/салон и т.п.) — дополнение к галерее.
+        # Фото из чека (днище/салон и т.п.) — в отчёт осмотра, не в галерею.
         insp_images = inspection.get("images") if isinstance(inspection, dict) else None
+        check_photos: list[str] = []
         if isinstance(insp_images, list) and insp_images:
-            extra: list[str] = []
-            for p in insp_images:
+            for p in insp_images[:20]:  # лимит InspectionReportIn.images
                 path = p.get("path") or p.get("location") if isinstance(p, dict) else p
                 if isinstance(path, str) and path.strip():
                     path = path.strip()
-                    extra.append(
+                    check_photos.append(
                         path if path.startswith("http") else
                         f"{self._photo_prefix}/{path.lstrip('/')}"
                     )
-            if extra:
-                item.images = [*item.images, *extra]
 
         item.inspection = self._build_inspection(
             detail, cleaned,
             inspection=inspection, insp_summary=insp_summary,
             record=record, diagnosis=diagnosis,
+            photos=check_photos,
         )
 
     @staticmethod
@@ -840,6 +839,7 @@ class EncarApiAdapter(BaseApiAdapter):
         insp_summary: dict[str, Any] | None = None,
         record: dict[str, Any] | None = None,
         diagnosis: dict[str, Any] | None = None,
+        photos: list[str] | None = None,
     ) -> dict[str, Any]:
         """Собрать отчёт осмотра из анонимных API Encar.
 
@@ -864,6 +864,7 @@ class EncarApiAdapter(BaseApiAdapter):
             insp_summary: JSON summary чека.
             record: JSON страховой истории.
             diagnosis: JSON 엔ка진단.
+            photos: URL-ы фото чека (днище/салон) — в отчёт, не в галерею.
 
         Returns:
             Словарь для `inspection_reports` (формат InspectionReport).
@@ -1126,6 +1127,7 @@ class EncarApiAdapter(BaseApiAdapter):
             "summary": summary,
             "marks": marks,
             "items": items,
+            "images": photos or [],
         }
 
     def _map_item(self, raw: dict[str, Any]) -> UnifiedListing | None:

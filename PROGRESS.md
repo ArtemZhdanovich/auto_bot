@@ -1,6 +1,40 @@
 
 
-## 76. Обогащение отчётов осмотра Encar: анонимные readside-API (чек, страховка, 엔ка진단) (2026-10-23)
+## 77. Фото чека осмотра: БД → API → фронт (2026-10-23)
+
+- **Симптом:** «картинок чеков нет, данных на фронте тоже нет». Причина —
+  фото чека из JSON-API обрезались на первом же слое: адаптер клал их в
+  **галерею объявления** (`item.images`), а не в отчёт; в
+  `inspection_reports` колонки `images` не было; `_INSPECTION_SQL` не
+  писал даже существующие `inspector`/`inspected_at` (терялись при
+  каждом upsert); в API-схемах и на фронте поля не существовало.
+- **Fix (вся цепочка):**
+  - миграция **0022**: `inspection_reports.images JSONB NOT NULL
+    DEFAULT '[]'`;
+  - `listings_writer`: `_INSPECTION_SQL` + params пишут
+    `inspector`/`inspected_at`/`images`; `_coerce_dt` — строка чека
+    `'2026-08-21'` → aware datetime (asyncpg требует datetime);
+  - `encar.py`: фото чека (path/location, ≤20) → `report["images"]`
+    с префиксом CDN, в галерею больше не подмешиваются;
+  - схемы `InspectionReportIn/Out` + `InspectionUpdate/View` +
+    admin PUT: `images: list[str]` (≤40);
+  - фронт: `Inspection.tsx` — блок «Фото осмотра» (сетка 3 колонки,
+    тап → полное фото в новой вкладке), тип `images?` в
+    `lib/inspection.ts`, стили `.inspection__photos*`.
+- **Проверка:** encar 17/17, полная суита **1190 passed, 7 skipped**,
+  `npm run build` (tsc+vite) ОК; миграция 0021→0022 применена; образы
+  catalog/admin/worker_fetch/miniapp пересобраны; live
+  `GET /api/listings/1423/inspection` отдаёт `images: []` (новое поле);
+  roundtrip-тест в контейнере: отчёт с
+  inspector=`엠파크오토서비스…`/`inspected_at=2026-08-21`/2 фото —
+  записался и прочитался из БД, транзитный листинг удалён каскадом;
+  фетч 25 стр — 214 отчётов перезаписаны без `inspection_upsert_failed`.
+- **Оговорка:** фото и структурированные marks/items появляются только
+  у авто, для которых чек нового формата реально есть у источника
+  (редкость — см. №76); у остальных отчёт честно показывает факты.
+
+
+## 76. Обогащение отчётов осмотра Encar: анонимные readside-API (чек, страховка, 엔카진단) (2026-10-23)
 
 - **Открытие:** в JS-бандле fem.encar.com найдены анонимные JSON-API (все
   отвечают 200 без авторизации, 404 — если данных нет):

@@ -38,6 +38,7 @@ export interface InspectionReport {
   summary?: string | null;
   marks: InspectionMark[];
   items: InspectionItem[];
+  images?: string[] | null;
 }
 
 /** Порядок важности: чем левее, тем «сильнее» дефект — зона красится им. */

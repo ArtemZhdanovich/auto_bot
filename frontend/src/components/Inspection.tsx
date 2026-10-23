@@ -79,6 +79,26 @@ export function InspectionSection({ report }: { report: InspectionReport }) {
         </span>
       </div>
 
+      {/* Фото чека осмотра (днище/салон) — из чека 성능점검기록부 */}
+      {(report.images?.length ?? 0) > 0 && (
+        <div className="inspection__photos">
+          <div className="inspection__photos-title">Фото осмотра</div>
+          <div className="inspection__photos-grid">
+            {report.images!.map((src, i) => (
+              <a
+                key={src}
+                className="inspection__photo"
+                href={src}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <img src={src} alt={`Фото осмотра ${i + 1}`} loading="lazy" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {hasMarks && (
       <>
       {/* SVG-карта кузова: тап по зоне — детали повреждений */}

@@ -147,7 +147,11 @@ INSPECTION_RESPONSE = {
         # S00 (самодиагностика) не маппится в items
         {"type": {"code": "S00", "title": "자기진단"}, "children": []},
     ],
-    "images": [],
+    "images": [
+        {"path": "checkimg/2026/08/21/underbody1.jpg"},
+        "https://ci.encar.com/checkimg/2026/08/21/room1.jpg",
+        {"other": "no-path"},
+    ],
     "etcs": [],
 }
 
@@ -260,6 +264,7 @@ async def test_fetch_enriches_vin_spec_photos_inspection():
     assert "примечание продавца: No,paint/TAX100%" in report["summary"]
     assert "осмотрена напрямую" not in report["summary"]  # directInspected=False
     assert report["grade"] is None and report["marks"] == [] and report["items"] == []
+    assert report["images"] == []  # чека нет — фото неоткуда взять
     # Три запроса: search + detail + clean-encar
     urls = [str(r.url) for r in requests]
     assert any("/v1/readside/vehicle/361895918" in u for u in urls)
@@ -322,6 +327,18 @@ async def test_fetch_builds_full_inspection_report():
     assert "인천 엠파크타워" in summary  # центр диагностики
     assert len(summary) <= 1000  # лимит InspectionReportOut
 
+    # Фото чека → report["images"] (не в галерее объявления); мусор без path
+    # пропущен, относительный path дополнен префиксом CDN
+    assert report["images"] == [
+        "https://ci.encar.com/checkimg/2026/08/21/underbody1.jpg",
+        "https://ci.encar.com/checkimg/2026/08/21/room1.jpg",
+    ]
+    gallery = [str(u) for u in result.items[0].images]
+    assert gallery == [  # detail-фото, без примеси фото чека
+        "https://ci.encar.com/carpicture09/pic3618/361895918_001.jpg",
+        "https://ci.encar.com/carpicture09/pic3618/361895918_010.jpg",
+    ]
+
     # Все новые эндпоинты запрошены
     urls = [str(r.url) for r in requests]
     assert any("/v1/readside/inspection/vehicle/361895918" in u for u in urls)
@@ -341,6 +358,7 @@ async def test_fetch_report_without_extra_apis():
     assert report is not None
     assert report["marks"] == [] and report["items"] == []
     assert report["inspector"] is None and report["inspected_at"] is None
+    assert report["images"] == []
     assert "Диагностика Encar (엔카진단): пройдена" in report["summary"]
     assert "страховые случаи" not in report["summary"]
     await adapter.close()

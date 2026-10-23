@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
-from sqlalchemy import bindparam, func, select, text, update
+from sqlalchemy import DateTime, bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -110,22 +110,46 @@ _PRICE_POINT_SQL = text(
 # Отчёт осмотра из источника. Ручные отчёты не перетираем: DO UPDATE
 # срабатывает только если текущая строка — тоже парсерная (`source='encar'`).
 # При вставке inspector/inspected_at остаются NULL (ручных данных нет).
+def _coerce_dt(value: Any) -> datetime | None:
+    """Дата осмотра из адаптера (`'2026-08-21'`/ISO/datetime) → aware datetime.
+
+    asyncpg принимает в timestamptz только datetime; наивному проставляем UTC.
+    """
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip())
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
 _INSPECTION_SQL = text(
     """
-    INSERT INTO inspection_reports (listing_id, source, grade, summary, marks, items)
-    VALUES (:listing_id, :source, :grade, :summary, :marks, :items)
+    INSERT INTO inspection_reports
+        (listing_id, source, inspector, inspected_at, grade, summary,
+         marks, items, images)
+    VALUES (:listing_id, :source, :inspector, :inspected_at, :grade, :summary,
+            :marks, :items, :images)
     ON CONFLICT (listing_id) DO UPDATE SET
         source = EXCLUDED.source,
+        inspector = EXCLUDED.inspector,
+        inspected_at = EXCLUDED.inspected_at,
         grade = COALESCE(EXCLUDED.grade, inspection_reports.grade),
         summary = EXCLUDED.summary,
         marks = EXCLUDED.marks,
         items = EXCLUDED.items,
+        images = EXCLUDED.images,
         updated_at = now()
     WHERE inspection_reports.source = 'encar'
     """
 ).bindparams(
     bindparam("marks", type_=JSONB),
     bindparam("items", type_=JSONB),
+    bindparam("images", type_=JSONB),
+    bindparam("inspected_at", type_=DateTime(timezone=True)),
 )
 
 
@@ -210,10 +234,13 @@ class SqlAlchemyListingsWriter:
             {
                 "listing_id": listing_id,
                 "source": str(report.get("source") or "encar"),
+                "inspector": report.get("inspector"),
+                "inspected_at": _coerce_dt(report.get("inspected_at")),
                 "grade": report.get("grade"),
                 "summary": report.get("summary"),
                 "marks": report.get("marks") or [],
                 "items": report.get("items") or [],
+                "images": report.get("images") or [],
             }
             for listing_id, report in rows
         ]

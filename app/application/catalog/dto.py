@@ -162,6 +162,7 @@ class InspectionUpdate:
     summary: str | None = None
     marks: list[dict] = field(default_factory=list)
     items: list[dict] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +176,7 @@ class InspectionView:
     summary: str | None = None
     marks: list[dict] = field(default_factory=list)
     items: list[dict] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
