@@ -41,6 +41,20 @@ DEFAULT_DETAIL_TEMPLATE = "https://fem.encar.com/car/detail/{source_id}"
 DEFAULT_DETAIL_API = "https://api.encar.com/v1/readside/vehicle/{source_id}"
 # Флаг «безаварийности» (Clean Encar): {"vehicleId": N, "cleaned": bool}.
 DEFAULT_CLEAN_API = "https://api.encar.com/v1/readside/clean-encar/vehicle/{source_id}"
+# Чек осмотра (성능점검기록부): зоны кузова (outers), чек-лист агрегатов
+# (inners), фото чека (images), флаги ДТП/ремонта (master). Анонимно 200,
+# для авто без чека — 404 (окт 2026, найдено в JS-бандле fem.encar.com).
+DEFAULT_INSPECTION_API = "https://api.encar.com/v1/readside/inspection/vehicle/{source_id}"
+# Кто проводил чек (название центра + инспектор) — поле `inspName`.
+DEFAULT_INSPECTION_SUMMARY_API = (
+    "https://api.encar.com/v1/readside/inspection/vehicle/{source_id}/summary"
+)
+# Страховая история: количество ДТП (своя/чужая вина), утопления, угоны,
+# смена владельцев/номеров, залог/лизинг (анонимно 200).
+DEFAULT_RECORD_API = "https://api.encar.com/v1/readside/record/vehicle/{source_id}/summary"
+# 엔ка진단 — вердикт диагностики: зоны кузова NORMAL/дефект + комментарии
+# (CHECKER_COMMENT «무사고» и пр.). Анонимно 200, без диагностики — 404.
+DEFAULT_DIAGNOSIS_API = "https://api.encar.com/v1/readside/diagnosis/vehicle/{source_id}"
 # Параллельные detail-запросы на страницу выдачи (вежливость к API).
 _DETAIL_CONCURRENCY = 5
 # VIN: 17 знаков без I/O/Q (ISO 3779). Корейские VIN соответствуют; мусор
@@ -198,6 +212,163 @@ def _to_decimal_safe(value: Any) -> Decimal | None:
         return None
 
 
+# --- маппинг чека/диагностики Encar на unified-схему отчёта ---------------
+
+# Зоны 엔ка진단 (стабильные EN-имена) → BodyZone миниаппа.
+# Значение None — зоны нет в нашей схеме (задний бампер) — пропускаем.
+_DIAGNOSIS_ZONES: dict[str, str | None] = {
+    "FRONT_BUMPER": "front_bumper",
+    "REAR_BUMPER": None,
+    "HOOD": "hood",
+    "ROOF": "roof",
+    "ROOF_PANEL": "roof",
+    "TRUNK_LID": "trunk",
+    "TAIL_GATE": "trunk",
+    "REAR_PANEL": "trunk",
+    "FRONT_FENDER_LEFT": "fender_fl",
+    "FRONT_FENDER_RIGHT": "fender_fr",
+    "REAR_FENDER_LEFT": "fender_rl",
+    "REAR_FENDER_RIGHT": "fender_rr",
+    "QUARTER_PANEL_LEFT": "fender_rl",
+    "QUARTER_PANEL_RIGHT": "fender_rr",
+    "FRONT_DOOR_LEFT": "door_fl",
+    "FRONT_DOOR_RIGHT": "door_fr",
+    "BACK_DOOR_LEFT": "door_rl",
+    "BACK_DOOR_RIGHT": "door_rr",
+    "ROCKER_PANEL_LEFT": "rocker_l",
+    "ROCKER_PANEL_RIGHT": "rocker_r",
+}
+
+# Комментарий-зоны 엔ка진단 (текст, не отметка на карте).
+_DIAGNOSIS_COMMENT_KEYS = frozenset({"CHECKER_COMMENT", "OUTER_PANEL_COMMENT"})
+
+# Тип дефекта по корейскому статусу (판금/도색/…). Порядок = приоритет.
+_MARK_TYPES_KR: tuple[tuple[str, str], ...] = (
+    ("교환", "replace"),  # замена элемента
+    ("판금", "dent"),  # рихтовка
+    ("도색", "repaint"),  # покраска
+    ("부식", "rust"),  # коррозия
+    ("녹", "rust"),
+    ("균열", "crack"),  # трещина
+    ("깨짐", "glass"),  # повреждение стекла
+    ("흠집", "scratch"),  # царапина
+    ("스크래치", "scratch"),
+)
+# Неизвестный статус — самая «мягкая» отметка (видно на карте, не пугает).
+_MARK_TYPE_FALLBACK = "scratch"
+
+# Группы чека (성능점검기록부, стабильные коды S00–S07) → ItemKey.
+# S00 — самодиагностика продавца, дублирует S01/S02, не маппим.
+_ITEM_GROUP_KEYS: dict[str, str | None] = {
+    "S00": None,
+    "S01": "engine",  # 원동기 (двигатель)
+    "S02": "transmission",  # 변속기 (КПП)
+    "S03": "transmission",  # 동력전달 (приводы/дифференциал)
+    "S04": "steering",  # 조향 (рулевое)
+    "S05": "brakes",  # 제동 (тормоза)
+    "S06": "electronics",  # 전기 (электрика)
+    "S07": "leaks",  # 연료 (топливная система, течи)
+}
+
+# Статус пункта чека: код → (ItemStatus, русская подпись для note).
+# 1 양호 норма · 2 적정 допустимо · 3 없음 отсутствует (норма для течей) ·
+# 10 불량 неисправен · 4/6 микроподтекание · 5/7 подтекание · 8 недостаточно.
+_ITEM_STATUSES: dict[str, tuple[str, str]] = {
+    "1": ("ok", "норма"),
+    "2": ("ok", "допустимо"),
+    "3": ("ok", "нет"),
+    "10": ("defect", "неисправен"),
+    "4": ("warn", "микроподтекание"),
+    "6": ("warn", "запотевание"),
+    "8": ("warn", "недостаточно"),
+    "5": ("defect", "подтекание"),
+    "7": ("defect", "подтекание"),
+}
+_ITEM_WORST: dict[str, int] = {"ok": 0, "warn": 1, "defect": 2}
+
+# Порядок ключей чек-листа в отчёте (как на фронте).
+_ITEM_ORDER: tuple[str, ...] = (
+    "engine", "transmission", "suspension", "brakes", "steering",
+    "electronics", "interior", "optics", "glass", "tires", "ac", "leaks",
+)
+
+
+def _mark_type_from_kr(title: Any) -> str:
+    """Определяет MarkType по корейскому тексту статуса/результата.
+
+    Args:
+        title: Текст статуса (예: «도색», «판금», «정상»).
+
+    Returns:
+        Имя MarkType из схемы отчёта.
+    """
+    text = str(title or "")
+    for needle, mark in _MARK_TYPES_KR:
+        if needle in text:
+            return mark
+    return _MARK_TYPE_FALLBACK
+
+
+def _status_of(status_type: Any) -> tuple[str, str] | None:
+    """Код статуса пункта чека → (ItemStatus, русская подпись).
+
+    Args:
+        status_type: Значение `statusType` из чека (dict или None).
+
+    Returns:
+        Кортеж (status, label) или `None`, если статус не указан.
+    """
+    if not isinstance(status_type, dict):
+        return None
+    code = str(status_type.get("code") or "")
+    if not code:
+        return None
+    mapped = _ITEM_STATUSES.get(code)
+    if mapped is None:
+        # Незнакомый код — осторожно считаем предупреждением.
+        return ("warn", str(status_type.get("title") or ""))
+    return mapped
+
+
+def _outer_zone(title: Any) -> str | None:
+    """Корейское название зоны чека (outer) → BodyZone (или None).
+
+    Названия вида «프론트 범퍼», «앞도어(좁)». Определяем по ключевым словам;
+    неизвестные зоны пропускаем (схема кузова фиксирована).
+
+    Args:
+        title: Корейский текст названия зоны.
+
+    Returns:
+        Имя BodyZone или `None`.
+    """
+    t = str(title or "")
+    if not t:
+        return None
+    left = "좌" in t
+    front = ("앞" in t) or ("프론트" in t) or ("전방" in t)
+    rear = ("뒤" in t) or ("리어" in t) or ("후방" in t)
+    if "범퍼" in t:
+        return "front_bumper" if front or not rear else None
+    if "보닛" in t:
+        return "hood"
+    if "트렁크" in t or "게이트" in t or "리어패널" in t:
+        return "trunk"
+    if "루프" in t:
+        return "roof"
+    if "도어" in t:
+        return ("door_fl" if left else "door_fr") if front else (
+            "door_rl" if left else "door_rr"
+        )
+    if "펜더" in t or "쿼터" in t or "파일러" in t:
+        return ("fender_fl" if left else "fender_fr") if front or not rear else (
+            "fender_rl" if left else "fender_rr"
+        )
+    if "록커" in t or "미어" in t:
+        return "rocker_l" if left else "rocker_r"
+    return None
+
+
 class EncarApiAdapter(BaseApiAdapter):
     """Адаптер Encar Search API.
 
@@ -234,6 +405,16 @@ class EncarApiAdapter(BaseApiAdapter):
             raise ValueError(f"encar: usd_krw must be > 0, got {self._usd_krw}")
         self._detail_api = self.config.get("detail_api_template", DEFAULT_DETAIL_API)
         self._clean_api = self.config.get("clean_api_template", DEFAULT_CLEAN_API)
+        self._inspection_api = self.config.get(
+            "inspection_api_template", DEFAULT_INSPECTION_API
+        )
+        self._inspection_summary_api = self.config.get(
+            "inspection_summary_api_template", DEFAULT_INSPECTION_SUMMARY_API
+        )
+        self._record_api = self.config.get("record_api_template", DEFAULT_RECORD_API)
+        self._diagnosis_api = self.config.get(
+            "diagnosis_api_template", DEFAULT_DIAGNOSIS_API
+        )
         self._enrich_details = bool(self.config.get("enrich_details", True))
 
     # --- fetch ---------------------------------------------------------
@@ -497,13 +678,31 @@ class EncarApiAdapter(BaseApiAdapter):
 
     # --- обогащение детальными карточками -------------------------------
 
-    async def _enrich_from_details(self, items: list[UnifiedListing]) -> None:
-        """Догрузить `/v1/readside/vehicle/{id}` для каждого объявления.
+    async def _fetch_optional(self, url: str) -> dict[str, Any] | None:
+        """GET JSON без фатальных ошибок: 404 «нет данных» → `None`.
 
-        Search-выдача не содержит VIN и показывает часть фото; детальный
-        API (анонимно, окт 2026) отдаёт VIN, полный spec и полный набор
-        фото, плюс флаги состояния (диагностика/осмотр/обременения).
-        Ошибки отдельных карточек логируются и не роняют страницу.
+        Args:
+            url: Абсолютный URL.
+
+        Returns:
+            Dict-ответ или `None` при любой ошибке/не-dict.
+        """
+        try:
+            data = await self.http.get_json(url)
+        except Exception as exc:  # 404/таймаут/блокировка — не критично
+            logger.debug("encar_optional_failed url=%s: %s", url, exc)
+            return None
+        return data if isinstance(data, dict) else None
+
+    async def _enrich_from_details(self, items: list[UnifiedListing]) -> None:
+        """Догрузить детальные данные для каждого объявления.
+
+        Search-выдача не содержит VIN и показывает часть фото. Анонимно
+        (окт 2026) работают: `/v1/readside/vehicle/{id}` (VIN, spec, фото,
+        флаги), `clean-encar` (безаварийность), `inspection` (чек
+        성능점검기록부: агрегаты/зоны/фото), `record/summary` (страховая
+        история), `diagnosis` (엔ка진단: зоны/вердикт). Ошибки отдельных
+        карточек и отдельных отчётов логируются и не роняют страницу.
 
         Args:
             items: Объявления страницы (мутируются in-place).
@@ -532,8 +731,34 @@ class EncarApiAdapter(BaseApiAdapter):
                         "encar_detail_failed id=%s: %s", item.source_id, exc
                     )
                     return
-                if isinstance(detail, dict):
-                    self._apply_detail(item, detail, cleaned)
+                if not isinstance(detail, dict):
+                    return
+                sid = item.source_id
+                inspection = await self._fetch_optional(
+                    self._inspection_api.format(source_id=sid)
+                )
+                insp_summary = (
+                    await self._fetch_optional(
+                        self._inspection_summary_api.format(source_id=sid)
+                    )
+                    if inspection is not None
+                    else None
+                )
+                record = await self._fetch_optional(
+                    self._record_api.format(source_id=sid)
+                )
+                diagnosis = await self._fetch_optional(
+                    self._diagnosis_api.format(source_id=sid)
+                )
+                self._apply_detail(
+                    item,
+                    detail,
+                    cleaned,
+                    inspection=inspection,
+                    insp_summary=insp_summary,
+                    record=record,
+                    diagnosis=diagnosis,
+                )
 
         await asyncio.gather(*(enrich_one(item) for item in items))
 
@@ -542,6 +767,10 @@ class EncarApiAdapter(BaseApiAdapter):
         item: UnifiedListing,
         detail: dict[str, Any],
         cleaned: bool | None,
+        inspection: dict[str, Any] | None = None,
+        insp_summary: dict[str, Any] | None = None,
+        record: dict[str, Any] | None = None,
+        diagnosis: dict[str, Any] | None = None,
     ) -> None:
         """Наложить данные детальной карточки на объявление (in-place).
 
@@ -549,6 +778,10 @@ class EncarApiAdapter(BaseApiAdapter):
             item: Объявление из search-выдачи.
             detail: JSON ответа `/v1/readside/vehicle/{id}`.
             cleaned: Флаг Clean Encar (`None` — не удалось получить).
+            inspection: JSON чека осмотра (`None` — нет/ошибка).
+            insp_summary: JSON summary чека (`None` — нет/ошибка).
+            record: JSON страховой истории (`None` — нет/ошибка).
+            diagnosis: JSON 엔ка진단 (`None` — нет/ошибка).
         """
         vin_raw = detail.get("vin")
         vin = vin_raw.strip().upper() if isinstance(vin_raw, str) else ""
@@ -578,23 +811,59 @@ class EncarApiAdapter(BaseApiAdapter):
             if urls:
                 item.images = urls
 
-        item.inspection = self._build_inspection(detail, cleaned)
+        # Фото из чека (днище/салон и т.п.) — дополнение к галерее.
+        insp_images = inspection.get("images") if isinstance(inspection, dict) else None
+        if isinstance(insp_images, list) and insp_images:
+            extra: list[str] = []
+            for p in insp_images:
+                path = p.get("path") or p.get("location") if isinstance(p, dict) else p
+                if isinstance(path, str) and path.strip():
+                    path = path.strip()
+                    extra.append(
+                        path if path.startswith("http") else
+                        f"{self._photo_prefix}/{path.lstrip('/')}"
+                    )
+            if extra:
+                item.images = [*item.images, *extra]
+
+        item.inspection = self._build_inspection(
+            detail, cleaned,
+            inspection=inspection, insp_summary=insp_summary,
+            record=record, diagnosis=diagnosis,
+        )
 
     @staticmethod
     def _build_inspection(
-        detail: dict[str, Any], cleaned: bool | None
+        detail: dict[str, Any],
+        cleaned: bool | None,
+        inspection: dict[str, Any] | None = None,
+        insp_summary: dict[str, Any] | None = None,
+        record: dict[str, Any] | None = None,
+        diagnosis: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Собрать отчёт осмотра из доступных анонимно фактов карточки.
+        """Собрать отчёт осмотра из анонимных API Encar.
 
-        Полная диагностическая таблица (엔카진단: оценки зон кузова/салона)
-        живёт в `/v1/readside/diagnosis/vehicle/{id}` и требует авторизацию
-        Encar — анонимно она отдаёт 404. Поэтому marks/items остаются
-        пустыми (рукопашная осмотра поверх — PUT /listings/{id}/inspection),
-        а факты состояния попадают в `summary`.
+        Источники (все анонимны, окт 2026; `None` — 404/ошибка):
+        - detail (`/v1/readside/vehicle/{id}`): флаги карточки;
+        - inspection (`.../inspection/vehicle/{id}`): чек 성능점검기록부 —
+          флаги ДТП/ремонта (master), чек-лист агрегатов (inners → items),
+          зоны кузова (outers → marks);
+        - insp_summary (`.../summary`): центр и инспектор → inspector;
+        - record (`.../record/vehicle/{id}/summary`): страховая история
+          (ДТП, гибель, угоны, владельцы, залог) → facts;
+        - diagnosis (`.../diagnosis/vehicle/{id}`): 엔카진단 — зоны
+          NORMAL/дефект → marks, вердикт CHECKER_COMMENT → facts.
+
+        grade не выдумываем (остаётся `None`) — Encar онлайн-оценку не
+        отдаёт; ручную оценку админ ставит через PUT /listings/{id}/inspection.
 
         Args:
             detail: JSON детальной карточки.
             cleaned: Флаг Clean Encar (`None` — неизвестен).
+            inspection: JSON чека осмотра.
+            insp_summary: JSON summary чека.
+            record: JSON страховой истории.
+            diagnosis: JSON 엔ка진단.
 
         Returns:
             Словарь для `inspection_reports` (формат InspectionReport).
@@ -652,14 +921,211 @@ class EncarApiAdapter(BaseApiAdapter):
         if isinstance(one_line, str) and one_line.strip():
             facts.append(f"примечание продавца: {one_line.strip()}")
 
+        marks: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
+        inspector: str | None = None
+        inspected_at: str | None = None
+
+        # --- чек осмотра (성능점검기록부) -----------------------------------
+        if inspection is not None:
+            master = (
+                inspection.get("master")
+                if isinstance(inspection.get("master"), dict)
+                else {}
+            )
+            m_detail = (
+                master.get("detail")
+                if isinstance(master.get("detail"), dict)
+                else {}
+            )
+            if master.get("accdient") is False:
+                facts.append("чек осмотра: ДТП не отмечены")
+            elif master.get("accdient") is True:
+                facts.append("чек осмотра: отмечены ДТП")
+            if bool(master.get("simpleRepair")):
+                facts.append("чек осмотра: простой ремонт (полировка)")
+            first_reg = str(m_detail.get("firstRegistrationDate") or "")
+            if first_reg:
+                facts.append(f"первая регистрация: {first_reg}")
+            guaranty = (
+                m_detail.get("guarantyType")
+                if isinstance(m_detail.get("guarantyType"), dict)
+                else {}
+            )
+            if str(guaranty.get("title") or "") == "보험사보증":
+                facts.append("гарантия страховой компании")
+            source = (
+                inspection.get("inspectionSource")
+                if isinstance(inspection.get("inspectionSource"), dict)
+                else {}
+            )
+            if str(source.get("code") or "") == "DIRECT_INPUT":
+                facts.append("чек заполнен продавцом/дилером, не сервисом Encar")
+            reg_date = str(master.get("registrationDate") or "")
+            if reg_date:
+                inspected_at = reg_date[:10]
+
+        # --- outers → marks (зоны кузова чека: 교환/판금/도색/…) -------------
+        if inspection is not None:
+            for outer in inspection.get("outers") or []:
+                if not isinstance(outer, dict):
+                    continue
+                o_type = outer.get("type")
+                o_title = o_type.get("title") if isinstance(o_type, dict) else None
+                zone = _outer_zone(o_title)
+                if zone is None:
+                    continue
+                st = outer.get("statusType")
+                st_title = st.get("title") if isinstance(st, dict) else None
+                if not st_title or st_title in ("없음", "정상"):
+                    continue
+                marks.append(
+                    {
+                        "zone": zone,
+                        "type": _mark_type_from_kr(st_title),
+                        "note": str(st_title)[:300],
+                    }
+                )
+
+            # inners → items (чек-лист агрегатов; берём худший статус группы)
+            grouped: dict[str, dict[str, Any]] = {}
+
+            def _walk(node: dict[str, Any], cell: dict[str, Any]) -> None:
+                st = _status_of(node.get("statusType"))
+                children = [
+                    ch for ch in (node.get("children") or []) if isinstance(ch, dict)
+                ]
+                if st is None:
+                    for ch in children:
+                        _walk(ch, cell)
+                    return
+                status, label = st
+                if _ITEM_WORST[status] > _ITEM_WORST[cell["status"]]:
+                    cell["status"] = status
+                if status != "ok":
+                    n_type = node.get("type")
+                    n_title = n_type.get("title") if isinstance(n_type, dict) else ""
+                    cell["notes"].append(f"{n_title} — {label}")
+
+            for group in inspection.get("inners") or []:
+                if not isinstance(group, dict):
+                    continue
+                g_type = group.get("type")
+                g_code = (
+                    str(g_type.get("code") or "") if isinstance(g_type, dict) else ""
+                )
+                key = _ITEM_GROUP_KEYS.get(g_code)
+                if key is None:
+                    continue
+                cell = grouped.setdefault(key, {"status": "ok", "notes": []})
+                for child in group.get("children") or []:
+                    if isinstance(child, dict):
+                        _walk(child, cell)
+
+            for key in _ITEM_ORDER:
+                cell = grouped.get(key)
+                if cell is None:
+                    continue
+                entry: dict[str, Any] = {"key": key, "status": cell["status"]}
+                if cell["notes"]:
+                    entry["note"] = "; ".join(cell["notes"])[:300]
+                items.append(entry)
+
+            insp_name = insp_summary.get("inspName") if isinstance(
+                insp_summary, dict
+            ) else None
+            if isinstance(insp_name, str) and insp_name.strip():
+                inspector = insp_name.strip()[:120]
+
+        # --- страховая история (보험이력) ------------------------------------
+        if record is not None:
+
+            def _cnt(key: str) -> int:
+                value = record.get(key)
+                return value if isinstance(value, int) else 0
+
+            my = _cnt("myAccidentCnt")
+            other = _cnt("otherAccidentCnt")
+            if my or other:
+                facts.append(
+                    f"страховые случаи: {my + other} "
+                    f"(этим авто: {my}, у других: {other})"
+                )
+            if _cnt("floodTotalLossCnt"):
+                facts.append(
+                    f"полная гибель (наводнение): {_cnt('floodTotalLossCnt')}"
+                )
+            if _cnt("floodPartLossCnt"):
+                facts.append(
+                    f"частичная гибель (наводнение): {_cnt('floodPartLossCnt')}"
+                )
+            if _cnt("robberCnt"):
+                facts.append(f"угонов: {_cnt('robberCnt')}")
+            if _cnt("ownerChangeCnt"):
+                facts.append(f"смен владельцев: {_cnt('ownerChangeCnt')}")
+            if _cnt("carNoChangeCnt"):
+                facts.append(f"смен госномера: {_cnt('carNoChangeCnt')}")
+            if record.get("loan"):
+                facts.append("залог/кредит в истории")
+            if record.get("business"):
+                facts.append("служебное использование в истории")
+            if record.get("government"):
+                facts.append("использование госорганами в истории")
+            if not any(f.startswith("первая регистрация") for f in facts):
+                first_date = str(record.get("firstDate") or "")
+                if first_date:
+                    facts.append(f"первая регистрация: {first_date}")
+
+        # --- 엔ка진단 (диагностика Encar) ------------------------------------
+        if diagnosis is not None:
+            comments: list[str] = []
+            for d_item in diagnosis.get("items") or []:
+                if not isinstance(d_item, dict):
+                    continue
+                d_name = str(d_item.get("name") or "")
+                if d_name in _DIAGNOSIS_COMMENT_KEYS:
+                    text = str(d_item.get("result") or "").strip()
+                    if text:
+                        comments.append(text)
+                    continue
+                zone = _DIAGNOSIS_ZONES.get(d_name)
+                # None — зона вне нашей схемы (REAR_BUMPER) или неизвестна.
+                if zone is None:
+                    continue
+                if str(d_item.get("resultCode") or "").upper() == "NORMAL":
+                    continue
+                d_result = str(d_item.get("result") or "").strip()
+                marks.append(
+                    {
+                        "zone": zone,
+                        "type": _mark_type_from_kr(d_result),
+                        "note": (d_result[:300] or None),
+                    }
+                )
+            if comments:
+                if any("무사고" in c for c in comments):
+                    facts.append("вердикт Encar: 무사고 (без ДТП)")
+                else:
+                    facts.append(f"вердикт Encar: {' / '.join(comments)[:120]}")
+            d_date = str(diagnosis.get("diagnosisDate") or "")[:10]
+            d_center = str(diagnosis.get("reservationCenterName") or "").strip()
+            d_extra = " ".join(x for x in (d_date, d_center) if x)
+            facts[0] = "Диагностика Encar (엔카진단): пройдена" + (
+                f" — {d_extra}" if d_extra else ""
+            )
+
+        summary = " · ".join(facts)
+        if len(summary) > 1000:  # лимит InspectionReportIn/Out
+            summary = summary[:997] + "…"
+
         return {
             "source": "encar",
-            "inspector": None,
-            "inspected_at": None,
+            "inspector": inspector,
+            "inspected_at": inspected_at,
             "grade": None,
-            "summary": " · ".join(facts),
-            "marks": [],
-            "items": [],
+            "summary": summary,
+            "marks": marks,
+            "items": items,
         }
 
     def _map_item(self, raw: dict[str, Any]) -> UnifiedListing | None:

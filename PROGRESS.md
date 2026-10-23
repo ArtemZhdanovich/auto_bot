@@ -1,5 +1,52 @@
 
 
+## 76. Обогащение отчётов осмотра Encar: анонимные readside-API (чек, страховка, 엔ка진단) (2026-10-23)
+
+- **Открытие:** в JS-бандле fem.encar.com найдены анонимные JSON-API (все
+  отвечают 200 без авторизации, 404 — если данных нет):
+  `/v1/readside/inspection/vehicle/{id}` (чек 성능점검기록부),
+  `.../summary`, `/v1/readside/record/vehicle/{id}/summary` (страховая
+  история) и `/v1/readside/diagnosis/vehicle/{id}` (엔ка진단).
+- **Адаптер `encar.py`:** 4 эндпоинта + конфиг-ключи; маппинги
+  `_DIAGNOSIS_ZONES`, `_ITEM_GROUP_KEYS` (S00–S07), `_ITEM_STATUSES`
+  (коды 1/2/3/10/4-8…), `_MARK_TYPES_KR`; `_fetch_optional` (404→None);
+  `_enrich_from_details` фетчит чек+summary+record+diagnosis;
+  `_build_inspection` переписан: outers→marks, inners→items (худший
+  статус группы), record→факты (ДТП, гибель, угоны, владельцы, залог),
+  diagnosis→marks+вердикт, inspector/inspected_at; фото чека → images.
+  Note ≤300, summary ≤1000 (лимиты схемы). `guarantyType` читается из
+  `master.detail` (не `master`); `master.accdient` — реальное имя поля
+  (опечатка Encar).
+- **Тесты:** роутинг URL в mock, фикстуры INSPECTION/RECORD/DIAGNOSIS,
+  `test_fetch_builds_full_inspection_report`,
+  `test_fetch_report_without_extra_apis`; encar 17/17, полная суита
+  **1214 passed**. Реальный payload 41339509 → валидный
+  InspectionReportIn (marks/items/inspector заполнены).
+- **Прод:**
+  - Образ worker_fetch пересобран; batch `_enrich_from_details` и полный
+    `adapter.fetch()` в контейнере работают (new_format=0/20 на свежей
+    странице — у источника данных нет, не регрессия).
+  - Сквозная запись: обогащение 42757015 → `SqlAlchemyListingsWriter.
+    upsert_many` → БД → `GET /api/listings/1423/inspection` → **200**,
+    summary с диагнозом/записью техосмотра/Clean Encar/примечанием
+    продавца ( hangul без моджибейка).
+  - Метрики после фетчей: 1474 отчётов encar, у 1148 упомянута запись
+    техосмотра, у 1468 — диагностика; marks/items/inspector — только у
+    авто с реальными данными.
+- **Ограничение источника:** структурированные marks/items есть только у
+  авто, для которых чек/диагностика реально проводились в новом формате
+  (41339509 — есть; 5 свежих и 3 старых ID 2014–2018 — 404). У остальных
+  чек живёт в legacy `mdsl_regcar.do`, который из контейнера
+  недостижим (ConnectTimeout на `www.encar.com`; из локальной сети
+  открывается). Обогащение срабатывает автоматически, когда такой авто
+  попадает в фетч (cron).
+- **DLQ (depth=12):** разобрана — задачи `fetch_source_task encar` пали
+  сетевыми таймаутами search-API (деградация прокси ~08:21), не багом
+  сериализации. Повторная постановка (`year_from:2014, year_to:2017`)
+  отработала: +37 объявлений, ошибок нет.
+- **Убрано:** временные `_debug_encar_detail.py`, `_probe*.txt`.
+
+
 ## 75. Чек Encar «без данных»: факты в summary + компактный список на фронте (2026-10-23)
 
 - **Симптом:** «чеки кривые — данных нет» — отчёты осмотра encar в БД с

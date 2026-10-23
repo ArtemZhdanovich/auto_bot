@@ -83,9 +83,132 @@ DETAIL_RESPONSE = {
 }
 CLEAN_RESPONSE = {"vehicleId": 361895918, "cleaned": True}
 
+# Чек осмотра (성능점검기록부): фрагмент реальной структуры — флаги master,
+# зоны кузова (outers), чек-лист агрегатов (inners, коды групп S00-S07).
+INSPECTION_RESPONSE = {
+    "vehicleId": 361895918,
+    "formats": ["TABLE"],
+    "inspectionSource": {"code": "DIRECT_INPUT", "registrantId": "youngo06"},
+    "price": None,
+    "directManagement": None,
+    "master": {
+        "supplyNum": "2026002071",
+        "accdient": False,
+        "simpleRepair": True,
+        "registrationDate": "2026-08-21T15:02:27",
+        "detail": {
+            "recordNo": "26080508106",
+            "vin": "KLAZA69SDHB728319",
+            "firstRegistrationDate": "20161125",
+            "guarantyType": {"code": "2", "title": "보험사보증"},
+        },
+    },
+    "outers": [
+        # левая передняя дверь — покраска; бампер без дефектов → не в marks
+        {"type": {"code": "O01", "title": "앞도어(좌)"}, "statusType": {"code": "6", "title": "도색"}},
+        {"type": {"code": "O02", "title": "프론트 범퍼"}, "statusType": {"code": "3", "title": "없음"}},
+    ],
+    "inners": [
+        {
+            "type": {"code": "S01", "title": "원동기"},
+            "children": [
+                {
+                    "type": {"code": "s003", "title": "작동상태(공회전)"},
+                    "statusType": {"code": "1", "title": "양호"},
+                    "statusItemTypes": [],
+                    "children": [],
+                },
+                {
+                    "type": {"code": "s0102", "title": "오일누유"},
+                    "statusType": None,
+                    "statusItemTypes": [],
+                    "children": [
+                        {
+                            "type": {"code": "s006", "title": "실린더 블록 / 오일팬"},
+                            "statusType": {"code": "7", "title": "누유"},
+                            "statusItemTypes": [],
+                            "children": [],
+                        },
+                    ],
+                },
+            ],
+        },
+        {
+            "type": {"code": "S05", "title": "제동"},
+            "children": [
+                {
+                    "type": {"code": "s032", "title": "배력장치 상태"},
+                    "statusType": {"code": "10", "title": "불량"},
+                    "statusItemTypes": [],
+                    "children": [],
+                },
+            ],
+        },
+        # S00 (самодиагностика) не маппится в items
+        {"type": {"code": "S00", "title": "자기진단"}, "children": []},
+    ],
+    "images": [],
+    "etcs": [],
+}
 
-def make_enrich_adapter(detail: dict, clean: dict | None) -> tuple[EncarApiAdapter, list[httpx.Request]]:
-    """Адаптер с маршрутизацией по URL: search → выдача, detail/clean → ответы."""
+# Страховая история (보험이력): фрагмент реального ответа.
+RECORD_RESPONSE = {
+    "vehicleId": 361895918,
+    "accidentCnt": 2,
+    "myAccidentCnt": 0,
+    "myAccidentCost": None,
+    "otherAccidentCnt": 2,
+    "otherAccidentCost": None,
+    "floodTotalLossCnt": 0,
+    "floodPartLossCnt": 1,
+    "robberCnt": 0,
+    "ownerChangeCnt": 5,
+    "carNoChangeCnt": 1,
+    "business": 0,
+    "government": 0,
+    "loan": 1,
+    "firstDate": "2016-11-25",
+    "regDate": "2026-10-23T16:45:14",
+}
+
+# 엔ка진단: зоны NORMAL/дефект + вердикты.
+DIAGNOSIS_RESPONSE = {
+    "vehicleId": 361895918,
+    "diagnosisNo": "18",
+    "diagnosisDate": "2026-09-18T00:00:00",
+    "reservationCenterName": "인천 엠파크타워",
+    "items": [
+        {"code": "006003", "name": "FRONT_DOOR_LEFT", "result": "정상", "resultCode": "NORMAL"},
+        {"code": "006009", "name": "TRUNK_LID", "result": "도색", "resultCode": "REPAINT"},
+        {
+            "code": "011001",
+            "name": "CHECKER_COMMENT",
+            "result": "본 차량은 엔카의 진단 결과 모든 항목이 정상이며 '무사고' 차량입니다.",
+            "resultCode": None,
+        },
+        {"code": "011002", "name": "OUTER_PANEL_COMMENT", "result": "좌우쿼터패널 미세판금", "resultCode": None},
+    ],
+}
+
+
+def make_enrich_adapter(
+    detail: dict,
+    clean: dict | None,
+    inspection: dict | None = None,
+    insp_summary: dict | None = None,
+    record: dict | None = None,
+    diagnosis: dict | None = None,
+) -> tuple[EncarApiAdapter, list[httpx.Request]]:
+    """Адаптер с маршрутизацией по URL: search → выдача, detail/clean → ответы.
+
+    Чек/страховая/диагностика: `None` → 404 (как у авто без этих данных).
+    """
+
+    def _resp(payload: dict | None) -> httpx.Response:
+        if payload is None:
+            return httpx.Response(404, json={"message": "Not Found"})
+        return httpx.Response(200, json=payload)
+
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -95,6 +218,14 @@ def make_enrich_adapter(detail: dict, clean: dict | None) -> tuple[EncarApiAdapt
             if clean is None:
                 return httpx.Response(500, json={})
             return httpx.Response(200, json=clean)
+        if "/inspection/vehicle/" in url:
+            if url.endswith("/summary"):
+                return _resp(insp_summary)
+            return _resp(inspection)
+        if "/record/vehicle/" in url:
+            return _resp(record)
+        if "/diagnosis/vehicle/" in url:
+            return _resp(diagnosis)
         if "readside/vehicle/" in url:
             return httpx.Response(200, json=detail)
         return httpx.Response(200, json=_payload([SAMPLE_ITEM], total=1))
@@ -136,6 +267,85 @@ async def test_fetch_enriches_vin_spec_photos_inspection():
     await adapter.close()
 
 
+async def test_fetch_builds_full_inspection_report():
+    """Чек + страховая история + диагностика → marks/items/inspector/facts."""
+    adapter, requests = make_enrich_adapter(
+        DETAIL_RESPONSE,
+        CLEAN_RESPONSE,
+        inspection=INSPECTION_RESPONSE,
+        insp_summary={
+            "vehicleId": 361895918,
+            "inspName": "엠파크오토서비스(주)타워 박기현",
+            "outers": [],
+            "outerSummarys": [],
+        },
+        record=RECORD_RESPONSE,
+        diagnosis=DIAGNOSIS_RESPONSE,
+    )
+    result = await adapter.fetch(SearchCriteria())
+    report = result.items[0].inspection
+    assert report is not None
+
+    # Кто и когда осматривал
+    assert report["inspector"] == "엠파크오토서비스(주)타워 박기현"
+    assert report["inspected_at"] == "2026-08-21"
+
+    # Зоны кузова: покраска левой двери (outer) + крышки багажника (диагностика);
+    # NORMAL-зоны и бампер «없음» не попадают
+    assert {"zone": "door_fl", "type": "repaint", "note": "도색"} in report["marks"]
+    assert {"zone": "trunk", "type": "repaint", "note": "도색"} in report["marks"]
+    assert len(report["marks"]) == 2
+
+    # Чек-лист: двигатель — подтекание масла (defect), тормоза — 불량 (defect);
+    # S00 не маппится, «хороших» групп в фикстуре нет
+    by_key = {i["key"]: i for i in report["items"]}
+    assert by_key["engine"]["status"] == "defect"
+    assert "실린더 블록 / 오일팬 — подтекание" in by_key["engine"]["note"]
+    assert by_key["brakes"]["status"] == "defect"
+    assert "배력장치 상태 — неисправен" in by_key["brakes"]["note"]
+    assert "transmission" not in by_key  # в фикстуре группы S02/S03 пустые
+
+    # Факты в summary
+    summary = report["summary"]
+    assert "чек осмотра: ДТП не отмечены" in summary
+    assert "чек осмотра: простой ремонт (полировка)" in summary
+    assert "гарантия страховой компании" in summary
+    assert "чек заполнен продавцом/дилером, не сервисом Encar" in summary
+    assert "первая регистрация: 20161125" in summary
+    assert "страховые случаи: 2 (этим авто: 0, у других: 2)" in summary
+    assert "частичная гибель (наводнение): 1" in summary
+    assert "смен владельцев: 5" in summary
+    assert "смен госномера: 1" in summary
+    assert "залог/кредит в истории" in summary
+    assert "вердикт Encar: 무사고 (без ДТП)" in summary
+    assert "Диагностика Encar" in summary and "2026-09-18" in summary
+    assert "인천 엠파크타워" in summary  # центр диагностики
+    assert len(summary) <= 1000  # лимит InspectionReportOut
+
+    # Все новые эндпоинты запрошены
+    urls = [str(r.url) for r in requests]
+    assert any("/v1/readside/inspection/vehicle/361895918" in u for u in urls)
+    assert any(
+        "/v1/readside/inspection/vehicle/361895918/summary" in u for u in urls
+    )
+    assert any("/v1/readside/record/vehicle/361895918/summary" in u for u in urls)
+    assert any("/v1/readside/diagnosis/vehicle/361895918" in u for u in urls)
+    await adapter.close()
+
+
+async def test_fetch_report_without_extra_apis():
+    """404 чека/страховой/диагностики → отчёт из флагов, marks/items пусты."""
+    adapter, _ = make_enrich_adapter(DETAIL_RESPONSE, CLEAN_RESPONSE)
+    result = await adapter.fetch(SearchCriteria())
+    report = result.items[0].inspection
+    assert report is not None
+    assert report["marks"] == [] and report["items"] == []
+    assert report["inspector"] is None and report["inspected_at"] is None
+    assert "Диагностика Encar (엔카진단): пройдена" in report["summary"]
+    assert "страховые случаи" not in report["summary"]
+    await adapter.close()
+
+
 async def test_fetch_survives_detail_failure():
     """«Мусорный» detail (без vin/spec/photos) не портит search-данные."""
     adapter, _ = make_enrich_adapter({"message": "Not Found"}, None)  # clean → 500
@@ -165,7 +375,7 @@ async def test_fetch_maps_to_unified_listing():
     result = await adapter.fetch(SearchCriteria())
 
     # search + detail-карточка + clean-encar (обогащение окт 2026)
-    assert len(requests) == 3
+    assert len(requests) == 7  # search + detail + clean + чек + его summary + страховая + диагностика
     assert len(result.items) == 1
     item = result.items[0]
     assert item.source == "encar"
