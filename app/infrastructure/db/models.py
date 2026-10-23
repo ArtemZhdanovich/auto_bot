@@ -430,6 +430,10 @@ class Listing(Base):
     images: Mapped[list[Any]] = mapped_column(
         JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
     )
+    # Комплектация (миграция 0023): русифицированные опции из detail-карточки.
+    options: Mapped[list[Any]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
     raw_key: Mapped[str | None] = mapped_column(String(512))
     schema_version: Mapped[int] = mapped_column(
         Integer, default=1, server_default=text("1"), nullable=False

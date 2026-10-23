@@ -75,6 +75,14 @@ DETAIL_RESPONSE = {
         "verification": {"version": "V3", "reportExists": True},
     },
     "view": {"encarDiagnosis": 1, "photoPlus": 1},
+    # Комплектация (0023): коды; 0999/1001 — неизвестные, в названия не идут
+    "options": {
+        "type": "CAR",
+        "standard": ["010", "007", "095", "087", "0999"],
+        "choice": ["1001"],
+        "tuning": ["023"],
+        "etc": [],
+    },
     "condition": {
         "accident": {"recordView": True, "resumeView": True},
         "inspection": {"formats": ["TABLE"]},
@@ -269,6 +277,23 @@ async def test_fetch_enriches_vin_spec_photos_inspection():
     urls = [str(r.url) for r in requests]
     assert any("/v1/readside/vehicle/361895918" in u for u in urls)
     assert any("/v1/readside/clean-encar/vehicle/361895918" in u for u in urls)
+    await adapter.close()
+
+
+async def test_fetch_extracts_options_russian():
+    """Комплектация (0023): коды detail.options → RU, неизвестные коды — скип."""
+    adapter, _ = make_enrich_adapter(DETAIL_RESPONSE, CLEAN_RESPONSE)
+    result = await adapter.fetch(SearchCriteria())
+
+    item = result.items[0]
+    # Порядок — как у источника; 0999/1001 пропущены (сырые коды не показываем)
+    assert item.options == [
+        "Люк",
+        "Подогрев сидений",
+        "Проекционный дисплей (HUD)",
+        "Круговой обзор 360°",
+        "Видеорегистратор",
+    ]
     await adapter.close()
 
 

@@ -79,6 +79,7 @@ def _to_card(row: Listing) -> ListingCard:
         engine_volume=getattr(row, "engine_volume", None),
         color=getattr(row, "color", None),
         images=tuple(getattr(row, "images", None) or ()),
+        options=[str(o) for o in (getattr(row, "options", None) or [])],
         is_active=True if is_active is None else bool(is_active),
         first_seen_at=getattr(row, "first_seen_at", None),
         last_seen_at=getattr(row, "last_seen_at", None),

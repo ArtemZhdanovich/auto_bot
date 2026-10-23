@@ -47,6 +47,10 @@ class UnifiedListing(BaseModel):
     # Медиа
     images: list[HttpUrl] = Field(default_factory=list)
 
+    # Комплектация: русифицированные названия опций источника (Encar detail
+    # `options.standard/choice/tuning`). Пишется writer'ом в `listings.options`.
+    options: list[str] = Field(default_factory=list)
+
     # Отчёт осмотра источника (если отдаётся): словарь в формате отчёта
     # осмотра {source, grade, summary, marks, items, ...}. Пишется
     # writer'ом в `inspection_reports`; `None` — отчёта нет.

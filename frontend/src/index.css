@@ -2119,6 +2119,11 @@ main {
   .listing-back {
     grid-column: 1 / -1;
   }
+  /* Секции ниже грида (Комплектация 0023, Осмотр) — на всю ширину,
+     а не в узкой правой колонке */
+  .listing-page > .panel {
+    grid-column: 1 / -1;
+  }
   .listing-page__side {
     position: sticky;
     top: var(--space-4);
@@ -2468,24 +2473,43 @@ main {
 .inspection__facts {
   list-style: none;
   margin: 0;
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
+  padding: 0;
+  /* Карточки чеков состояния: сетка на всю ширину секции (не сбоку) */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-2);
 }
 .inspection__fact {
   position: relative;
-  padding-left: 16px;
+  padding: var(--space-2) var(--space-3) var(--space-2) 26px;
   font-size: var(--font-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
 }
 .inspection__fact::before {
   content: "•";
   position: absolute;
-  left: 2px;
+  left: 10px;
+  top: var(--space-2);
   font-weight: 700;
   color: var(--text-secondary);
+}
+
+/* Комплектация (миграция 0023): чипы опций, отдельная секция на всю ширину */
+.options-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.options-chips__item {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  font-size: var(--font-sm);
+  line-height: 1.2;
 }
 
 .inspection__photos-title {

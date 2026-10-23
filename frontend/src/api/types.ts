@@ -74,6 +74,8 @@ export interface Listing {
   engine_volume?: number | null;
   color?: string | null;
   images: string[];
+  /** Комплектация (миграция 0023): русифицированные опции источника. */
+  options?: string[];
   parsed_at: string;
   /** Отслеживание (PLAN.md, фаза 4) */
   is_active: boolean;

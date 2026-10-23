@@ -39,6 +39,8 @@ class ListingOut(BaseModel):
     engine_volume: Optional[float] = None
     color: Optional[str] = None
     images: list[Any] = Field(default_factory=list)
+    # Комплектация (миграция 0023): русифицированные опции источника.
+    options: list[str] = Field(default_factory=list)
     parsed_at: datetime
 
     # Отслеживание (PLAN.md, фаза 4): is_active/first_seen_at приходят из ORM;

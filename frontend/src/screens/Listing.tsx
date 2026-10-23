@@ -410,13 +410,9 @@ export function ListingScreen() {
         )}
       </section>
 
-      {/* Осмотр (миграция 0018): карта повреждений + чек-лист, только если есть отчёт */}
-      {inspection && (
-        <section className="panel">
-          <h3>🔍 Осмотр</h3>
-          <InspectionSection report={inspection} />
-        </section>
-      )}
+      {/* Осмотр и комплектация — ОТДЕЛЬНЫЕ секции на всю ширину (ниже грида),
+          а не в узкой side-колонке: у чека много контента (факты, фото,
+          карта повреждений), ему нужен простор */}
 
       {/* История цен (PLAN.md, фаза 4): точки listing_price_history, новые сверху */}
       {listing.price_history && listing.price_history.length > 1 && (
@@ -494,6 +490,30 @@ export function ListingScreen() {
         Назад
       </button>
       </div>
+
+      {/* Комплектация (миграция 0023): русифицированные опции источника —
+          отдельная секция на всю ширину, ниже карточек */}
+      {listing.options && listing.options.length > 0 && (
+        <section className="panel">
+          <h3>🧰 Комплектация</h3>
+          <div className="options-chips">
+            {listing.options.map((o) => (
+              <span className="options-chips__item" key={o}>
+                {o}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Осмотр (миграция 0018/0022): факты, карта повреждений, чек-лист и
+          фото чека — отдельная секция на всю ширину */}
+      {inspection && (
+        <section className="panel">
+          <h3>🔍 Осмотр</h3>
+          <InspectionSection report={inspection} />
+        </section>
+      )}
 
       {/* Sticky-CTA на мобиле: цена + избранное + главное действие под пальцем */}
       <div className="listing-cta-bar">

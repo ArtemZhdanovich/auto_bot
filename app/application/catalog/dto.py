@@ -78,6 +78,8 @@ class ListingCard:
     engine_volume: float | None = None
     color: str | None = None
     images: tuple[str, ...] = ()
+    # Комплектация (миграция 0023): русифицированные опции источника.
+    options: list[str] = field(default_factory=list)
     is_active: bool = True
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None

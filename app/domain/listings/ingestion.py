@@ -84,6 +84,7 @@ def row_values(item: UnifiedListing) -> dict[str, Any]:
         "engine_volume": item.engine_volume,
         "color": clean_value(item.color),
         "images": [str(i) for i in item.images],
+        "options": [str(o) for o in item.options],
         "schema_version": item.schema_version,
         "parsed_at": item.parsed_at,
     }

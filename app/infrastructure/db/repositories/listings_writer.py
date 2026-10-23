@@ -60,12 +60,12 @@ WITH existing AS (
 upserted AS (
     INSERT INTO listings (
         source, source_id, url, make, model, year, price, currency,
-        mileage_km, vin, images, schema_version, parsed_at,
+        mileage_km, vin, images, options, schema_version, parsed_at,
         body_type, fuel, transmission, drive, engine_volume, color,
         content_hash, is_active, first_seen_at, last_seen_at, title_raw
     ) VALUES (
         :source, :source_id, :url, :make, :model, :year, :price, :currency,
-        :mileage_km, :vin, :images, :schema_version, :parsed_at,
+        :mileage_km, :vin, :images, :options, :schema_version, :parsed_at,
         :body_type, :fuel, :transmission, :drive, :engine_volume, :color,
         :content_hash, TRUE, now(), now(), :title_raw
     )
@@ -79,6 +79,7 @@ upserted AS (
         mileage_km = EXCLUDED.mileage_km,
         vin = COALESCE(EXCLUDED.vin, listings.vin),
         images = EXCLUDED.images,
+        options = EXCLUDED.options,
         schema_version = EXCLUDED.schema_version,
         parsed_at = EXCLUDED.parsed_at,
         body_type = COALESCE(EXCLUDED.body_type, listings.body_type),
@@ -100,6 +101,7 @@ SELECT e.id AS old_id, e.price AS old_price, e.currency AS old_currency,
 FROM upserted u LEFT JOIN existing e ON TRUE
 """).bindparams(
     bindparam("images", type_=JSONB),
+    bindparam("options", type_=JSONB),
 )
 
 _PRICE_POINT_SQL = text(

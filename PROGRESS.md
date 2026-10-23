@@ -1,5 +1,41 @@
 
 
+## 78. Комплектация сквозь стек + осмотр/чеки на всю ширину PDP (2026-10-23)
+
+- **Запрос:** «чеки состояния пропали? мы же получаем данные — рендерим;
+  отдельно ниже, а не сбоку; и комплектация тоже — отдельно». Осмотр
+  действительно жил в узкой side-колонке грида (≥1024px), а комплектации
+  в продукте не было вовсе, хотя Encar отдаёт её в detail-карточке.
+- **Источник опций:** `detail.options` = `{standard, choice, tuning, etc}`
+  — списки **кодов** («010», «095», «1xxx»). Словарь имён нашёл в SPA-бандле
+  fem и API `/v1/readside/vehicles/car/options/standard` (45 кодов) +
+  `.../tuning` (30). Коды 1xxx (choice) анонимным словарём не резолвятся —
+  пропускаем; коды 001–008 коллизируют между классической таблицей и новым
+  fem-чеклистом — в адаптере зафиксированы осмысленные значения
+  (007=подогрев сидений, а не «ЭСП»; сверено с oneLineText продавцов).
+- **Цепочка (миграция 0023):**
+  - `0023_listing_options.py`: `listings.options JSONB NOT NULL
+    DEFAULT '[]'`;
+  - `unified.py`: `UnifiedListing.options: list[str]`;
+  - `encar.py`: `_STANDARD_OPTION_RU` (45) + `_TUNING_OPTION_RU` (24),
+    `_extract_options()` — коды → русифицированные названия, неизвестные
+    коды молча скипаются (сырые коды на фронте не показываем), ≤60;
+  - `ingestion.row_values` / `listings_writer._UPSERT_SQL` (+bindparam
+    JSONB) / `listings_read._to_card` / `ListingCard.options` /
+    `ListingOut.options`;
+  - фронт: `Listing.options?`, секция «🧰 Комплектация» — чипы
+    (`.options-chips`), **отдельная секция ниже грида**, не сбоку;
+  - «🔍 Осмотр» перенесён из side-колонки в такую же full-width секцию;
+    факты чека — сетка карточек `.inspection__facts` (auto-fill ≥160px)
+    вместо плоского списка; `grid-column: 1/-1` для `.listing-page > .panel`.
+- **Проверка:** encar 18/18 (новый тест `test_fetch_extracts_options_russian`),
+  полная суита **1214 passed, 7 skipped** (1 фейл `test_rag.py` —
+  средозависимый, стучится в живой RAG :8100, к правкам не относится),
+  `npm run build` ОК; миграция 0022→0023 применена; образы catalog/admin/
+  worker_fetch/miniapp пересобраны; E2E через боевой writer: 20 NEW,
+  Mustang 2840 → 27 опций, K7 → 30; live `GET /api/listings/2840` отдаёт
+  `options`; регресс `GET /api/listings/1423/inspection` → 200.
+
 ## 77. Фото чека осмотра: БД → API → фронт (2026-10-23)
 
 - **Симптом:** «картинок чеков нет, данных на фронте тоже нет». Причина —
