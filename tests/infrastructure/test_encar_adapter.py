@@ -66,7 +66,15 @@ DETAIL_RESPONSE = {
         {"code": "001", "path": "/carpicture09/pic3618/361895918_001.jpg", "type": "OUTER"},
         {"code": "010", "path": "/carpicture09/pic3618/361895918_010.jpg", "type": "INNER"},
     ],
-    "advertisement": {"advertisementType": "NORMAL", "diagnosisCar": True},
+    "advertisement": {
+        "advertisementType": "NORMAL",
+        "diagnosisCar": True,
+        "directInspected": False,
+        "hasUnderBodyPhoto": True,
+        "oneLineText": "No,paint/TAX100%",
+        "verification": {"version": "V3", "reportExists": True},
+    },
+    "view": {"encarDiagnosis": 1, "photoPlus": 1},
     "condition": {
         "accident": {"recordView": True, "resumeView": True},
         "inspection": {"formats": ["TABLE"]},
@@ -114,8 +122,12 @@ async def test_fetch_enriches_vin_spec_photos_inspection():
     report = item.inspection
     assert report is not None and report["source"] == "encar"
     assert "Диагностика Encar (엔카진단): пройдена" in report["summary"]
-    assert "запись осмотра доступна" in report["summary"]
+    assert "запись техосмотра (성능기록부): доступна" in report["summary"]
     assert "Clean Encar: безаварийная" in report["summary"]
+    assert "отчёт верификации Encar: есть" in report["summary"]
+    assert "фото днища: есть" in report["summary"]
+    assert "примечание продавца: No,paint/TAX100%" in report["summary"]
+    assert "осмотрена напрямую" not in report["summary"]  # directInspected=False
     assert report["grade"] is None and report["marks"] == [] and report["items"] == []
     # Три запроса: search + detail + clean-encar
     urls = [str(r.url) for r in requests]

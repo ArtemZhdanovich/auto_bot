@@ -43,6 +43,18 @@ const ITEM_ORDER: ItemKey[] = [
 export function InspectionSection({ report }: { report: InspectionReport }) {
   const [selectedZone, setSelectedZone] = useState<BodyZone | null>(null);
 
+  const hasMarks = report.marks.length > 0;
+  const hasItems = report.items.length > 0;
+  // Анонимные данные Encar не содержат повреждений по зонам и чек-листа —
+  // вместо пустой карты показываем факты из summary списком.
+  const facts =
+    !hasMarks && !hasItems
+      ? (report.summary ?? "")
+          .split(" · ")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+
   const defectZones = new Set(report.marks.map((m) => m.zone));
   const zoneMarks = selectedZone
     ? report.marks.filter((m) => m.zone === selectedZone)
@@ -67,6 +79,8 @@ export function InspectionSection({ report }: { report: InspectionReport }) {
         </span>
       </div>
 
+      {hasMarks && (
+      <>
       {/* SVG-карта кузова: тап по зоне — детали повреждений */}
       <svg
         className="inspection__map"
@@ -132,6 +146,8 @@ export function InspectionSection({ report }: { report: InspectionReport }) {
           </div>
         )
       )}
+      </>
+      )}
 
       {/* Чек-лист агрегатов */}
       {items.length > 0 && (
@@ -163,8 +179,18 @@ export function InspectionSection({ report }: { report: InspectionReport }) {
         </div>
       )}
 
-      {report.summary && (
-        <div className="inspection__summary">💬 {report.summary}</div>
+      {facts.length > 0 ? (
+        <ul className="inspection__facts">
+          {facts.map((f, i) => (
+            <li key={i} className="inspection__fact">
+              {f}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        report.summary && (
+          <div className="inspection__summary">💬 {report.summary}</div>
+        )
       )}
     </div>
   );

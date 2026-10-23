@@ -2465,3 +2465,26 @@ main {
   padding: var(--space-3);
 }
 
+.inspection__facts {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.inspection__fact {
+  position: relative;
+  padding-left: 16px;
+  font-size: var(--font-sm);
+}
+.inspection__fact::before {
+  content: "•";
+  position: absolute;
+  left: 2px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+

@@ -615,8 +615,16 @@ class EncarApiAdapter(BaseApiAdapter):
             if isinstance(condition.get("inspection"), dict)
             else {}
         )
+        view_block = detail.get("view") if isinstance(detail.get("view"), dict) else {}
+        verification = (
+            advertisement.get("verification")
+            if isinstance(advertisement.get("verification"), dict)
+            else {}
+        )
 
-        diagnosis_done = bool(advertisement.get("diagnosisCar"))
+        diagnosis_done = bool(
+            advertisement.get("diagnosisCar") or view_block.get("encarDiagnosis")
+        )
         record_formats = inspection_block.get("formats") or []
         seizing_count = seizing_block.get("seizingCount") or 0
         pledge_count = seizing_block.get("pledgeCount") or 0
@@ -627,13 +635,22 @@ class EncarApiAdapter(BaseApiAdapter):
             else "Диагностика Encar: не проводилась"
         ]
         if "TABLE" in record_formats:
-            facts.append("запись осмотра доступна у источника")
+            facts.append("запись техосмотра (성능기록부): доступна у источника")
         if cleaned is True:
             facts.append("Clean Encar: безаварийная")
         elif cleaned is False:
             facts.append("Clean Encar: статус не подтверждён")
         if seizing_count or pledge_count:
             facts.append(f"обременения: залог={seizing_count}, пледж={pledge_count}")
+        if bool(verification.get("reportExists")):
+            facts.append("отчёт верификации Encar: есть")
+        if bool(advertisement.get("directInspected")):
+            facts.append("осмотрена напрямую Encar: да")
+        if bool(advertisement.get("hasUnderBodyPhoto")):
+            facts.append("фото днища: есть")
+        one_line = advertisement.get("oneLineText")
+        if isinstance(one_line, str) and one_line.strip():
+            facts.append(f"примечание продавца: {one_line.strip()}")
 
         return {
             "source": "encar",
