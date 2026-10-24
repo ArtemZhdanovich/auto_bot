@@ -27,6 +27,7 @@ from app.infrastructure.sources.common.normalize import (
     normalize_make,
     normalize_transmission,
 )
+from app.infrastructure.sources.korean import dehangul, ru_color, ru_make, ru_model
 from app.domain.search.criteria import SearchCriteria
 from app.domain.listings.unified import FetchResult, UnifiedListing
 
@@ -1185,12 +1186,12 @@ class EncarApiAdapter(BaseApiAdapter):
         pledge_count = seizing_block.get("pledgeCount") or 0
 
         facts: list[str] = [
-            "Диагностика Encar (엔카진단): пройдена"
+            "Диагностика Encar: пройдена"
             if diagnosis_done
             else "Диагностика Encar: не проводилась"
         ]
         if "TABLE" in record_formats:
-            facts.append("запись техосмотра (성능기록부): доступна у источника")
+            facts.append("запись техосмотра: доступна у источника")
         if cleaned is True:
             facts.append("Clean Encar: безаварийная")
         elif cleaned is False:
@@ -1269,7 +1270,7 @@ class EncarApiAdapter(BaseApiAdapter):
                     {
                         "zone": zone,
                         "type": _mark_type_from_kr(st_title),
-                        "note": str(st_title)[:300],
+                        "note": dehangul(str(st_title))[:300],
                     }
                 )
 
@@ -1314,14 +1315,14 @@ class EncarApiAdapter(BaseApiAdapter):
                     continue
                 entry: dict[str, Any] = {"key": key, "status": cell["status"]}
                 if cell["notes"]:
-                    entry["note"] = "; ".join(cell["notes"])[:300]
+                    entry["note"] = dehangul("; ".join(cell["notes"]))[:300]
                 items.append(entry)
 
             insp_name = insp_summary.get("inspName") if isinstance(
                 insp_summary, dict
             ) else None
             if isinstance(insp_name, str) and insp_name.strip():
-                inspector = insp_name.strip()[:120]
+                inspector = dehangul(insp_name.strip())[:120]
 
         # --- классический чек (mdsl_regcar.do): ранки панелей ----------------
         # Карта повреждений «двух машинок» живёт только там (окт 2026).
@@ -1330,6 +1331,8 @@ class EncarApiAdapter(BaseApiAdapter):
             seen = {m["zone"] for m in marks}
             for legacy in legacy_marks:
                 if legacy["zone"] not in seen:
+                    if legacy.get("note"):
+                        legacy = {**legacy, "note": dehangul(legacy["note"])}
                     marks.append(legacy)
                     seen.add(legacy["zone"])
 
@@ -1395,18 +1398,22 @@ class EncarApiAdapter(BaseApiAdapter):
                     {
                         "zone": zone,
                         "type": _mark_type_from_kr(d_result),
-                        "note": (d_result[:300] or None),
+                        "note": (dehangul(d_result)[:300] or None),
                     }
                 )
             if comments:
                 if any("무사고" in c for c in comments):
-                    facts.append("вердикт Encar: 무사고 (без ДТП)")
+                    facts.append("вердикт Encar: без ДТП")
                 else:
-                    facts.append(f"вердикт Encar: {' / '.join(comments)[:120]}")
+                    facts.append(
+                        f"вердикт Encar: {dehangul(' / '.join(comments))[:120]}"
+                    )
             d_date = str(diagnosis.get("diagnosisDate") or "")[:10]
-            d_center = str(diagnosis.get("reservationCenterName") or "").strip()
+            d_center = dehangul(
+                str(diagnosis.get("reservationCenterName") or "").strip()
+            )
             d_extra = " ".join(x for x in (d_date, d_center) if x)
-            facts[0] = "Диагностика Encar (엔카진단): пройдена" + (
+            facts[0] = "Диагностика Encar: пройдена" + (
                 f" — {d_extra}" if d_extra else ""
             )
 
@@ -1478,9 +1485,14 @@ class EncarApiAdapter(BaseApiAdapter):
             source_id=str(source_id),
             url=self._detail_template.format(source_id=source_id),
             title=title,
-            make=normalize_make(raw.get("Manufacturer")),
-            model=raw.get("Model"),
-            generation=raw.get("Badge") or raw.get("BadgeDetail"),
+            make=ru_make(
+                normalize_make(raw.get("Manufacturer"))
+                or raw.get("Manufacturer")
+            ),
+            model=ru_model(raw.get("Model")),
+            generation=dehangul(
+                raw.get("Badge") or raw.get("BadgeDetail") or ""
+            ) or None,
             year=year,
             price=price,
             currency="KRW",
@@ -1489,7 +1501,7 @@ class EncarApiAdapter(BaseApiAdapter):
             body_type=normalize_body(raw.get("BodyType")) or raw.get("BodyType") or None,
             fuel=normalize_fuel(raw.get("FuelType")),
             transmission=normalize_transmission(raw.get("Transmission")),
-            color=normalize_color(raw.get("Color")) or raw.get("Color") or None,
+            color=normalize_color(raw.get("Color")) or ru_color(raw.get("Color")),
             location=raw.get("OfficeCityState") or raw.get("OfficeCity") or None,
             seller_type="dealer",
             images=photos,

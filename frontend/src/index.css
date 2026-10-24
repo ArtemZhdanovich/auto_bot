@@ -2386,10 +2386,37 @@ main {
   display: block;
 }
 
+.inspection__body {
+  fill: var(--bg-primary);
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.inspection__glass {
+  fill: rgba(100, 116, 139, 0.18);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.inspection__seam {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.2;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .inspection__wheel {
   fill: var(--bg-primary);
   stroke: var(--text-secondary);
   stroke-width: 3;
+  pointer-events: none;
+}
+
+.inspection__hub {
+  fill: var(--bg-secondary);
+  stroke: var(--text-secondary);
+  stroke-width: 2;
   pointer-events: none;
 }
 

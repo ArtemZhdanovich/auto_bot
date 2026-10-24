@@ -26,36 +26,57 @@ interface PanelShape {
   d: string;
 }
 
+/** Общий силуэт кузова (вид сбоку, перед слева): профиль + вырезы арок. */
+const BODY_D =
+  "M20,122 C13,110 14,101 24,97 L166,76 L213,48 L290,43 L327,73 L398,79 " +
+  "C405,88 407,120 403,137 L356,142 A26,26 0 0 0 304,142 L140,142 " +
+  "A26,26 0 0 0 88,142 L28,142 C18,136 16,128 20,122 Z";
+
+/** Остекление (лобовое/крыша/заднее) — рисуется под панелями. */
+const GLASS_D = "M174,76 L216,52 L286,47 L316,73 Z";
+
+/** Детали: B-стойка, ручки дверей. */
+const SEAM_D = ["M233,52 L238,74", "M194,98 h16", "M244,94 h16"];
+
 /** Схема «внешние панели» (외판 классического чека). Вид сбоку, перед слева. */
 const OUTER_PANELS: PanelShape[] = [
-  { zones: ["front_bumper"], d: "M8,78 Q8,68 22,66 L54,64 L54,144 L22,146 Q8,144 8,126 Z" },
-  { zones: ["hood"], d: "M58,62 L150,50 L154,86 L58,96 Z" },
-  { zones: ["roof"], d: "M160,44 L300,40 L303,82 L157,86 Z" },
-  { zones: ["trunk"], d: "M370,78 L412,72 L412,140 L374,142 Z" },
-  { zones: ["fender_fl", "fender_fr"], d: "M58,100 L154,90 L157,132 Q157,148 140,150 L120,152 Q100,152 96,150 L58,146 Z" },
-  { zones: ["door_fl", "door_fr"], d: "M160,90 L230,86 L232,134 L160,136 Z" },
-  { zones: ["door_rl", "door_rr"], d: "M234,86 L304,84 L306,134 L234,134 Z" },
-  { zones: ["fender_rl", "fender_rr"], d: "M308,84 L366,80 L372,142 L310,138 Z" },
-  { zones: ["rocker_l", "rocker_r"], d: "M160,140 L304,138 L304,152 L160,154 Z" },
+  { zones: ["front_bumper"], d: "M22,99 L36,96 L37,140 L26,140 C15,132 14,110 22,99 Z" },
+  { zones: ["hood"], d: "M40,94 L164,79 L166,93 L42,108 Z" },
+  {
+    zones: ["fender_fl", "fender_fr"],
+    d: "M36,112 L166,97 L168,140 L140,141 A26,26 0 0 0 88,141 L66,148 L38,146 Z",
+  },
+  { zones: ["roof"], d: "M217,50 L288,45 L290,60 L219,65 Z" },
+  { zones: ["door_fl", "door_fr"], d: "M172,97 L231,92 L233,142 L174,144 Z" },
+  { zones: ["door_rl", "door_rr"], d: "M237,92 L297,87 L299,142 L239,142 Z" },
+  { zones: ["rocker_l", "rocker_r"], d: "M146,147 L300,145 L300,159 L148,161 Z" },
+  {
+    zones: ["fender_rl", "fender_rr"],
+    d: "M303,88 L332,75 L396,81 L398,138 L356,141 A26,26 0 0 0 304,141 L300,120 Z",
+  },
+  { zones: ["trunk"], d: "M336,77 L397,82 L398,94 L337,89 Z" },
 ];
 
 /** Схема «силовая структура» (주요골격 классического чека). */
 const FRAME_PANELS: PanelShape[] = [
-  { zones: ["frame_front"], d: "M8,78 Q8,68 22,66 L104,60 L108,122 L22,126 Q8,124 8,104 Z" },
-  { zones: ["frame_inside_l", "frame_inside_r"], d: "M112,62 L204,52 L207,114 L114,122 Z" },
-  { zones: ["wheelhouse_fl", "wheelhouse_fr"], d: "M88,118 L152,112 L154,158 L90,162 Z" },
-  { zones: ["pillar_a_l", "pillar_a_r"], d: "M160,46 L186,44 L188,88 L158,90 Z" },
-  { zones: ["pillar_b_l", "pillar_b_r"], d: "M232,85 L254,84 L256,134 L234,134 Z" },
-  { zones: ["pillar_c_l", "pillar_c_r"], d: "M298,42 L320,41 L323,82 L301,84 Z" },
-  { zones: ["frame_floor"], d: "M160,140 L304,138 L304,154 L160,156 Z" },
-  { zones: ["wheelhouse_rl", "wheelhouse_rr"], d: "M312,116 L372,112 L374,158 L314,160 Z" },
-  { zones: ["frame_rear"], d: "M310,84 L410,74 L410,140 L312,140 Z" },
+  { zones: ["frame_front"], d: "M20,99 L88,92 L88,142 L26,142 C15,132 14,110 20,99 Z" },
+  { zones: ["frame_inside_l", "frame_inside_r"], d: "M92,96 L166,88 L168,104 L94,112 Z" },
+  { zones: ["wheelhouse_fl", "wheelhouse_fr"], d: "M64,118 L88,116 L88,144 L62,146 Z" },
+  { zones: ["pillar_a_l", "pillar_a_r"], d: "M174,96 L205,54 L217,56 L187,97 Z" },
+  { zones: ["pillar_b_l", "pillar_b_r"], d: "M236,92 L250,91 L252,143 L238,143 Z" },
+  { zones: ["pillar_c_l", "pillar_c_r"], d: "M289,46 L299,45 L330,74 L318,77 Z" },
+  { zones: ["frame_floor"], d: "M146,146 L302,144 L302,158 L148,160 Z" },
+  { zones: ["wheelhouse_rl", "wheelhouse_rr"], d: "M304,100 L356,96 L356,142 L304,142 Z" },
+  {
+    zones: ["frame_rear"],
+    d: "M336,84 L398,80 C403,96 403,124 399,138 L358,140 Z M310,126 L356,124 L356,142 L310,142 Z",
+  },
 ];
 
-/** Колёса — рисуются поверх панелей, дают «арки». */
+/** Колёса — рисуются поверх панелей, дают «арки»; r диска — 10. */
 const WHEELS = [
-  { cx: 112, cy: 148, r: 24 },
-  { cx: 342, cy: 146, r: 24 },
+  { cx: 114, cy: 142, r: 26 },
+  { cx: 330, cy: 142, r: 26 },
 ];
 
 const SCHEMES: { title: string; panels: PanelShape[] }[] = [
@@ -128,10 +149,15 @@ export function InspectionSection({ report }: { report: InspectionReport }) {
               </div>
               <svg
                 className="inspection__car"
-                viewBox="0 0 420 172"
+                viewBox="0 0 420 176"
                 role="img"
                 aria-label={scheme.title}
               >
+                <path d={BODY_D} className="inspection__body" />
+                <path d={GLASS_D} className="inspection__glass" />
+                {SEAM_D.map((d, i) => (
+                  <path key={`seam-${i}`} d={d} className="inspection__seam" />
+                ))}
                 {scheme.panels.map((panel) => {
                   const color = panel.zones
                     .map((z) => zoneColor(report.marks, z))
@@ -155,15 +181,24 @@ export function InspectionSection({ report }: { report: InspectionReport }) {
                 })}
                 {WHEELS.map((w, i) => (
                   <circle
-                    key={i}
+                    key={`tire-${i}`}
                     cx={w.cx}
                     cy={w.cy}
                     r={w.r}
                     className="inspection__wheel"
                   />
                 ))}
-                <text x="26" y="36" className="inspection__axis">ПЕРЕД</text>
-                <text x="378" y="36" className="inspection__axis">ЗАД</text>
+                {WHEELS.map((w, i) => (
+                  <circle
+                    key={`hub-${i}`}
+                    cx={w.cx}
+                    cy={w.cy}
+                    r={10}
+                    className="inspection__hub"
+                  />
+                ))}
+                <text x="30" y="30" className="inspection__axis">ПЕРЕД</text>
+                <text x="390" y="30" className="inspection__axis">ЗАД</text>
               </svg>
             </div>
           );
