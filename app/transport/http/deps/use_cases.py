@@ -104,6 +104,7 @@ from app.application.market.use_cases import (
     CreateMarketLot,
     CreatePartnerLot,
     ExtendLot,
+    ListMarketLots,
     ListMarketOffers,
     ListModerationQueue,
     ListMyLots,
@@ -283,6 +284,7 @@ CreateMarketLotDep = FromDishka[CreateMarketLot]
 SubmitLotDep = FromDishka[SubmitLot]
 UpdateLotDep = FromDishka[UpdateLot]
 ListMyLotsDep = FromDishka[ListMyLots]
+ListMarketLotsDep = FromDishka[ListMarketLots]
 CloseMarketLotDep = FromDishka[CloseMarketLot]
 ExtendLotDep = FromDishka[ExtendLot]
 ListPackagesDep = FromDishka[ListPackages]

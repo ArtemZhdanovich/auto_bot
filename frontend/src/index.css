@@ -1023,6 +1023,12 @@ main {
   grid-template-columns: 1fr 1fr;
   gap: 10px 12px;
 }
+/* Сегмент «Страна» (GEO-V1 §3): чипсы в строку с переносом, не 2 колонки */
+.feed-panel__pair--chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .feed-panel__field input:focus,
 .feed-panel__field select:focus {
   outline: none;
@@ -1423,6 +1429,12 @@ main {
   border-radius: 999px;
   padding: 4px 10px;
   font-size: var(--font-sm);
+}
+/* Маршрут и сроки фрейта (GEO-V1 §3): «🇦🇪 Джебель-Али → Новороссийск · ~25–40 дней» */
+.calc-total__route {
+  margin-top: 4px;
+  font-size: var(--font-sm);
+  opacity: 0.92;
 }
 .calc-rows {
   background: var(--bg);

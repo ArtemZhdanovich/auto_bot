@@ -38,6 +38,10 @@ class ListingOut(BaseModel):
     # Объём (литры) и цвет — миграция 0017, ленивое обогащение из detail encar.
     engine_volume: Optional[float] = None
     color: Optional[str] = None
+    # Гео (GEO-V1 §2, миграция 0031): ISO-3166 alpha-2 страны лота —
+    # бейдж-флаг рядом с источником (`CN · che168`); город — owner-лоты.
+    country: Optional[str] = None
+    city: Optional[str] = None
     images: list[Any] = Field(default_factory=list)
     # Комплектация (миграция 0023): русифицированные опции источника.
     options: list[str] = Field(default_factory=list)

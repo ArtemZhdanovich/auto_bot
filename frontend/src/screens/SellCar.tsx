@@ -51,6 +51,7 @@ import { api } from "../api/client";
 import { haptic, isGuest } from "../api/auth";
 import { openInvoice } from "../lib/invoice";
 import { digits } from "../lib/fx";
+import { SELL_COUNTRIES } from "../lib/geo";
 import { localQualityChecks } from "../lib/listingQuality";
 import {
   isAcceptablePhoto,
@@ -112,12 +113,20 @@ interface FieldErrors {
   make?: string;
   model?: string;
   year?: string;
+  country?: string;
   price?: string;
   description?: string;
 }
 
-/** Валидация шага 1 «Авто» (марка/модель/год). */
-function validateCar(make: string, model: string, year: string): FieldErrors {
+/** Валидация шага 1 «Авто» (марка/модель/год + страна, GEO-V1 §2:
+ *  country обязателен для owner-лотов; селект с дефолтом RU пустым
+ *  быть не может — проверка защитная). */
+function validateCar(
+  make: string,
+  model: string,
+  year: string,
+  country: string,
+): FieldErrors {
   const e: FieldErrors = {};
   if (!make.trim()) e.make = "Укажите марку (Kia, Hyundai…)";
   if (!model.trim()) e.model = "Укажите модель";
@@ -125,6 +134,7 @@ function validateCar(make: string, model: string, year: string): FieldErrors {
   if (!year.trim()) e.year = "Укажите год выпуска";
   else if (!Number.isInteger(y) || y < YEAR_MIN || y > YEAR_MAX)
     e.year = `Год — от ${YEAR_MIN} до ${YEAR_MAX}`;
+  if (!country.trim()) e.country = "Укажите страну";
   return e;
 }
 
@@ -163,6 +173,9 @@ interface DraftData {
   mileage: string;
   fuel: string;
   transmission: string;
+  /** Гео owner-лота (GEO-V1 §2): ISO2 (дефолт RU) + город (опционально). */
+  country: string;
+  city: string;
   price: string;
   currency: "KRW" | "USD" | "RUB";
   description: string;
@@ -240,6 +253,10 @@ export function SellCarScreen() {
   const [mileage, setMileage] = useState(initialDraft?.mileage ?? "");
   const [fuel, setFuel] = useState(initialDraft?.fuel ?? "");
   const [transmission, setTransmission] = useState(initialDraft?.transmission ?? "");
+  /** Гео лота (GEO-V1 §2): страна продавца, ISO2; дефолт RU — внутренний
+   *  рынок (импортные источники KR/CN/AE/US в списке не предлагаются). */
+  const [country, setCountry] = useState(initialDraft?.country ?? "RU");
+  const [city, setCity] = useState(initialDraft?.city ?? "");
   const [description, setDescription] = useState(initialDraft?.description ?? "");
   /** Фото шага 2: загруженные из черновика стартуют как done с готовым URL. */
   const [photos, setPhotos] = useState<PhotoItem[]>(() =>
@@ -294,6 +311,8 @@ export function SellCarScreen() {
       mileage,
       fuel,
       transmission,
+      country,
+      city,
       price,
       currency,
       description,
@@ -301,7 +320,7 @@ export function SellCarScreen() {
         .filter((p) => p.status === "done" && p.remoteUrl)
         .map((p) => p.remoteUrl as string),
     });
-  }, [step, make, model, year, mileage, fuel, transmission, price, currency, description, photos, editId]);
+  }, [step, make, model, year, mileage, fuel, transmission, country, city, price, currency, description, photos, editId]);
 
   /** Edit-режим: грузим лот из my-lots и предзаполняем визард (10 §5).
    *  Фото — готовые URL как мини-превью (можно удалить/добавить новые). */
@@ -325,6 +344,8 @@ export function SellCarScreen() {
         setMileage(lot.mileage_km != null ? String(lot.mileage_km) : "");
         setFuel(lot.fuel ?? "");
         setTransmission(lot.transmission ?? "");
+        setCountry(lot.country ?? "RU");
+        setCity(lot.city ?? "");
         setPrice(lot.price != null ? String(lot.price) : "");
         setCurrency(
           lot.currency === "USD" || lot.currency === "RUB" ? lot.currency : "KRW",
@@ -459,7 +480,7 @@ export function SellCarScreen() {
   /** «Далее»: шаг валидируется (шаг 1 — авто, шаг 2 — ждём загрузки). */
   const next = () => {
     if (step === 0) {
-      const errs = validateCar(make, model, year);
+      const errs = validateCar(make, model, year, country);
       setErrors(errs);
       if (Object.keys(errs).length > 0) {
         haptic("heavy");
@@ -474,11 +495,14 @@ export function SellCarScreen() {
   const back = () => setStep((s) => Math.max(0, s - 1));
 
   /** Тело лота из полей визарда — общее для POST (создание) и PATCH
-   *  (правка), контракт MarketLotCreate (10 §4). */
+   *  (правка), контракт MarketLotCreate (10 §4 + GEO-V1 §2: country
+   *  обязателен для owner-лотов, city опционален). */
   const buildBody = () => ({
     make: make.trim(),
     model: model.trim(),
     year: Number(year),
+    country,
+    ...(city.trim() ? { city: city.trim() } : {}),
     price: Number(price),
     currency,
     ...(mileage.trim() ? { mileage_km: Number(mileage) } : {}),
@@ -895,6 +919,37 @@ export function SellCarScreen() {
                   </option>
                 ))}
               </select>
+            </label>
+            {/* Гео owner-лота (GEO-V1 §3): страна продавца (дефолт RU —
+                внутренний рынок) + город (опционально, но рекомендуемо) */}
+            <label className="sell-field">
+              <span>Страна *</span>
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                aria-label="Страна"
+              >
+                {SELL_COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code === "RU"
+                      ? `${c.flag} ${c.name} — внутренний рынок`
+                      : `${c.flag} ${c.name}`}
+                  </option>
+                ))}
+              </select>
+              {errors.country && (
+                <em className="sell-field__error" role="alert">{errors.country}</em>
+              )}
+            </label>
+            <label className="sell-field">
+              <span>Город</span>
+              <input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="Москва"
+                aria-label="Город"
+                maxLength={64}
+              />
             </label>
           </div>
         )}

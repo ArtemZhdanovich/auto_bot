@@ -5,6 +5,10 @@
 
 export const KRW_PER_USD = 1350;
 export const EUR_PER_USD = 1.08;
+/* GEO-V1: валюты новых источников (фикс-курсы MVP, как KRW; потом ЦБ). */
+export const KZT_PER_USD = 480;
+export const CNY_PER_USD = 7.1;
+export const AED_PER_USD = 3.6725; // дирхам привязан к доллару
 
 /** Локальные валюты (фикс-курсы MVP; потом ЦБ — один источник бот+веб). */
 export const RUB_PER_USD = 92;
@@ -78,7 +82,7 @@ export function priceChain(
   return { usd: formatUsd(usd), local, original: orig };
 }
 
-/** Цена в $: KRW ÷1350, EUR ×1.08, RUB ÷92, BYN ÷3.05, USD как есть; null для пустых/нулевых. */
+/** Цена в $: KRW÷1350, KZT÷480, CNY÷7.1, AED÷3.6725, EUR ×1.08, RUB ÷92, BYN ÷3.05; null для пустых/нулевых. */
 export function toUsd(
   price: number | null | undefined,
   currency?: string | null,
@@ -89,6 +93,9 @@ export function toUsd(
   if (cur === "EUR") return Math.round(price * EUR_PER_USD);
   if (cur === "RUB") return Math.round(price / RUB_PER_USD);
   if (cur === "BYN") return Math.round(price / BYN_PER_USD);
+  if (cur === "KZT") return Math.round(price / KZT_PER_USD);
+  if (cur === "CNY") return Math.round(price / CNY_PER_USD);
+  if (cur === "AED") return Math.round(price / AED_PER_USD);
   return Math.round(price);
 }
 

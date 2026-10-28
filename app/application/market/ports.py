@@ -98,6 +98,14 @@ class MarketLotRepository(Protocol):
     ) -> list[MarketLotSnapshot]:
         """Все лоты партнёра-владельца (включая снятые), новые первыми."""
 
+    async def list_public_lots(
+        self, *, country: str | None = None, limit: int = 60
+    ) -> list[MarketLotSnapshot]:
+        """Опубликованные owner-лоты рынка (витрина), новые первыми.
+
+        `country` (GEO-V1 §2) — точный ISO-2 или все страны.
+        """
+
     async def count_active_user_lots(
         self, user_id: int, *, exclude_listing_id: int | None = None
     ) -> int:

@@ -48,7 +48,8 @@ describe("BackButton на экранах расчётов", () => {
 
 const apiMock = vi.mocked(api);
 
-/** Полный мок-ответ бэка (region/currency/local — новые поля юрисдикции). */
+/** Полный мок-ответ бэка (region/currency/local — поля юрисдикции;
+ *  country/route/freight_days_* — гео-контракт GEO-V1 §2). */
 const byResult = {
   price_usd: 18000,
   engine_cc: 2000,
@@ -57,6 +58,11 @@ const byResult = {
   age_group: "3–5 лет",
   region: "by",
   currency: "Br",
+  country: "KR",
+  route: "Пусан → Владивосток",
+  freight_days_min: 14,
+  freight_days_max: 21,
+  power_hp: null,
   util_category: "льготный",
   util_note: "",
   components: [{ label: "Авто по счёту", usd: 18000, rub: 54900, local: 54900 }],
@@ -65,6 +71,57 @@ const byResult = {
   total_usd: 18000,
   total_local: 54900,
 };
+
+describe("Calc: страна отправки (GEO-V1 §2–§3)", () => {
+  const deliveryCalls = () => apiMock.mock.calls.filter(([p]) => p === "/calc/delivery");
+  const lastBody = () =>
+    JSON.parse(String(deliveryCalls()[deliveryCalls().length - 1]![1]!.body));
+
+  const renderCalc = () =>
+    render(
+      <MemoryRouter initialEntries={["/calc"]} initialIndex={0}>
+        <CalcScreen />
+      </MemoryRouter>,
+    );
+
+  it("дефолт KR уходит в POST /calc/delivery без касания сегмента", async () => {
+    apiMock.mockResolvedValueOnce(byResult);
+    renderCalc();
+    fireEvent.change(screen.getByPlaceholderText("18 000"), { target: { value: "18000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать" }));
+    await screen.findByText(/Итого «под ключ»/);
+    expect(lastBody().country).toBe("KR");
+  });
+
+  it("сегмент страны: выбор ОАЭ шлёт country=AE в расчёт", async () => {
+    apiMock.mockResolvedValue(byResult);
+    renderCalc();
+    fireEvent.click(screen.getByRole("button", { name: "ОАЭ" }));
+    fireEvent.change(screen.getByPlaceholderText("18 000"), { target: { value: "18000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать" }));
+    await screen.findByText(/Итого «под ключ»/);
+    expect(lastBody().country).toBe("AE");
+  });
+
+  it("маршрут и окно фрейта из DeliveryOut — под итогом расчёта", async () => {
+    apiMock.mockResolvedValueOnce({
+      ...byResult,
+      region: "ru",
+      currency: "₽",
+      country: "AE",
+      route: "Джебель-Али → Новороссийск",
+      freight_days_min: 25,
+      freight_days_max: 40,
+    });
+    renderCalc();
+    fireEvent.click(screen.getByRole("button", { name: "ОАЭ" }));
+    fireEvent.change(screen.getByPlaceholderText("18 000"), { target: { value: "18000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать" }));
+    await screen.findByText(/Джебель-Али → Новороссийск/);
+    const route = document.querySelector(".calc-total__route");
+    expect(route?.textContent).toContain("~25–40 дней");
+  });
+});
 
 describe("Calc: юрисдикция расчёта по валюте (BYN → РБ)", () => {
   it("переключатель «Расчёт по РБ» отправляет region=by и показывает Br", async () => {
@@ -96,7 +153,9 @@ describe("Calc: юрисдикция расчёта по валюте (BYN → �
       </MemoryRouter>,
     );
     await screen.findByText(/Итого «под ключ» \(РБ\)/);
-    const body = JSON.parse((apiMock.mock.calls[0]![1] as RequestInit).body as string);
+    // вызовы накапливаются между тестами файла — берём последний расчёт
+    const calls = apiMock.mock.calls.filter(([p]) => p === "/calc/delivery");
+    const body = JSON.parse(String((calls[calls.length - 1]![1] as RequestInit).body));
     expect(body.region).toBe("by");
   });
 

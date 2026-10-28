@@ -10,6 +10,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
 import { type Region, getRegion, setRegion } from "../lib/fx";
+import { FEED_COUNTRIES, countryFlag, countryName } from "../lib/geo";
 import { BackButton } from "../ui/BackButton";
 import { SkeletonCard } from "../ui/Skeleton";
 import { apiErrorText } from "./apiErrorText";
@@ -61,6 +62,12 @@ interface CalcOut {
   total_rub: number;
   total_usd: number;
   total_local: number;
+  /** Гео маршрута (GEO-V1 §2): страна отправки (эхо DeliveryIn.country),
+   *  маршрут «Пусан → Владивосток» и окно сроков фрейта, дни. */
+  country?: string;
+  route?: string;
+  freight_days_min?: number | null;
+  freight_days_max?: number | null;
 }
 
 /** Регион из query ?cur= (валюта объявления) или сохранённый выбор пользователя. */
@@ -74,6 +81,10 @@ function regionFromParams(params: URLSearchParams): Region {
 export function CalcScreen() {
   const [params] = useSearchParams();
   const [region, setRegionState] = useState<Region>(() => regionFromParams(params));
+  /** Страна отправки (GEO-V1 §2): DeliveryIn.country, дефолт KR — как
+   *  раньше считали «Корея → Владивосток»; ставки логистики по странам
+   *  выбирает бэк, фронт только шлёт код и показывает маршрут. */
+  const [country, setCountryState] = useState("KR");
   const [price, setPrice] = useState(params.get("price") ?? "");
   const [cc, setCc] = useState(params.get("cc") ?? "2000");
   const [hp, setHp] = useState(params.get("hp") ?? "");
@@ -83,7 +94,7 @@ export function CalcScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const calc = useCallback(
-    async (p: string, c: string, h: string, y: string, r: Region) => {
+    async (p: string, c: string, h: string, y: string, r: Region, co: string) => {
       const priceNum = parseFloat(p.replace(/\s/g, ""));
       const ccNum = parseInt(c, 10);
       const hpNum = parseInt(h, 10);
@@ -105,6 +116,7 @@ export function CalcScreen() {
             power_hp: hpNum || undefined,
             year: yearNum,
             region: r,
+            country: co,
           }),
         });
         setResult(out);
@@ -135,14 +147,21 @@ export function CalcScreen() {
     setYear(yearParam);
     const r = regionFromParams(params);
     setRegionState(r);
-    void calc(priceParam, ccParam, hpParam, yearParam, r);
-  }, [params, calc]);
+    void calc(priceParam, ccParam, hpParam, yearParam, r, country);
+  }, [params, calc, country]);
 
   const pickRegion = (r: Region) => {
     haptic("light");
     setRegionState(r);
     setRegion(r); // запоминаем выбор и для ленты/PDP
-    if (result && result.region !== r) void calc(price, cc, hp, year, r);
+    if (result && result.region !== r) void calc(price, cc, hp, year, r, country);
+  };
+
+  /** Смена страны отправки (GEO-V1 §3): пересчёт, если результат уже есть. */
+  const pickCountry = (co: string) => {
+    haptic("light");
+    setCountryState(co);
+    if (result) void calc(price, cc, hp, year, region, co);
   };
 
   const fmt = (n: number) => n.toLocaleString("ru-RU");
@@ -160,7 +179,9 @@ export function CalcScreen() {
         <div>
           <div className="feed-header__title">🚚 Доставка «под ключ»</div>
           <div className="feed-header__counter">
-            {region === "by" ? "Корея → Владивосток → Минск" : "Корея → Владивосток → вам"}
+            {region === "by"
+              ? `${countryName(country) || "Корея"} → Владивосток → Минск`
+              : `${countryName(country) || "Корея"} → Владивосток → вам`}
           </div>
         </div>
       </div>
@@ -181,6 +202,21 @@ export function CalcScreen() {
           >
             🇧🇾 Расчёт по РБ
           </button>
+        </div>
+        {/* Страна отправки (GEO-V1 §3): KR/CN/AE/US/KZ, дефолт KR — от неё
+            зависят порт загрузки, фрейт и сроки (маршрут под результатом) */}
+        <div className="chip-row" role="group" aria-label="Страна отправки">
+          {FEED_COUNTRIES.map((c) => (
+            <button
+              key={c.code}
+              type="button"
+              className={country === c.code ? "chip chip--active" : "chip"}
+              aria-pressed={country === c.code}
+              onClick={() => pickCountry(c.code)}
+            >
+              <span aria-hidden="true">{c.flag}</span> {c.name}
+            </button>
+          ))}
         </div>
         <label className="calc-field">
           <span>Цена авто, $</span>
@@ -236,7 +272,7 @@ export function CalcScreen() {
         <button
           className="btn btn--primary btn--block"
           disabled={loading}
-          onClick={() => void calc(price, cc, hp, year, region)}
+          onClick={() => void calc(price, cc, hp, year, region, country)}
         >
           {loading ? "Считаю…" : "Рассчитать"}
         </button>
@@ -277,6 +313,20 @@ export function CalcScreen() {
               {result.power_hp ? `${result.power_hp} л.с. · ` : ""}
               {result.year} г. · {result.engine_cc} см³ · {result.age_group}
             </div>
+            {/* Маршрут и сроки фрейта (GEO-V1 §2): DeliveryOut.route +
+                окно freight_days_min–max от страны отправки */}
+            {(result.route ||
+              (result.freight_days_min != null && result.freight_days_max != null)) && (
+              <div className="calc-total__route">
+                {result.country && (
+                  <span aria-hidden="true">{countryFlag(result.country)}</span>
+                )}{" "}
+                {result.route}
+                {result.freight_days_min != null && result.freight_days_max != null
+                  ? ` · ~${result.freight_days_min}–${result.freight_days_max} дней`
+                  : ""}
+              </div>
+            )}
           </div>
 
           <div className="calc-rows">

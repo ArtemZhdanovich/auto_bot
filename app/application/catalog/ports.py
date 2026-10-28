@@ -39,8 +39,10 @@ class ListingReadRepository(Protocol):
     ) -> None:
         """Записать событие завершённого поиска (analytics)."""
 
-    async def facets(self, make: str | None) -> dict[str, list[str]]:
-        """Марки или модели выбранной марки для селектов."""
+    async def facets(
+        self, make: str | None, *, country: str | None = None
+    ) -> dict[str, list[str]]:
+        """Марки или модели выбранной марки для селектов (+ `countries`)."""
 
     async def find_by_url(self, needle: str) -> list[ListingCard]:
         """До двух активных объявлений по нормализованному хвосту URL."""

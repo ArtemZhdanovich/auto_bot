@@ -1,7 +1,7 @@
 /** Тесты пагинации и области прокрутки ленты: авто-подгрузка скроллом
  *  внутри viewport-области, ретрай после ошибки, конец списка, skeleton,
  *  IntersectionObserver с root = контейнер области. */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,6 +65,8 @@ const listing = (id: number): Listing => ({
   currency: "KRW",
   mileage_km: 42_000,
   vin: null,
+  country: "KR", // GEO-V1 §2: ListingOut.country (ISO2)
+  city: null, // город — только у owner-лотов рынка
   images: [`https://img/${id}.jpg`],
   parsed_at: "2026-10-01T00:00:00Z",
   is_active: true,
@@ -448,6 +450,101 @@ describe("Feed: чипс «🏪 Рынок» (source=market, витрина па
       const last = listingCalls()[listingCalls().length - 1];
       expect(last.includes("source=market")).toBe(true);
       expect(last.includes("price_max=13500000")).toBe(true);
+    });
+  });
+});
+
+describe("Feed: гео-фильтры стран (GEO-V1 §3)", () => {
+  /** Вызовы GET /listings (не фасеты и не limit=1-счётчик). */
+  const listingCalls = () =>
+    apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings?"));
+
+  it("чипс страны шлёт country=KR, повторный клик снимает фильтр", async () => {
+    renderFeed();
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBeGreaterThan(0),
+    );
+    const chip = screen.getByRole("button", { name: "Корея" });
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(listingCalls().some((p) => p.includes("country=KR"))).toBe(true),
+    );
+    expect(
+      screen.getByRole("button", { name: "Корея" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    // повторный клик снимает: последний запрос без country=
+    fireEvent.click(screen.getByRole("button", { name: "Корея" }));
+    await waitFor(() =>
+      expect(listingCalls()[listingCalls().length - 1].includes("country=")).toBe(false),
+    );
+    expect(
+      screen.getByRole("button", { name: "Корея" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+  });
+
+  it("чипс страны не сбрасывает остальные критерии (toggle, не пресет)", async () => {
+    renderFeed();
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBeGreaterThan(0),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "до $10 000" }));
+    await waitFor(() =>
+      expect(listingCalls().some((p) => p.includes("price_max=13500000"))).toBe(true),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Китай" }));
+    await waitFor(() => {
+      const last = listingCalls()[listingCalls().length - 1];
+      expect(last.includes("country=CN")).toBe(true);
+      expect(last.includes("price_max=13500000")).toBe(true);
+    });
+  });
+
+  it("шит фильтров: сегмент «Страна» (5 стран + «Все») применяется через «Применить»", async () => {
+    renderFeed();
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    const sheet = screen.getByRole("dialog", { name: "Фильтры ленты" });
+    // те же пять стран, что и в чипсах над лентой
+    const seg = within(sheet).getByRole("group", { name: "Страна" });
+    for (const name of ["Корея", "Китай", "ОАЭ", "США", "Казахстан"]) {
+      expect(within(seg).getByRole("button", { name })).toBeTruthy();
+    }
+    expect(within(seg).getByRole("button", { name: "Все" })).toBeTruthy();
+    fireEvent.click(within(seg).getByRole("button", { name: "ОАЭ" }));
+    fireEvent.click(screen.getByText("Применить"));
+    await waitFor(() =>
+      expect(listingCalls().some((p) => p.includes("country=AE"))).toBe(true),
+    );
+    // страна учтена в счётчике активных критериев и подсветила чипс ленты
+    expect(screen.getByText("Фильтры · 1")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "ОАЭ" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("keep-alive: deep-link /?country=AE применяется к смонтированной ленте", async () => {
+    function Harness() {
+      const navigate = useNavigate();
+      return (
+        <>
+          <button onClick={() => navigate("/?country=AE")}>Показать в ленте</button>
+          <FeedScreen />
+        </>
+      );
+    }
+    render(
+      <AppRoot>
+        <MemoryRouter>
+          <Harness />
+        </MemoryRouter>
+      </AppRoot>,
+    );
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+    fireEvent.click(screen.getByRole("button", { name: "Показать в ленте" }));
+    await waitFor(() => {
+      const last = listingCalls()[listingCalls().length - 1] ?? "";
+      expect(last.includes("country=AE")).toBe(true);
     });
   });
 });

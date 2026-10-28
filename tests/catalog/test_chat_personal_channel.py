@@ -460,6 +460,7 @@ async def test_partner_typing_mirror(session, fake_redis, auth_headers, user):
                 "year": 2023,
                 "price": 65000,
                 "currency": "USD",
+                "country": "RU",  # GEO-V1 §2: страна обязательна
             },
             headers={"X-API-Key": raw_key},
         )

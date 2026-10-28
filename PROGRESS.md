@@ -3115,3 +3115,52 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
   «как добавить источник»); README.md — 140 (карта доков); NAV-V2.md — §4 «Как
   реализовано»; TECHDEBT.md — перепроверен (закрыто: UX-полиш, LLM-двойной-вызов;
   новые долги: rate_limit адаптеров не enforced, LPG-фасет, зеркало при смене фото).
+
+## 2026-10-29: GEO-V1 — источники AE/US/KZ + гео в фильтрах и рынке + UI/UX
+
+Спека docs/GEO-V1.md; волна 5 агентов (A умер на 5ч-лимите — бэк доделан
+руками по его наработкам; B/C/D/E завершились). Прогон browser-use живой.
+
+### Бэкенд
+- Миграция 0031: listings.country (ISO2) + city; бэкфилл по source-мапе
+  (394 лота → KR); индекс ix_listings_country. РЕВИЗОРСКИЙ ФИКС: агент
+  оставил `#`-комментарии Пайтона внутри SQL listings_writer — Postgres
+  падал синтаксисом; заменены на `--`. Ещё фикс: alembic env.py
+  fileConfig(disable_existing_loggers=False) — программный прогон
+  миграций в тестах глушил caplog соседям (4 флейка).
+- Лента: query country=; фасеты v2 с countries (сейчас [KR,KZ]).
+- Рынок: country/city в create/update/MyLotOut + фильтр GET /market/lots.
+- Калькулятор: DeliveryIn.country (KR/CN/AE/US/KZ), домен
+  app/domain/logistics/routes.py (порт/фрейт/сроки), DeliveryOut.route
+  («Джебель-Али → Новороссийск») + freight_days_*.
+- UnifiedListing.country → writer (COALESCE — не сбрасывает бэкфилл).
+
+### Источники (ADAPTER_CLASSES: 6 классов)
+- kolesa (KZ): ВКЛЮЧЁН, живой HTML сверен (20/20 карточек), прод-fetch
+  принёс 40 лотов KZ (Hongqi HS5, Ferrari F8, Lada…). KZ_MAKE_MAP
+  кириллицы в адаптере.
+- dubizzle (AE) / cars_com (US): написаны на фикстурах двух поколений
+  вёрстки (31 тест), ВЫКЛЮЧЕНЫ — Imperva/Akamai антибот, включение
+  только с use_proxy + резидентными прокси, селекторы — сверить.
+- che168 (CN): не включён (JS-антибот EO_Bot_Ssid) — TODO headless/прокси.
+- Сид источников через PUT /api/admin/sources (kolesa вкл, dubizzle/
+  cars_com выкл с use_proxy). Гочворо: registry кеш адаптеров греется
+  на старте воркера — после сида нового источника нужен рестарт
+  worker_fetch.
+
+### Фронтенд (vitest 568→572, tsc чисто)
+- lib/geo.ts (COUNTRIES/flags); чипсы-страны в ленте + секция «Страна»
+  в шите; deep-link ?country=; бейджи «🇰🇿 KZ · kolesa»/«🇷🇺 Москва» на
+  карточках; PDP «Страна»; SellCar страна (дефолт RU, без импортных) +
+  город; MyLots «📍»; калькулятор: сегмент стран + маршрут/сроки.
+- РЕВИЗОРСКИЙ ФИКС: цены KZT рисовались «$12 200 000» — lib/fx не знал
+  KZT (фолбэк USD). Добавлены фикс-курсы KZT÷480/CNY÷7.1/AED÷3.6725
+  (тесты). Теперь Hongqi HS5 = $25 417.
+
+### Деплой и проверки
+- Пересобран весь micro-профиль + workers + bot + miniapp; миграция
+  через gateway (alembic). Полный pytest: infra 433/433, фулл-ран в фоне
+  дал 23 errors на рестарте Docker (артефакт параллельности; изолированно
+  все файлы зелёные). vitest 572/572.
+- browser-use: /?country=KZ → 40 авто, чипс [pressed], «Фильтры · 1»,
+  бейджи на карточках, цены KZT→$ корректны, калькулятор со странами.

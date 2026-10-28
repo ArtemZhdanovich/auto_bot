@@ -94,6 +94,10 @@ class ListingCard:
     # История машины (миграция 0028): события [{date, title, note?}]
     # партнёра — PDP-таймлайн «как в Корее» (07 §3), пуст для юзер-лотов.
     owner_history: list[dict] = field(default_factory=list)
+    # Гео (GEO-V1 §2, миграция 0031): ISO-3166 alpha-2 страны лота
+    # (бейдж-флаг на карточке); город — только у owner-лотов рынка.
+    country: str | None = None
+    city: str | None = None
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
     updated_at: datetime | None = None
@@ -142,6 +146,9 @@ class ListingFeedQuery:
     engine_volume_max: float | None = None
     color: str | None = None
     source: str | None = None
+    # Фильтр по стране (GEO-V1 §2): точный ISO-2 («KR», «CN»), одна
+    # страна; CSV не поддерживается.
+    country: str | None = None
     cursor: str | None = None
     sort: str = "new"
     limit: int = 20

@@ -104,6 +104,9 @@ def _to_card(row: Listing) -> ListingCard:
             dict(event)
             for event in (getattr(row, "owner_history", None) or [])
         ],
+        # Гео (GEO-V1 §2): бейдж-флаг страны на карточке; город — рынок.
+        country=getattr(row, "country", None),
+        city=getattr(row, "city", None),
         first_seen_at=getattr(row, "first_seen_at", None),
         last_seen_at=getattr(row, "last_seen_at", None),
         updated_at=getattr(row, "updated_at", None),
@@ -222,9 +225,19 @@ class SqlAlchemyListingReadRepository:
             conditions.append(Listing.status == LISTING_STATUS_ACCEPTED)
         elif query.source:
             conditions.append(func.lower(Listing.source) == query.source.lower())
-        else:
-            # MVP: только Корея — без `source` отдаём encar+kcar.
+        elif not query.country:
+            # MVP: только Корея — без `source` отдаём encar+kcar. Явный
+            # `country` (GEO-V1 §2) расширяет ленту на все источники
+            # страны: чипс «🇨🇳 Китай» не должен глохнуть на дефолте.
             conditions.append(func.lower(Listing.source).in_(("encar", "kcar")))
+        else:
+            # Есть `country`, но нет `source`: границы ленты задаёт
+            # страна (исключение — рынок выше по ветке source=market).
+            conditions.append(Listing.source != "market")
+
+        # Точный ISO-2 (GEO-V1 §2): одна страна, без CSV.
+        if query.country:
+            conditions.append(func.upper(Listing.country) == query.country.upper())
 
         if query.make:
             m = (normalize_make(query.make) or query.make).lower()
@@ -288,40 +301,71 @@ class SqlAlchemyListingReadRepository:
     # Facets
     # ------------------------------------------------------------------
 
-    async def facets(self, make: str | None) -> dict[str, list[str]]:
-        """Марки (без `make`) или модели выбранной марки."""
+    async def facets(
+        self, make: str | None, *, country: str | None = None
+    ) -> dict[str, list[str]]:
+        """Марки (без `make`) или модели марки + страны для чипсов GEO-V1.
+
+        `country` сужает марки/модели до одной страны (сегмент фильтра
+        «Страна»); `countries` — distinct по активным объявлениям, порядок
+        по частоте (сколько лотов страны в базе).
+        """
+        # Чипсы-страны (GEO-V1 §2): частые первыми — KR/CN/AE/US/KZ.
+        country_rows = (
+            await self._session.execute(
+                select(Listing.country, func.count())
+                .where(
+                    Listing.is_active.is_(True),
+                    Listing.country.is_not(None),
+                )
+                .group_by(Listing.country)
+                .order_by(func.count().desc(), Listing.country)
+                .limit(_FACETS_LIMIT)
+            )
+        ).all()
+        countries = [row[0] for row in country_rows]
+
+        country_cond = (
+            func.upper(Listing.country) == country.upper() if country else None
+        )
         if make:
             m_norm = (normalize_make(make) or make).lower()
+            conditions = [
+                Listing.is_active.is_(True),
+                func.lower(Listing.make) == m_norm,
+                Listing.model.is_not(None),
+                Listing.model != "",
+            ]
+            if country_cond is not None:
+                conditions.append(country_cond)
             rows = (
                 await self._session.execute(
                     select(Listing.model)
-                    .where(
-                        Listing.is_active.is_(True),
-                        func.lower(Listing.make) == m_norm,
-                        Listing.model.is_not(None),
-                        Listing.model != "",
-                    )
+                    .where(*conditions)
                     .distinct()
                     .order_by(Listing.model)
                     .limit(_FACETS_LIMIT)
                 )
             ).all()
-            return {"models": [row[0] for row in rows]}
+            return {"models": [row[0] for row in rows], "countries": countries}
 
+        conditions = [
+            Listing.is_active.is_(True),
+            Listing.make.is_not(None),
+            Listing.make != "",
+        ]
+        if country_cond is not None:
+            conditions.append(country_cond)
         rows = (
             await self._session.execute(
                 select(Listing.make)
-                .where(
-                    Listing.is_active.is_(True),
-                    Listing.make.is_not(None),
-                    Listing.make != "",
-                )
+                .where(*conditions)
                 .distinct()
                 .order_by(Listing.make)
                 .limit(_FACETS_LIMIT)
             )
         ).all()
-        return {"makes": [row[0] for row in rows]}
+        return {"makes": [row[0] for row in rows], "countries": countries}
 
     # ------------------------------------------------------------------
     # By URL

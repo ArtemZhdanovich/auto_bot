@@ -273,6 +273,46 @@ describe("ListingCard: дизайн-пасс (02-design-system §7.3)", () => {
   });
 });
 
+describe("ListingCard: бейдж страны (GEO-V1 §3)", () => {
+  const metaText = () =>
+    (document.querySelector(".lcard__meta")?.textContent ?? "").replace(/\s/g, " ");
+
+  it("внешний лот: флаг + ISO2 рядом с источником («🇨🇳 CN · che168»)", () => {
+    renderCard({ ...base, source: "che168", country: "CN" });
+    const meta = metaText();
+    expect(meta).toContain("🇨🇳 CN");
+    expect(meta).toContain("che168");
+  });
+
+  it("owner-лот с городом: флаг + город вместо ISO2 («🇷🇺 Москва»)", () => {
+    renderCard({ ...base, owner_type: "user", country: "RU", city: "Москва" });
+    const meta = metaText();
+    expect(meta).toContain("🇷🇺 Москва");
+    // код страны у owner-лота не дублируется — гео читается городом
+    expect(meta).not.toMatch(/RU ·/);
+  });
+
+  it("owner-лот без города: флаг + ISO2 (город не обязателен в контракте)", () => {
+    renderCard({ ...base, owner_type: "partner", country: "KZ" });
+    expect(metaText()).toContain("🇰🇿 KZ");
+  });
+
+  it("страна в ленте рынка не мешает остальной метастроке (год · пробег · источник)", () => {
+    renderCard({ ...base, country: "KR" });
+    const meta = metaText();
+    expect(meta).toContain("2022");
+    expect(meta).toContain("42 000 км");
+    expect(meta).toContain("🇰🇷 KR");
+    expect(meta).toContain("KCar");
+  });
+
+  it("старый ответ без country — прежнее имя страны из словаря источников", () => {
+    renderCard(base);
+    expect(metaText()).toContain("Корея");
+    expect(metaText()).not.toContain("🇰🇷 KR");
+  });
+});
+
 describe("ListingCard: мини-карусель фото (ПК, задача владельца)", () => {  /** N фото с различимыми url. */
   const many = (n: number) => Array.from({ length: n }, (_, i) => `https://img/${i + 1}.jpg`);
 

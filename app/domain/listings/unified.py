@@ -41,6 +41,10 @@ class UnifiedListing(BaseModel):
 
     # Продавец и локация
     location: Optional[str] = None
+    # Страна лота (GEO-V1 §2): ISO-3166 alpha-2 ("KR", "CN", "AE", "US",
+    # "KZ"). Проставляет адаптер источника; writer пишет в listings.country
+    # (COALESCE — существующая страна не сбрасывается).
+    country: Optional[str] = None
     seller_type: Optional[Literal["private", "dealer", "auction"]] = None
     condition: Optional[str] = None
 

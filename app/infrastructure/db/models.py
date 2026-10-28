@@ -456,6 +456,9 @@ class Listing(Base):
             "id",
             postgresql_where=text("pending_patch IS NOT NULL"),
         ),
+        # Гео-контур (миграция 0031, GEO-V1 §2): фильтр ленты `?country=`
+        # и фасет `countries` (distinct по is_active).
+        Index("ix_listings_country", "country"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -475,6 +478,11 @@ class Listing(Base):
     drive: Mapped[str | None] = mapped_column(String(16))
     engine_volume: Mapped[float | None] = mapped_column(Float)
     color: Mapped[str | None] = mapped_column(String(32))
+    # Гео (миграция 0031, GEO-V1 §2): ISO-3166 alpha-2 страны лота —
+    # внешним проставляет адаптер (UnifiedListing.country), owner-лотам
+    # рынка — форма продавца; город — только для owner-лотов.
+    country: Mapped[str | None] = mapped_column(String(2))
+    city: Mapped[str | None] = mapped_column(String(64))
     images: Mapped[list[Any]] = mapped_column(
         JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
     )

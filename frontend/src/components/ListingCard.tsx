@@ -29,6 +29,7 @@ import { Car, Heart } from "lucide-react";
 import { api } from "../api/client";
 import { haptic, isGuest } from "../api/auth";
 import { getRegion, priceChain } from "../lib/fx";
+import { countryFlag } from "../lib/geo";
 import { fuelLabel, transmissionLabel, driveLabel } from "../lib/specs";
 import { useToast } from "../ui/Toast";
 import { useLoginPrompt } from "../ui/LoginPrompt";
@@ -93,12 +94,20 @@ export const ListingCard = memo(function ListingCard({ listing, favorited = fals
 
   // F9: источник — текстом в метастроке, а не ссылкой
   const meta = SOURCE_META[listing.source.toLowerCase()];
+  // Гео-бейдж (GEO-V1 §3): флаг + ISO2 рядом с источником («🇨🇳 CN · che168»);
+  // owner-лоты рынка — флаг + город («🇷🇺 Москва»); пока country нет в ответе
+  // (старый бэк) — прежнее имя страны из словаря источников
+  const countryPart = listing.country
+    ? `${countryFlag(listing.country)} ${
+        listing.city ?? listing.country.toUpperCase()
+      }`
+    : (meta?.country ?? "");
   const metaParts = [
     listing.year ? String(listing.year) : "",
     listing.mileage_km != null
       ? `${listing.mileage_km.toLocaleString("ru-RU")} км`
       : "",
-    meta?.country ?? "",
+    countryPart,
     meta?.name ?? listing.source,
     listing.parsed_at ? shortDate(listing.parsed_at) : "",
   ].filter(Boolean);

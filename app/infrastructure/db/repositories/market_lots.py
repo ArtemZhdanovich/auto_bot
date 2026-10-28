@@ -51,6 +51,9 @@ def _snapshot(row: Listing) -> MarketLotSnapshot:
         images=tuple(row.images or ()),
         url=row.url,
         created_at=row.first_seen_at,
+        # Гео (GEO-V1 §2): страна/город owner-лота из формы SellCar.
+        country=row.country,
+        city=row.city,
         status=row.status,
         rejected_reason=row.rejected_reason,
         moderation_payload=dict(row.moderation_payload)
@@ -85,6 +88,9 @@ class SqlAlchemyMarketLotRepository:
             fuel=command.fuel,
             transmission=command.transmission,
             images=list(command.photos),
+            # Гео (GEO-V1 §2): страна продавца из формы + город (опционален).
+            country=command.country,
+            city=command.city,
             owner_type=lot.owner_type,
             owner_user_id=lot.owner_user_id,
             owner_partner_id=lot.owner_partner_id,
@@ -132,6 +138,32 @@ class SqlAlchemyMarketLotRepository:
                     Listing.owner_partner_id == partner_id,
                 )
                 .order_by(Listing.id.desc())
+            )
+        ).scalars().all()
+        return [_snapshot(row) for row in rows]
+
+    async def list_public_lots(
+        self, *, country: str | None = None, limit: int = 60
+    ) -> list[MarketLotSnapshot]:
+        """Опубликованные owner-лоты рынка (витрина GET /api/market/lots).
+
+        Только активные accepted (draft/moderation/rejected/expired не
+        видны); `country` (GEO-V1 §2) — точный ISO-2, чипсы стран сверху.
+        Новые первыми.
+        """
+        conditions = [
+            Listing.owner_type.is_not(None),
+            Listing.is_active.is_(True),
+            Listing.status == LISTING_STATUS_ACCEPTED,
+        ]
+        if country:
+            conditions.append(func.upper(Listing.country) == country.upper())
+        rows = (
+            await self._session.execute(
+                select(Listing)
+                .where(*conditions)
+                .order_by(Listing.id.desc())
+                .limit(limit)
             )
         ).scalars().all()
         return [_snapshot(row) for row in rows]
@@ -398,6 +430,9 @@ class SqlAlchemyMarketLotRepository:
             "fuel": "fuel",
             "transmission": "transmission",
             "description": "owner_description",
+            # Гео (GEO-V1 §2): страна/город правятся патчем лота.
+            "country": "country",
+            "city": "city",
         }
         for key, value in fields.items():
             if key == "photos":

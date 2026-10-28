@@ -68,6 +68,7 @@ import type {
   HistoryReportView,
 } from "../api/types";
 import { getRegion, priceChain, toUsd } from "../lib/fx";
+import { countryLabel } from "../lib/geo";
 import { createSellerChat } from "../lib/chatApi";
 import { VERDICT_LABEL, deltaPct, fairPosition, type AnalysisData } from "../lib/analysis";
 import { PriceChart } from "../ui/PriceChart";
@@ -465,6 +466,13 @@ export function ListingScreen() {
   const specs: { label: string; value: string }[] = [
     listing.body_type && { label: "Кузов", value: listing.body_type },
     listing.year && { label: "Год выпуска", value: String(listing.year) },
+    // Гео лота (GEO-V1 §3): «🇦🇪 ОАЭ» / «🇷🇺 Россия, Москва»
+    listing.country && {
+      label: "Страна",
+      value: listing.city
+        ? `${countryLabel(listing.country)}, ${listing.city}`
+        : countryLabel(listing.country),
+    },
     listing.engine_volume != null && {
       label: "Двигатель",
       value: `${listing.engine_volume} л`,

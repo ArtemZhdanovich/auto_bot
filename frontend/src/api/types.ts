@@ -92,6 +92,12 @@ export interface Listing {
   updated_at?: string | null;
   last_seen_at?: string | null;
   price_changed_at?: string | null;
+  /** Гео лота (GEO-V1 §2): ISO-3166 alpha-2 страны источника (адаптер
+   *  проставляет сам: encar/kcar→KR, che168→CN…) либо страны продавца
+   *  для owner-лотов рынка; null — до бэкфилла старых записей. */
+  country?: string | null;
+  /** Город — только для owner-лотов рынка (форма SellCar), у внешних null. */
+  city?: string | null;
   /** Рынок владельцев (06-market-user-listings §4): 'user'/'partner' —
    *  лот рынка с продавцом (seller-чат доступен), null — внешний лот
    *  (encar/kcar, чата с продавцом нет). Поле появляется после B1. */
@@ -257,6 +263,10 @@ export interface MyLot {
   images: string[];
   url: string | null;
   owner_description: string | null;
+  /** Гео owner-лота (GEO-V1 §2): country обязателен для лотов рынка
+   *  (ISO2 от формы SellCar), city опционален; undefined — старый ответ. */
+  country?: string | null;
+  city?: string | null;
   /** Спеки для предзаполнения edit-формы (/sell?edit): бэк может отдать
    *  поля лота — если нет, селекты остаются «Не выбрано». */
   fuel?: string | null;

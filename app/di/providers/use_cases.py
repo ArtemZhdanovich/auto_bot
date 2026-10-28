@@ -69,6 +69,7 @@ from app.application.market.use_cases import (
     CreateMarketLot,
     CreatePartnerLot,
     ExtendLot,
+    ListMarketLots,
     ListMarketOffers,
     ListModerationQueue,
     ListMyLots,
@@ -318,6 +319,8 @@ _AUTO_WIRED = (
     # Лоты рынка с владельцем + монетизация размещений (редизайн части 6)
     CreateMarketLot,
     ListMyLots,
+    # Витрина опубликованных лотов рынка с фильтром страны (GEO-V1 §2)
+    ListMarketLots,
     CloseMarketLot,
     ExtendLot,
     ListPackages,

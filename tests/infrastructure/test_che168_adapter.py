@@ -34,6 +34,11 @@ CARD_NO_ID = """
 ANY_NUM = re.compile(r"([\d.]+)\s*(万?)")
 
 
+def _country(item) -> str:
+    """country из модели (волна A GEO-V1 §2) либо из raw (пока поля нет)."""
+    return getattr(item, "country", None) or item.raw.get("country")
+
+
 def _page(*cards: str) -> str:
     return f"<html><body><ul id='usedList'>{''.join(cards)}</ul></body></html>"
 
@@ -74,6 +79,9 @@ def test_extract_make_zh():
     assert extract_make_zh("2020款 丰田汉兰达 2.0T") == "Toyota"
     assert extract_make_zh("比亚迪汉 EV") == "BYD"
     assert extract_make_zh("广汽传祺GS4") == "Trumpchi"  # длинный ключ раньше короткого
+    assert extract_make_zh("蔚来ES6") == "NIO"
+    assert extract_make_zh("小鹏P7") == "XPeng"
+    assert extract_make_zh("理想L9") == "Li Auto"
     assert extract_make_zh("какой-то текст без марки") is None
     assert extract_make_zh(None) is None
 
@@ -102,9 +110,22 @@ async def test_fetch_maps_card_to_unified_listing():
     assert item.mileage_km == 52000  # 5.2万公里 → 52000
     assert item.transmission == "automatic"  # 自动挡 → automatic
     assert item.vin is None  # VIN в Китае скрыт
+    assert _country(item) == "CN"  # country=CN (raw, пока поля нет в модели)
     assert str(item.images[0]).endswith("auto/2024/1.jpg")  # data-src, абсолютный
     assert item.raw["title"] == item.title  # raw_payload сохраняется
     assert "丰田" in item.raw["html"]
+    await adapter.close()
+
+
+async def test_fetch_detects_fuel_and_plain_mileage():
+    """Топливо из текста (汽油) и пробег без 万: «52300公里» → 52300."""
+    card = CARD.replace("5.2万公里", "52300公里</li><li>汽油")
+    adapter, _ = make_adapter([_page(card)])
+    result = await adapter.fetch(SearchCriteria())
+    item = result.items[0]
+    assert item.mileage_km == 52300  # без 万 — число как есть
+    assert item.fuel == "petrol"  # 汽油 → petrol
+    assert _country(item) == "CN"
     await adapter.close()
 
 

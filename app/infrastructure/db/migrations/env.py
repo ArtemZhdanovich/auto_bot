@@ -14,7 +14,9 @@ from app.infrastructure.db.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: программные прогоны alembic из тестов
+    # не должны глушить уже созданные логгеры pytest (caplog соседних тестов)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # URL берём из настроек приложения, а не из alembic.ini
 config.set_main_option("sqlalchemy.url", get_settings().database_url)

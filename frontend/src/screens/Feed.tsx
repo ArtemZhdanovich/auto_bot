@@ -46,6 +46,7 @@ import { ListingCard } from "../components/ListingCard";
 import { SkeletonList } from "../ui/Skeleton";
 import { EmptyState, ErrorState } from "../ui/States";
 import { KRW_PER_USD, digits } from "../lib/fx";
+import { FEED_COUNTRIES } from "../lib/geo";
 import {
   BODIES,
   COLORS,
@@ -92,6 +93,8 @@ interface FeedQuery {
   transmission?: string;
   drive?: string;
   source?: string;
+  /** Страна источника (GEO-V1 §2): ISO2, одна страна (CSV не нужен). */
+  country?: string;
 }
 
 /** Чипс ленты: пресет («Быстрые») или сохранённая подписка («Мои сигналы»). */
@@ -169,6 +172,7 @@ function sameQuery(a: FeedQuery, b: FeedQuery): boolean {
     "transmission",
     "drive",
     "source",
+    "country",
   ];
   return keys.every((k) => a[k] === b[k]);
 }
@@ -198,6 +202,7 @@ function buildListParams(q: FeedQuery, sort: SortKey, offset: number, limit: num
   if (q.transmission) params.set("transmission", q.transmission);
   if (q.drive) params.set("drive", q.drive);
   if (q.source) params.set("source", q.source);
+  if (q.country) params.set("country", q.country);
   params.set("sort", sort);
   params.set("limit", String(limit));
   params.set("offset", String(offset));
@@ -260,6 +265,7 @@ function deepLinkQuery(search: string): FeedQuery {
     transmission: pick("transmission"),
     drive: pick("drive"),
     source: pick("source"),
+    country: pick("country"),
   };
   const clean = Object.fromEntries(
     Object.entries(entries).filter(([, v]) => v !== undefined && v !== ""),
@@ -637,6 +643,23 @@ export function FeedScreen({ inactive = false }: { inactive?: boolean }) {
             >
               🏪 Рынок
             </button>
+            {/* Быстрые чипсы-стран (GEO-V1 §3): флаг + имя, toggle как рынок
+                (повторный клик снимает), остальные критерии не трогает */}
+            {FEED_COUNTRIES.map((c) => {
+              const on = query.country === c.code;
+              return (
+                <button
+                  key={c.code}
+                  className={on ? "chip chip--active" : "chip"}
+                  aria-pressed={on}
+                  onClick={() =>
+                    setQuery((q) => ({ ...q, country: on ? undefined : c.code }))
+                  }
+                >
+                  <span aria-hidden="true">{c.flag}</span> {c.name}
+                </button>
+              );
+            })}
             {chips.signals.map((c) => (
               <button
                 key={c.key}
@@ -777,6 +800,34 @@ export function FeedScreen({ inactive = false }: { inactive?: boolean }) {
                     ))}
                   </select>
                 </label>
+                {/* Страна источника (GEO-V1 §3): сегмент один-выбор + «Все»;
+                    те же пять стран, что и в быстрых чипсах над лентой */}
+                <div className="feed-panel__section" aria-hidden="true">Страна</div>
+                <div
+                  className="feed-panel__pair feed-panel__pair--chips"
+                  role="group"
+                  aria-label="Страна"
+                >
+                  <button
+                    type="button"
+                    className={!draft.country ? "chip chip--active" : "chip"}
+                    aria-pressed={!draft.country}
+                    onClick={() => setDraft((d) => ({ ...d, country: undefined }))}
+                  >
+                    Все
+                  </button>
+                  {FEED_COUNTRIES.map((c) => (
+                    <button
+                      key={c.code}
+                      type="button"
+                      className={draft.country === c.code ? "chip chip--active" : "chip"}
+                      aria-pressed={draft.country === c.code}
+                      onClick={() => setDraft((d) => ({ ...d, country: c.code }))}
+                    >
+                      <span aria-hidden="true">{c.flag}</span> {c.name}
+                    </button>
+                  ))}
+                </div>
                 <div className="feed-panel__section" aria-hidden="true">Цена и год</div>
                 <label className="feed-panel__field">
                   <span>Цена $ от</span>

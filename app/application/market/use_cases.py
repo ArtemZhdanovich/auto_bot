@@ -332,6 +332,8 @@ def _lot_view(
         images=lot.images,
         url=lot.url,
         owner_description=lot.owner_description,
+        country=lot.country,
+        city=lot.city,
         status=lot.status,
         rejected_reason=lot.rejected_reason,
         violations=violations,
@@ -708,6 +710,29 @@ class UpdateLot:
             now=datetime.now(UTC),
             quality=await lot_quality(fresh, self._analyses),
         )
+
+
+class ListMarketLots:
+    """GET /api/market/lots — витрина опубликованных owner-лотов (GEO-V1 §2).
+
+    Активные accepted-лоты рынка (черновики и отклонённые не видны) с
+    опциональным фильтром `country` (точный ISO-2, чипсы стран).
+    """
+
+    def __init__(self, lots: MarketLotRepository) -> None:
+        self._lots = lots
+
+    async def execute(
+        self, *, country: str | None = None, limit: int = 60
+    ) -> list[MyLotView]:
+        """Опубликованные лоты рынка, новые первыми."""
+        now = datetime.now(UTC)
+        return [
+            _lot_view(lot, now=now)
+            for lot in await self._lots.list_public_lots(
+                country=country, limit=limit
+            )
+        ]
 
 
 class ListMyLots:

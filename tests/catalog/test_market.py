@@ -54,6 +54,7 @@ async def _partner_owner_lot(
             "currency": "USD",
             "mileage_km": 15000,
             "description": "Салон, гарантия",
+            "country": "RU",  # GEO-V1 §2: страна обязательна для owner-лота
         },
         headers={"X-API-Key": raw_key},
     )

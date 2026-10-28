@@ -98,6 +98,9 @@ async def list_listings(
     engine_volume_max: float | None = Query(default=None, ge=0, le=20),
     color: str | None = None,
     source: str | None = None,
+    country: str | None = Query(
+        default=None, pattern="^[A-Za-z]{2}$", description="ISO-3166 alpha-2"
+    ),
     cursor: str | None = None,
     sort: str = Query(
         default="new",
@@ -110,7 +113,8 @@ async def list_listings(
 
     `cursor` работает только с `sort=new`; в keyset-запросе `total` = 0 и
     `count(*)` не выполняется. Контракт `total`/`items`/`next_cursor`/
-    `has_more` не меняется.
+    `has_more` не меняется. `country` (GEO-V1 §2) — точный ISO-2: чипсы
+    «Корея/Китай/ОАЭ/США/Казахстан», одна страна без CSV.
     """
     try:
         page = await use_case.execute(
@@ -132,6 +136,7 @@ async def list_listings(
                 engine_volume_max=engine_volume_max,
                 color=color,
                 source=source,
+                country=country,
                 cursor=cursor,
                 sort=sort,
                 limit=limit,
@@ -159,15 +164,23 @@ async def listing_facets(
     redis: RedisDep,
     use_case: ListListingFacetsDep,
     make: str | None = None,
+    country: str | None = Query(
+        default=None, pattern="^[A-Za-z]{2}$", description="ISO-3166 alpha-2"
+    ),
 ) -> dict[str, list[str]]:
-    """Справочник для селектов фильтров (марки / модели выбранной марки).
+    """Справочник для селектов фильтров (марки / модели марки / страны).
 
     Кэш в Redis на 5 минут; `is_active` — только по актуальным объявлениям.
+    `countries` (GEO-V1 §2) — distinct страны по активным листингам, частые
+    первыми; `country` сужает марки/модели до страны. Ключ `facets:v2:…` —
+    форма ответа изменилась (добавлен `countries`).
     """
     if make:
-        cache_key = f"facets:models:{make.strip().lower()}"
+        cache_key = f"facets:v2:models:{make.strip().lower()}"
     else:
-        cache_key = "facets:makes"
+        cache_key = "facets:v2:makes"
+    if country:
+        cache_key += f":{country.upper()}"
 
     try:
         cached = await redis.get(cache_key)
@@ -176,7 +189,7 @@ async def listing_facets(
     except Exception:  # noqa: BLE001 — кэш не критичен
         logger.warning("facets_cache_get_failed", exc_info=True)
 
-    result = await use_case.execute(make)
+    result = await use_case.execute(make, country=country)
 
     try:
         await redis.setex(cache_key, _FACETS_CACHE_TTL_SEC, json.dumps(result))

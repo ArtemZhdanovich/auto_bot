@@ -537,12 +537,12 @@ async def test_facets_excludes_inactive(
 async def test_facets_cached_in_redis(
     client: AsyncClient, session: AsyncSession, fake_redis,
 ):
-    """Второй вызов — из кэша; ключ `facets:makes` в Redis."""
+    """Второй вызов — из кэша; ключ `facets:v2:makes` в Redis (GEO-V1 §2)."""
     await _make_listing(session, make="Toyota", source_id="fc-1")
-    await fake_redis.delete("facets:makes")  # на случай предыдущих тестов
+    await fake_redis.delete("facets:v2:makes")  # на случай предыдущих тестов
     await client.get("/api/listings/facets")
-    assert await fake_redis.exists("facets:makes") == 1
-    cached_raw = await fake_redis.get("facets:makes")
+    assert await fake_redis.exists("facets:v2:makes") == 1
+    cached_raw = await fake_redis.get("facets:v2:makes")
     assert "Toyota" in json.loads(cached_raw)["makes"]
 
 
@@ -551,9 +551,9 @@ async def test_facets_models_cached_per_make(
     client: AsyncClient, session: AsyncSession, fake_redis,
 ):
     await _make_listing(session, make="Toyota", model="Camry", source_id="fcm-1")
-    await fake_redis.delete("facets:models:toyota")
+    await fake_redis.delete("facets:v2:models:toyota")
     await client.get("/api/listings/facets", params={"make": "Toyota"})
-    assert await fake_redis.exists("facets:models:toyota") == 1
+    assert await fake_redis.exists("facets:v2:models:toyota") == 1
 
 
 # =========================================================================

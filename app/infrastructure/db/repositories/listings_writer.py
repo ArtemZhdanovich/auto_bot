@@ -25,6 +25,7 @@ from app.domain.listings.ingestion import (
     IngestStats,
     ItemOutcome,
     PendingRawUpload,
+    clean_value,
     compute_content_hash,
     decide,
     row_values,
@@ -62,12 +63,14 @@ upserted AS (
         source, source_id, url, make, model, year, price, currency,
         mileage_km, vin, images, options, schema_version, parsed_at,
         body_type, fuel, transmission, drive, engine_volume, color,
-        content_hash, is_active, first_seen_at, last_seen_at, title_raw
+        content_hash, is_active, first_seen_at, last_seen_at, title_raw,
+        country
     ) VALUES (
         :source, :source_id, :url, :make, :model, :year, :price, :currency,
         :mileage_km, :vin, :images, :options, :schema_version, :parsed_at,
         :body_type, :fuel, :transmission, :drive, :engine_volume, :color,
-        :content_hash, TRUE, now(), now(), :title_raw
+        :content_hash, TRUE, now(), now(), :title_raw,
+        :country
     )
     ON CONFLICT ON CONSTRAINT uq_listings_source_source_id DO UPDATE SET
         url = EXCLUDED.url,
@@ -88,6 +91,9 @@ upserted AS (
         drive = COALESCE(EXCLUDED.drive, listings.drive),
         engine_volume = COALESCE(EXCLUDED.engine_volume, listings.engine_volume),
         color = COALESCE(EXCLUDED.color, listings.color),
+        -- Страна (GEO-V1 §2): адаптер мог не проставить — не сбрасываем
+        -- бэкфилл миграции 0031 и значение прошлых прогонов.
+        country = COALESCE(EXCLUDED.country, listings.country),
         content_hash = EXCLUDED.content_hash,
         is_active = TRUE,
         disappeared_at = NULL,
@@ -350,6 +356,9 @@ class SqlAlchemyListingsWriter:
             "drive": normalize_drive(item.drive) or values["drive"],
             "engine_volume": normalize_engine_volume(item.engine_volume),
             "color": normalize_color(item.color),
+            # Страна (GEO-V1 §2): адаптер проставил ISO2; NULL — источник
+            # страну пока не отдаёт (в БД останется прежнее значение).
+            "country": clean_value((item.country or "").upper()),
             "content_hash": compute_content_hash(item),
         }
 

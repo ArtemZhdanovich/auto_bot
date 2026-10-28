@@ -69,6 +69,7 @@ from app.transport.http.deps.use_cases import (
     IssueWsTokenDep,
     JoinByCodeDep,
     ListMarketOffersDep,
+    ListMarketLotsDep,
     ListMessagesDep,
     ListModerationQueueDep,
     ListMyLotsDep,
@@ -198,8 +199,24 @@ class MarketLotIn(BaseModel):
     transmission: str | None = Field(default=None, max_length=32)
     description: str | None = Field(default=None, max_length=2000)
     photos: list[str] = Field(default_factory=list, max_length=10)
+    # Гео (GEO-V1 §2): страна продавца — обязательна для owner-лота при
+    # создании (enum известных + свобода, ISO-3166 alpha-2); город опционален.
+    country: str = Field(pattern=r"^[A-Za-z]{2}$")
+    city: str | None = Field(default=None, max_length=64)
     # 10 §4: true = сразу прогнать модерацию (партнёрам — всегда true).
     submit: bool = False
+
+    @field_validator("country")
+    @classmethod
+    def _country_upper(cls, value: str) -> str:
+        """ISO-2 в верхний регистр («ru» → «RU»)."""
+        return value.strip().upper()
+
+    @field_validator("city")
+    @classmethod
+    def _city_trim(cls, value: str | None) -> str | None:
+        """Trim города; пустая строка — не передан."""
+        return (value or "").strip() or None
 
     @field_validator("photos")
     @classmethod
@@ -238,6 +255,16 @@ class MarketLotPatchIn(BaseModel):
     transmission: str | None = Field(default=None, max_length=32)
     description: str | None = Field(default=None, max_length=2000)
     photos: list[str] | None = Field(default=None, max_length=10)
+    # Гео (GEO-V1 §2): страна/город правятся как остальные поля патча
+    # (не передано — не меняется).
+    country: str | None = Field(default=None, pattern=r"^[A-Za-z]{2}$")
+    city: str | None = Field(default=None, max_length=64)
+
+    @field_validator("country")
+    @classmethod
+    def _country_upper(cls, value: str | None) -> str | None:
+        """ISO-2 в верхний регистр (не передано — None)."""
+        return value.strip().upper() if value else value
 
     @field_validator("photos")
     @classmethod
@@ -297,6 +324,9 @@ class MyLotOut(BaseModel):
     images: list[str] = Field(default_factory=list)
     url: str | None = None
     owner_description: str | None = None
+    # Гео (GEO-V1 §2): страна/город owner-лота (бейдж «🇷🇺 RU · Москва»).
+    country: str | None = None
+    city: str | None = None
     # Жизненный цикл (10 §1): статус-пилюля, причина отказа, сработавшие
     # правила и патч на проверке (patch_reject_reason при отказе).
     status: str = "accepted"
@@ -573,6 +603,8 @@ async def create_market_lot(
                 transmission=body.transmission,
                 description=body.description,
                 photos=tuple(body.photos),
+                country=body.country,
+                city=body.city,
             ),
             submit=body.submit,
         )
@@ -643,12 +675,34 @@ async def update_market_lot(
         transmission=provided.get("transmission"),
         description=provided.get("description"),
         photos=tuple(provided["photos"]) if "photos" in provided else None,
+        country=provided.get("country"),
+        city=provided.get("city"),
     )
     try:
         view = await use_case.execute(user.telegram_id, listing_id, patch)
     except AppError as exc:
         _raise_market_error(exc)
     return _my_lot_out(view)
+
+
+@market_router.get("/lots", response_model=list[MyLotOut])
+async def market_lots(
+    user: CurrentUserDep,
+    use_case: ListMarketLotsDep,
+    country: str | None = Query(
+        default=None, pattern="^[A-Za-z]{2}$", description="ISO-3166 alpha-2"
+    ),
+    limit: int = Query(default=60, ge=1, le=100),
+) -> list[MyLotOut]:
+    """Витрина опубликованных лотов рынка (GEO-V1 §2).
+
+    Активные accepted owner-лоты; `country` — фильтр чипсов стран сверху
+    (точный ISO-2). Черновики/модерация/отклонённые не видны.
+    """
+    lots = await use_case.execute(
+        country=country.strip().upper() if country else None, limit=limit
+    )
+    return [_my_lot_out(lot) for lot in lots]
 
 
 @market_router.get("/my-lots", response_model=list[MyLotOut])
@@ -1119,6 +1173,8 @@ async def create_partner_market_lot(
                 transmission=body.transmission,
                 description=body.description,
                 photos=tuple(body.photos),
+                country=body.country,
+                city=body.city,
             ),
         )
     except AppError as exc:

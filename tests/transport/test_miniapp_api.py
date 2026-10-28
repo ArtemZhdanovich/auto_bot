@@ -325,22 +325,26 @@ async def test_list_listings_mileage_min(client):
 
 @pytest.mark.asyncio
 async def test_listings_facets_makes(client):
-    """GET /api/listings/facets — список марок для селекта фильтра."""
+    """GET /api/listings/facets — марки + страны (GEO-V1 §2) для селекта."""
     http, session = client
-    session.set_result([("BMW",), ("Kia",)])
+    # Первый execute — страны (частые первыми), второй — марки.
+    session.set_results([[("KR", 3), ("CN", 1)], [("BMW",), ("Kia",)]])
     resp = await http.get("/api/listings/facets")
     assert resp.status_code == 200
-    assert resp.json() == {"makes": ["BMW", "Kia"]}
+    assert resp.json() == {
+        "makes": ["BMW", "Kia"],
+        "countries": ["KR", "CN"],
+    }
 
 
 @pytest.mark.asyncio
 async def test_listings_facets_models_for_make(client):
     """facets?make=X — только модели этой марки (зависимый селект)."""
     http, session = client
-    session.set_result([("520i",), ("X5",)])
+    session.set_results([[("KR", 2)], [("520i",), ("X5",)]])
     resp = await http.get("/api/listings/facets?make=bmw")
     assert resp.status_code == 200
-    assert resp.json() == {"models": ["520i", "X5"]}
+    assert resp.json() == {"models": ["520i", "X5"], "countries": ["KR"]}
 
 
 @pytest.mark.asyncio

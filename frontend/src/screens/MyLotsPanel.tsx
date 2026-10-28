@@ -19,6 +19,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { haptic, isGuest } from "../api/auth";
 import { openInvoice, type InvoiceStatus } from "../lib/invoice";
+import { countryFlag, countryName } from "../lib/geo";
 import { qualityTone } from "../lib/listingQuality";
 import { listingStatusToast, useListingStatus } from "../lib/chatStore";
 import { useToast } from "../ui/Toast";
@@ -274,6 +275,16 @@ export function MyLotsPanel() {
                   <span className="mylot__price tabular">
                     {lot.price?.toLocaleString("ru-RU")} {lot.currency}
                   </span>
+                  {/* Гео owner-лота (GEO-V1 §3): «🇷🇺 Москва»; без города —
+                      флаг + имя страны; старый ответ без country — строки нет */}
+                  {(lot.country || lot.city) && (
+                    <span className="mylot__placement">
+                      📍{" "}
+                      {lot.country
+                        ? `${countryFlag(lot.country)} ${lot.city ?? countryName(lot.country)}`
+                        : lot.city}
+                    </span>
+                  )}
                   <span className={`mylot__pill mylot__pill--${status.tone}`}>{status.text}</span>
                   {/* Качество объявления (12 §2): score с бэка, цвет по
                       порогам ≥80 deal / ≥50 warn / ниже danger */}

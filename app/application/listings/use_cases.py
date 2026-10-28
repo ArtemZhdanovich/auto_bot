@@ -88,6 +88,7 @@ def _count_user_filters(query: ListingFeedQuery) -> int:
         query.color,
         query.engine_volume_min,
         query.engine_volume_max,
+        query.country,
     )
     return sum(1 for value in values if value is not None)
 
@@ -175,14 +176,19 @@ class ListListings:
 
 
 class ListListingFacets:
-    """Справочник марок/моделей для зависимых селектов."""
+    """Справочник марок/моделей для зависимых селектов + страны (GEO-V1)."""
 
     def __init__(self, listings: ListingReadRepository) -> None:
         self._listings = listings
 
-    async def execute(self, make: str | None) -> dict[str, list[str]]:
-        """Вернуть `{"makes": [...]}` или `{"models": [...]}`."""
-        return await self._listings.facets(make)
+    async def execute(
+        self, make: str | None, *, country: str | None = None
+    ) -> dict[str, list[str]]:
+        """Вернуть `{"makes": [...], "countries": [...]}` или модели марки.
+
+        `country` сужает марки/модели до страны (сегмент фильтра «Страна»).
+        """
+        return await self._listings.facets(make, country=country)
 
 
 class GetListingByUrl:

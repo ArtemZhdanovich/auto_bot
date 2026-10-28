@@ -11,6 +11,10 @@ describe("toUsd", () => {
 
   it("EUR умножает на 1.08", () => {
     expect(toUsd(10_000, "EUR")).toBe(Math.round(10_000 * EUR_PER_USD));
+    // GEO-V1: валюты новых источников (KZT/CNY/AED)
+    expect(toUsd(12_200_000, "KZT")).toBe(Math.round(12_200_000 / 480));
+    expect(toUsd(238_000, "CNY")).toBe(Math.round(238_000 / 7.1));
+    expect(toUsd(125_000, "AED")).toBe(Math.round(125_000 / 3.6725));
     expect(toUsd(10_000, "eur")).toBe(10_800);
   });
 

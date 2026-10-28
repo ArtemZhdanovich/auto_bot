@@ -9,6 +9,11 @@ item даёт 422, а не молча выпадает из результата
 значение → 422. Это защита от тихого применения RU-правил к
 не-RU региону.
 
+`country` (GEO-V1 §2) — страна отправки `Literal["KR","CN","AE","US",
+"KZ"]` (по умолчанию KR): определяет маршрут (порт загрузки/выгрузки,
+окно сроков) из констант `app.domain.logistics.routes`; таможня и
+утильсбор считаются существующим кодом без изменений.
+
 `year` ограничен `le=2100` (контракт), но в `calc_delivery` при
 `year > current_year + 1` пишется warning: возраст будет
 отрицательным, и ставка утильсбора может быть некорректной.
@@ -24,10 +29,15 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.application.calc.use_cases import DeliveryBreakdown, calc_delivery
+from app.domain.logistics.routes import SUPPORTED_COUNTRIES, route_for
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(route_class=DishkaRoute, prefix="/api/calc", tags=["calc"])
+
+# Сегмент страны отправки (GEO-V1 §3): KR по умолчанию — прежнее
+# поведение «Корея → Владивосток» не меняется.
+Country = Literal[tuple(SUPPORTED_COUNTRIES)]  # type: ignore[valid-type]
 
 
 class DeliveryIn(BaseModel):
@@ -39,6 +49,8 @@ class DeliveryIn(BaseModel):
     power_hp: int | None = Field(default=None, ge=10, le=2000)
     # Юрисдикция расчёта (валюта объявления: BYN → РБ, RUB → РФ)
     region: Literal["ru", "by"] = "ru"
+    # Страна отправки (GEO-V1 §2): маршрут и сроки доставки.
+    country: Country = "KR"
 
 
 class DeliveryOut(BaseModel):
@@ -54,6 +66,12 @@ class DeliveryOut(BaseModel):
     power_hp: int | None = None
     util_category: str = "льготный"
     util_note: str = ""
+    # Маршрут доставки (GEO-V1 §2): страна отправки, строка «Пусан →
+    # Владивосток» и окно сроков; фрейт/таможня — в components.
+    country: str = "KR"
+    route: str = "Пусан → Владивосток"
+    freight_days_min: int = 25
+    freight_days_max: int = 35
     components: list[dict[str, Any]] = Field(default_factory=list)
     legal_refs: list[dict[str, Any]] = Field(default_factory=list)
     total_rub: float
@@ -93,6 +111,7 @@ async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
             параметры (невалидный регион в сервисе, год вне таблицы и т.п.).
     """
     _warn_future_year(payload.year)
+    route = route_for(payload.country)
     try:
         b: DeliveryBreakdown = calc_delivery(
             payload.price_usd,
@@ -103,9 +122,9 @@ async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
         )
     except (ValueError, KeyError) as exc:
         logger.warning(
-            "calc_delivery_failed price=%s cc=%s year=%s region=%s: %s",
+            "calc_delivery_failed price=%s cc=%s year=%s region=%s country=%s: %s",
             payload.price_usd, payload.engine_cc, payload.year,
-            payload.region, exc,
+            payload.region, payload.country, exc,
         )
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -122,6 +141,10 @@ async def calc_delivery_endpoint(payload: DeliveryIn) -> DeliveryOut:
         power_hp=b.power_hp,
         util_category=b.util_category,
         util_note=b.util_note,
+        country=route.country,
+        route=route.route,
+        freight_days_min=route.days_min,
+        freight_days_max=route.days_max,
         components=b.components,
         legal_refs=b.legal_refs,
         total_rub=b.total_rub,
@@ -139,6 +162,8 @@ class CompareItem(BaseModel):
     year: int = Field(ge=1980, le=2100)
     power_hp: int | None = Field(default=None, ge=10, le=2000)
     region: Literal["ru", "by"] = "ru"
+    # Страна отправки (GEO-V1 §2): по умолчанию KR — как в DeliveryIn.
+    country: Country = "KR"
 
 
 class CompareIn(BaseModel):
@@ -158,6 +183,11 @@ class CompareItemOut(BaseModel):
     region: str
     currency: str
     age_group: str
+    # Маршрут доставки варианта (GEO-V1 §2).
+    country: str = "KR"
+    route: str = "Пусан → Владивосток"
+    freight_days_min: int = 25
+    freight_days_max: int = 35
     total_usd: float
     total_rub: float
     total_local: float
@@ -185,6 +215,7 @@ async def calc_compare(payload: CompareIn) -> CompareOut:
     results: list[CompareItemOut] = []
     for it in payload.items:
         _warn_future_year(it.year)
+        route = route_for(it.country)
         try:
             b = calc_delivery(
                 it.price_usd,
@@ -198,8 +229,9 @@ async def calc_compare(payload: CompareIn) -> CompareOut:
             # только если сам `calc_delivery` не осилил (например,
             # `year` вне lookup-таблицы). Клиент получит 400 с контекстом.
             logger.warning(
-                "calc_compare_item_failed title=%r year=%s cc=%s region=%s: %s",
-                it.title, it.year, it.engine_cc, it.region, exc,
+                "calc_compare_item_failed title=%r year=%s cc=%s region=%s "
+                "country=%s: %s",
+                it.title, it.year, it.engine_cc, it.region, it.country, exc,
             )
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
@@ -216,6 +248,10 @@ async def calc_compare(payload: CompareIn) -> CompareOut:
                 region=str(b.region),
                 currency=str(b.currency),
                 age_group=str(b.age_group),
+                country=route.country,
+                route=route.route,
+                freight_days_min=route.days_min,
+                freight_days_max=route.days_max,
                 total_usd=round(float(b.total_usd), 2),
                 total_rub=round(float(b.total_rub), 2),
                 total_local=round(float(b.total_local), 2),

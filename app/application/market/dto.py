@@ -60,7 +60,12 @@ LISTING_STATUS_EXPIRED = "expired"
 
 @dataclass(frozen=True, slots=True)
 class CreateLotCommand:
-    """Ввод создания лота рынка (user и partner, §2)."""
+    """Ввод создания лота рынка (user и partner, §2).
+
+    `country` (GEO-V1 §2) обязателен для owner-лотов — страна продавца из
+    формы SellCar (ISO-3166 alpha-2, enum известных + свобода); `city`
+    опционален и только для owner-лотов.
+    """
 
     make: str
     model: str
@@ -72,6 +77,8 @@ class CreateLotCommand:
     transmission: str | None = None
     description: str | None = None  # owner_description, <=2000
     photos: tuple[str, ...] = field(default_factory=tuple)
+    country: str | None = None
+    city: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +120,9 @@ class MarketLotSnapshot:
     images: tuple[str, ...] = ()
     url: str | None = None
     created_at: datetime | None = None
+    # Гео (GEO-V1 §2): страна/город owner-лота из формы SellCar.
+    country: str | None = None
+    city: str | None = None
     # Жизненный цикл (10 §1): статус, причина отказа, вердикт последнего
     # скрининга и версия-на-модерации (правка опубликованного лота).
     status: str = LISTING_STATUS_ACCEPTED
@@ -170,6 +180,9 @@ class MyLotView:
     images: tuple[str, ...] = ()
     url: str | None = None
     owner_description: str | None = None
+    # Гео (GEO-V1 §2): страна/город owner-лота (карточка «🇷🇺 RU · Москва»).
+    country: str | None = None
+    city: str | None = None
     # Жизненный цикл (10 §1): статус-пилюля, причина отказа, сработавшие
     # правила и патч на проверке (с patch_reject_reason при отказе).
     status: str = LISTING_STATUS_ACCEPTED
@@ -208,6 +221,8 @@ class LotPatch:
     transmission: str | None = None
     description: str | None = None
     photos: tuple[str, ...] | None = None
+    country: str | None = None
+    city: str | None = None
 
     def fields(self) -> dict:
         """Словарь заданных полей (photos → list) для репозитория/патча."""

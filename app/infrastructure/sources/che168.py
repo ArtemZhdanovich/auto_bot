@@ -11,8 +11,16 @@ Che168 (二手车之家, Autohome) отдаёт серверный HTML со с�
 
 Селекторы и пути — в `sources.config` (ТЗ п. 6.1: код в Git, конфиг в БД):
 при смене вёрстки правится БД без деплоя. Селекторы по умолчанию
-соответствуют списку `ul#usedList li`, но должны быть сверены с живым HTML
-перед включением источника (sources.enabled=true) — см. PROGRESS.md.
+соответствуют списку `ul#usedList li`.
+
+Сверка селекторов с живым HTML 2026-10-28 (ревизия волны C GEO-V1):
+GET `https://www.che168.com/china/a0_0msdgscncgpi1ltocsp1exb0/` c UA
+Chrome вернул HTTP 200, но тело — 988-байтовый JS-антибот-челлендж
+(obfuscated JS, выставляет cookie `EO_Bot_Ssid` и перезагружает страницу),
+без списка объявлений. Живой HTML без выполнения JS недоступен — селекторы
+оставлены по прежней фикстуре (расхождений проверить не удалось).
+TODO перед включением (sources.enabled=true): повторить сверку через
+headless-браузер или прокси CN и при расхождении поправить конфиг-селекторы.
 
 `fetch(criteria, cursor)` **не применяет `criteria`**: che168 не поддерживает
 фильтры в URL списка, фильтрация выполняется downstream (pipeline/FilterService).
@@ -173,13 +181,18 @@ class Che168HtmlAdapter(BaseApiAdapter):
     - `_max_pages` ограничивает пагинацию (клампится к >= 1);
     - URL из HTML (`href`, `img.src`) валидируются по схеме (http/https);
     - при сбое `price_selector` цена извлекается только из «X万»
-      (иначе год выпуска матчился бы как цена).
+      (иначе год выпуска матчился бы как цена);
+    - `country="CN"` (GEO-V1 §2): поля в UnifiedListing ещё нет — pydantic
+      с `extra="ignore"` молча отбрасывает kwarg, значение дублируется
+      в `raw["country"]` (после добавления поля kwarg заработает сам).
 
     Attributes:
         source_name: `"che168"`.
     """
 
     source_name = "che168"
+    # ISO-3166 alpha-2 страны источника (GEO-V1 §2).
+    COUNTRY_CODE = "CN"
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -365,9 +378,13 @@ class Che168HtmlAdapter(BaseApiAdapter):
             ),
             seller_type="dealer",
             images=self._extract_images(card),
+            # country появится в модели в волне A (GEO-V1 §2); до этого
+            # kwarg молча отбрасывается (extra="ignore") — дублируем в raw.
+            country=self.COUNTRY_CODE,
             # raw_payload для перепарсинга при смене селекторов (ТЗ п. 6.1).
             # html обрезан — флаг сообщает потребителю.
             raw={
+                "country": self.COUNTRY_CODE,
                 "title": title,
                 "price_text": price_text,
                 "html": card.html[:2000],

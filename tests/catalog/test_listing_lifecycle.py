@@ -36,6 +36,8 @@ LOT_BODY = {
     "mileage_km": 42000,
     "description": "Один владелец, сервис по регламенту",
     "photos": ["https://cdn.example.test/1.jpg"],
+    # Гео (GEO-V1 §2): страна обязательна при создании owner-лота.
+    "country": "RU",
 }
 
 

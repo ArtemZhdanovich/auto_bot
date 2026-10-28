@@ -325,6 +325,7 @@ describe("SellCar v2: сабмит POST /market/lots (как в v1)", () => {
       make: "Kia",
       model: "K5",
       year: 2022,
+      country: "RU", // GEO-V1 §2: страна owner-лота обязательна (дефолт RU)
       price: 20_000_000,
       currency: "USD",
       mileage_km: 35_000,
@@ -514,7 +515,8 @@ describe("SellCar v3: финальный шаг — черновик/публи�
 
 // ---------- Edit-режим /sell?edit={id} (10-listing-lifecycle §5) ----------
 
-/** Лот my-lots для edit-режима (контракт MyLotOut += status, 10 §4). */
+/** Лот my-lots для edit-режима (контракт MyLotOut += status, 10 §4;
+ *  country/city — гео owner-лота, GEO-V1 §2). */
 const EDIT_LOT: MyLot = {
   listing_id: 7,
   status: "accepted",
@@ -530,6 +532,8 @@ const EDIT_LOT: MyLot = {
   images: ["https://s3/edit-1.jpg", "https://s3/edit-2.jpg"],
   url: null,
   owner_description: "Описание лота",
+  country: "KZ",
+  city: "Алматы",
 };
 
 const renderEdit = (initial = "/sell?edit=7") =>
@@ -556,6 +560,9 @@ describe("SellCar v3: edit-режим /sell?edit={id} (10 §5)", () => {
     expect((screen.getByLabelText("Модель") as HTMLInputElement).value).toBe("Sonata");
     expect((screen.getByLabelText("Год выпуска") as HTMLInputElement).value).toBe("2021");
     expect((screen.getByLabelText("Пробег, км") as HTMLInputElement).value).toBe("42000");
+    // гео предзаполнено из MyLotOut.country/city (GEO-V1 §2)
+    expect((screen.getByLabelText("Страна") as HTMLSelectElement).value).toBe("KZ");
+    expect((screen.getByLabelText("Город") as HTMLInputElement).value).toBe("Алматы");
     // баннер о старой версии (10 §1) + нет кнопки черновика у опубликованного
     expect(screen.getByText(/старая версия объявления/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Сохранить черновик" })).toBeNull();
@@ -589,6 +596,8 @@ describe("SellCar v3: edit-режим /sell?edit={id} (10 §5)", () => {
       make: "Hyundai2",
       model: "Sonata",
       year: 2021,
+      country: "KZ", // гео предзаполнено из my-lots (GEO-V1 §2)
+      city: "Алматы",
       price: 18_000_000,
       currency: "KRW",
       mileage_km: 42_000,
@@ -797,6 +806,68 @@ describe("SellCar: «Качество объявления» live (12 §2)", () 
       el.textContent?.includes("Описание"),
     );
     expect(okDesc).toBeTruthy();
+  });
+});
+
+// ---------- Гео owner-лота: страна + город (GEO-V1 §2–§3) ----------
+
+describe("SellCar: гео лота — страна и город (GEO-V1)", () => {
+  it("селект страны: дефолт RU («внутренний рынок»), выбор KZ + город уходят в POST", async () => {
+    renderScreen();
+    const sel = screen.getByLabelText("Страна") as HTMLSelectElement;
+    expect(sel.value).toBe("RU");
+    expect(sel.options[sel.selectedIndex]?.text).toContain("внутренний рынок");
+    fillStep1();
+    fireEvent.change(screen.getByLabelText("Страна"), { target: { value: "KZ" } });
+    fireEvent.change(screen.getByLabelText("Город"), { target: { value: "Алматы" } });
+    gotoPublish();
+    fillPrice();
+    fireEvent.click(screen.getByRole("button", { name: "Отправить на публикацию" }));
+    await waitFor(() => expect(lotCalls()).toHaveLength(1));
+    const body = JSON.parse(String((lotCalls()[0] as [string, RequestInit])[1].body));
+    expect(body.country).toBe("KZ");
+    expect(body.city).toBe("Алматы");
+  });
+
+  it("город опционален: без города ключа city в теле нет, страна всё равно уходит", async () => {
+    renderScreen();
+    fillStep1();
+    gotoPublish();
+    fillPrice();
+    fireEvent.click(screen.getByRole("button", { name: "Отправить на публикацию" }));
+    await waitFor(() => expect(lotCalls()).toHaveLength(1));
+    const body = JSON.parse(String((lotCalls()[0] as [string, RequestInit])[1].body));
+    expect(body.country).toBe("RU");
+    expect("city" in body).toBe(false);
+  });
+
+  it("импортные страны-источники (KR/CN/AE/US) в селекте не предлагаются", () => {
+    renderScreen();
+    const values = Array.from(
+      (screen.getByLabelText("Страна") as HTMLSelectElement).options,
+    ).map((o) => o.value);
+    expect(values).toContain("RU");
+    expect(values).toContain("KZ");
+    expect(values).toContain("GE");
+    expect(values).toContain("AM");
+    expect(values).toContain("BY");
+    expect(values).not.toContain("KR");
+    expect(values).not.toContain("CN");
+    expect(values).not.toContain("AE");
+    expect(values).not.toContain("US");
+  });
+
+  it("гео живёт в черновике визарда: страна и город восстанавливаются", () => {
+    renderScreen();
+    fillStep1();
+    fireEvent.change(screen.getByLabelText("Страна"), { target: { value: "GE" } });
+    fireEvent.change(screen.getByLabelText("Город"), { target: { value: "Тбилиси" } });
+    fireEvent.click(screen.getByRole("button", { name: "Далее →" }));
+    cleanup();
+    renderScreen();
+    fireEvent.click(screen.getByRole("button", { name: "← Назад" }));
+    expect((screen.getByLabelText("Страна") as HTMLSelectElement).value).toBe("GE");
+    expect((screen.getByLabelText("Город") as HTMLInputElement).value).toBe("Тбилиси");
   });
 });
 
