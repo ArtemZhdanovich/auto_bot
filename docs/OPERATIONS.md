@@ -8,56 +8,53 @@ uv sync && cd frontend && npm ci && cd ..
 # 2. конфиг: BOT_TOKEN, APP_SECRET_KEY, DATABASE_URL, REDIS_URL, RABBITMQ_URL
 uv run alembic upgrade head                        # 3. миграции
 uv run uvicorn app.main_api:app --port 8000        # 4. backend (mono)
-uv run python -m app.bot                           # 5. бот (другой терминал)
+uv run python -m app.transport.bot                           # 5. бот (другой терминал)
 uv run python -m app.infrastructure.workers.fetch  # 6. воркеры
 uv run python -m app.infrastructure.workers.send
 cd frontend && npm run dev                         # 7. Mini App :8080
 ```
 
-## Docker Compose
+## Docker Compose: поэтапные профили
 
-`docker-compose.yml` — вся инфраструктура: postgres, redis, rabbitmq, backend
-(mono, :8000), bot, worker_fetch, worker_send, miniapp (:8080/:8443),
-gateway+6 сервисов (профиль micro), qdrant, minio, rag (api/worker/миграции),
-translate.
+`docker-compose.yml` — ступенчатые профили (детали таблицей в конце
+раздела). База (postgres+redis) поднимается всегда; ядро не требует
+периферии (см. Degradation ниже).
 
 ```bash
-docker compose up -d                     # профиль из COMPOSE_PROFILES (.env; по умолчанию micro)
-docker compose --profile mono up -d      # монолит
-docker compose --profile micro up -d     # gateway + доменные сервисы
-start.bat [mono|micro]                   # то же + миграции + ожидание health (Windows);
-                                         # по умолчанию micro, при переключении сам
-                                         # прибивает API-контейнер чужого профиля
+docker compose up -d                          # base: postgres+redis
+docker compose --profile core up -d           # + backend(монолит)+bot+miniapp
+docker compose --profile storage up -d        # + minio (фото/S3-зеркало)
+docker compose --profile workers up -d        # + rabbitmq+fetch/send+translate
+docker compose --profile realtime up -d       # + centrifugo+chat-сервис
+docker compose --profile ai up -d             # + dialog+qdrant+rag
+docker compose --profile micro up -d          # + gateway+декомпозиция сервисов
+start.bat [mono|micro]                        # Windows: миграции+health+старт
 ```
 
-Оба профиля работают ОДИНАКОВО: API на хосте всегда `:8000` (micro — gateway,
-mono — backend; порт общий, поэтому оба API-контейнера одновременно жить
-не могут), сайт на `:8080`/`:8443`, миграции:
-`docker compose exec -T gateway alembic upgrade head` (micro) или
-`docker compose exec -T backend alembic upgrade head` (mono).
+| Ступень | Что появляется | Что деградирует без следующей |
+|---|---|---|
+| base | postgres, redis | — |
+| core | backend (все роутеры), bot, miniapp | продукт жив: лента/поиск/тарифы/бот/рынок/чаты(поллинг); без rabbit — воркеры не крутят fetch/notify |
+| storage | minio | фото-загрузки и S3-зеркало вкл (без — 503/NULL) |
+| workers | rabbitmq, fetch/send, translate | свежие объявления, русские переводы |
+| realtime | centrifugo, chat | мгновенные чаты/статусы, presence |
+| ai | dialog, qdrant, rag | RAG-бот (LLM-fallback остаётся) |
+| micro | gateway + доменные сервисы | декомпозиция вместо монолита |
 
-Горячее переключение профиля (без остановки остального стека):
+⚠️ Профили API не смешивать: gateway имеет алиас `backend` — оба
+API-контейнера одновременно = DNS round-robin и 502. Переключение:
 
 ```bash
-# mono -> micro: прибить backend, поднять gateway (compose пересоздаст
-# только то, чей конфиг разнится с файлом)
 docker compose rm -sf backend && COMPOSE_PROFILES=micro docker compose up -d
-# micro -> mono
 docker compose rm -sf gateway && COMPOSE_PROFILES=mono docker compose up -d
-# миграции из нового API-сервиса
-docker compose exec -T gateway alembic upgrade head   # (или backend)
+docker compose exec -T gateway alembic upgrade head   # миграции (или backend)
 ```
 
-`start.bat [mono|micro]` делает всё это автоматически.
+Degradation: Centrifugo → поллинг-фоллбэк; MinIO → 503 photos_unavailable,
+raw NULL; translate → хангыль остаётся; RAG → LLM; RabbitMQ → HTTP-ядро
+не зависит (depends_on required:false). Критичны только postgres+redis.
 
-⚠️ Профили не смешивать: gateway имеет сетевой алиас `backend` — при двух
-API-контейнерах одновременно DNS отдаёт два IP и половина запросов ловит 502
-(DNS round-robin). CLI-флаг `--profile` ОБЪЕДИНЯЕТСЯ с `COMPOSE_PROFILES`
-из `.env` — переключать профиль меняйте переменную в `.env`, запускайте
-`start.bat` или используйте команды горячего переключения выше (они гасят
-чужой API-контейнер перед подъёмом).
-
-Боевой развёртывание (Caddy + Let's Encrypt, bootstrap VPS) —
+Боевое развёртывание (Caddy + Let's Encrypt, bootstrap VPS) —
 [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 
 ## Миниапп в Telegram (валидный HTTPS)
@@ -119,12 +116,23 @@ miniapp-url.bat
 - `NOTIFY_SENT_TTL_SEC` — 7 дней антидубля; `NOTIFY_QUIET_HOURS_DEFAULT` —
   тихие часы `"23:00-08:00"`; `STALE_MAX_AGE_DAYS=3`.
 
-### S3 / прокси / партнёры / мониторинг
-- `RAW_PAYLOAD_ENABLED`, `S3_BUCKET=raw-payloads`, `RAW_RETENTION_DAYS=180`,
-  `RAW_PRESIGN_TTL_SEC=600`.
+### S3 / Centrifugo / рынок / прокси / мониторинг
+- `S3_ENDPOINT_URL` (пусто = S3 выкл), `S3_ACCESS_KEY`/`S3_SECRET_KEY`,
+  `S3_BUCKET=raw-payloads`, `RAW_RETENTION_DAYS=180`.
+- `S3_PHOTOS_BUCKET=market-photos`, `S3_PUBLIC_URL` (публичный URL фото;
+  в docker — http://localhost:9000, внутри — http://minio:9000),
+  `MARKET_PHOTO_MIRROR_LIMIT=5` (зеркало фото внешних лотов),
+  `MARKET_MIRROR_BATCH=40`.
+- `CENTRIFUGO_URL` (внутренний, http://centrifugo:8000),
+  `CENTRIFUGO_PUBLIC_URL` (ws для браузера), `CENTRIFUGO_SECRET`,
+  `CENTRIFUGO_HTTP_API_KEY` — в prod не change-me (fail-fast).
+- Рынок: `MARKET_FREE_DAYS=7`, `MARKET_WEEK_STARS=20`,
+  `MARKET_USER_MAX_PAID_LOTS=3`, `MARKET_FREE_COOLDOWN_DAYS=30`,
+  `MARKET_PARTNER_PACKAGES` (JSON {"10":500,…}),
+  `MARKET_FORBIDDEN_WORDS` (список для автомодерации).
 - `PROXY_DATAIMPULSE_USER`+`PASS` — прокси для источников с
   `capabilities.use_proxy=true`; `STICKY_TTL_SEC=1800`.
-- `PARTNER_RATE_LIMIT_PER_MIN=60`; `PARTNER_CPL_RATES` — CPL-тарифы планов.
+- `PARTNER_RATE_LIMIT_PER_MIN=60`; `PARTNER_CPL_RATES`.
 - `ALERTS_ENABLED=true`, `ALERT_DEDUP_TTL_SEC=1800`, `DLQ_ALERT_THRESHOLD=10`,
   `SENTRY_DSN`, `LOG_LEVEL`.
 - `ENCRYPT_DOCUMENTS` + `PQ_ENCRYPTION_PUBLIC_KEY/PRIVATE_KEY` — PQ-шифрование

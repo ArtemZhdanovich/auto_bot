@@ -56,6 +56,7 @@ def build_messages(
     listing: ListingSnapshot,
     comps: dict[str, Any] | None,
     history: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    inspection_digest: str | None = None,
 ) -> list[dict[str, str]]:
     """Собрать пару system/user для разбора.
 
@@ -63,6 +64,8 @@ def build_messages(
         listing: Объявление.
         comps: Сводка рынка (`market_stats`), может быть `None`.
         history: История цены объявления.
+        inspection_digest: Выжимка чека осмотра (глубокий разбор Business);
+            `None` — чека нет или тариф без доступа к чекам.
 
     Returns:
         Сообщения в формате `LLMPort`.
@@ -75,6 +78,8 @@ def build_messages(
         f"Рынок (сопоставимые): {json.dumps(comps, ensure_ascii=False)}.\n"
         f"История цены объявления: {json.dumps(list(history), ensure_ascii=False)}."
     )
+    if inspection_digest:
+        user += f"\nЧек осмотра (учти состояние кузова/агрегатов в цене): {inspection_digest}"
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user},
@@ -152,7 +157,7 @@ class AnalyzePrice:
         )
         comps = market_stats(list(ctx.comp_prices))
         price = float(listing.price or 0)
-        llm_data = await self._ask_llm(listing, comps, ctx)
+        llm_data = await self._ask_llm(listing, comps, ctx, command.inspection_digest)
 
         result = self._build_result(listing, price, comps, ctx, llm_data)
         async with self._uow:
@@ -175,10 +180,13 @@ class AnalyzePrice:
         listing: ListingSnapshot,
         comps: dict[str, Any] | None,
         ctx: MarketContext,
+        inspection_digest: str | None = None,
     ) -> dict[str, Any] | None:
         """Спросить модель; любой сбой — `None` (остаётся статистика)."""
         try:
-            reply = await self._llm.complete(build_messages(listing, comps, ctx.history))
+            reply = await self._llm.complete(
+                build_messages(listing, comps, ctx.history, inspection_digest)
+            )
         except Exception:  # noqa: BLE001 — LLM не обязателен, есть статистика
             logger.warning(
                 "price_analysis_llm_failed listing=%s", listing.id, exc_info=True

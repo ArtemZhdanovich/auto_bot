@@ -22,14 +22,22 @@ from app.application.catalog.dto import (
     ListingFeedQuery,
     ListingPageResult,
 )
-from app.application.catalog.ports import ListingReadRepository
-from app.application.errors import Conflict, InvalidInput, NotFound
+from app.application.catalog.ports import (
+    ListingReadRepository,
+    UserLookupPort,
+)
+from app.application.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.application.shared.pagination import CursorCodec
 from app.application.shared.ports import UnitOfWork
+from app.domain.subscription.policies import TIERS
 
 logger = logging.getLogger(__name__)
 
 _BY_URL_MIN_NEEDLE_LEN = 10
+
+INSPECTION_LOCKED_MESSAGE = (
+    "inspection_locked: данные чеков осмотра доступны на тарифах Pro и Business"
+)
 
 
 def normalize_url(url: str) -> str:
@@ -233,17 +241,61 @@ class GetListing:
 
 
 class GetInspection:
-    """Отчёт осмотра для PDP."""
+    """Отчёт осмотра для PDP.
 
-    def __init__(self, listings: ListingReadRepository) -> None:
+    Чеки — платные данные: доступны тарифам с `inspection=True`
+    (pro/business) и админам; Free получает 403 с приглашением
+    перейти на Pro. Решение о доступе живёт здесь, а не в
+    транспорте: правило едино для web и бота.
+    """
+
+    def __init__(
+        self,
+        listings: ListingReadRepository,
+        users: UserLookupPort | None = None,
+    ) -> None:
         self._listings = listings
+        self._users = users
 
-    async def execute(self, listing_id: int) -> InspectionView:
+    async def execute(
+        self,
+        listing_id: int,
+        *,
+        user_id: int | None = None,
+        is_admin: bool = False,
+        bypass_tier: bool = False,
+    ) -> InspectionView:
         """Вернуть отчёт осмотра.
 
+        Args:
+            listing_id: ID объявления.
+            user_id: Кто спрашивает (None — внутренний вызов без гейтинга).
+            is_admin: Админам чеки доступны на любом тарифе.
+            bypass_tier: Обход тарифного гейта для владельца-партнёра
+                (07 §3: партнёр читает/правит чек своего лота в кабинете,
+                безотносительно тарифа юзера).
+
         Raises:
+            Forbidden: Тариф без доступа к чекам (Free).
             NotFound: Объявления нет/оно неактивно или осмотра нет.
         """
+        if (
+            not is_admin
+            and not bypass_tier
+            and user_id is not None
+            and self._users is not None
+        ):
+            profile = await self._users.get(user_id)
+            if profile is not None and not TIERS.get(
+                profile.tier, TIERS["free"]
+            ).inspection:
+                logger.info(
+                    "inspection_locked user_id=%s listing_id=%s tier=%s",
+                    user_id,
+                    listing_id,
+                    profile.tier,
+                )
+                raise Forbidden(INSPECTION_LOCKED_MESSAGE)
         if await self._listings.get_active(listing_id) is None:
             raise NotFound("Listing not found")
         report = await self._listings.get_report(listing_id)

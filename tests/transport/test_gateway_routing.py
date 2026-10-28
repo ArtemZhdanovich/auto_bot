@@ -39,6 +39,24 @@ from services.gateway.routing import ROUTE_RULES, SERVICE_NAMES, resolve_service
         ("/api/admin/partners/3/rotate", "partners"),
         ("/api/leads", "partners"),
         ("/api/leads/9", "partners"),
+        # --- chat (чаты/рынок, редизайн часть 5) ---
+        ("/api/chats", "chat"),
+        ("/api/chats/abc-123/messages", "chat"),
+        ("/api/chats/seller/123", "chat"),
+        ("/api/chats/ws-token", "chat"),
+        ("/api/market/offers", "chat"),
+        # партнёрские зеркала чатов/витрины — специфичнее /api/partner
+        ("/api/partner/offers", "chat"),
+        ("/api/partner/chats", "chat"),
+        ("/api/partner/chats/ws-token", "chat"),
+        # размещения партнёра (06 §2): пакеты слотов и лоты — chat-сервис
+        ("/api/partner/market/packages", "chat"),
+        ("/api/partner/market/lots", "chat"),
+        ("/api/partner/market/lots/15", "chat"),
+        # остальной партнёрский контур — как раньше
+        ("/api/partner/me", "partners"),
+        ("/api/partner/leads", "partners"),
+        ("/api/partner/leads/batch", "partners"),
         # --- dialog ---
         ("/api/dialog/message", "dialog"),
         ("/api/dialog/finalize", "dialog"),
@@ -102,6 +120,7 @@ def test_rules_target_known_services():
         "partners",
         "dialog",
         "admin",
+        "chat",
     }
 
 

@@ -8,6 +8,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   type ReactNode,
 } from "react";
@@ -34,6 +35,16 @@ export function LoginPromptProvider({ children }: { children: ReactNode }) {
 
   const show = useCallback((r?: string) => setReason(r ?? DEFAULT_REASON), []);
   const close = useCallback(() => setReason(null), []);
+
+  // Esc закрывает модалку (03-content-a11y §5.3 — как шит ленты и лайтбокс)
+  useEffect(() => {
+    if (reason === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setReason(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [reason]);
   const goLogin = useCallback(() => {
     setReason(null);
     navigate("/login");

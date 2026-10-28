@@ -51,6 +51,7 @@ def service_urls() -> dict[str, str]:
         "partners": s.svc_partners_url,
         "dialog": s.svc_dialog_url,
         "admin": s.svc_admin_url,
+        "chat": s.svc_chat_url,
     }
 
 

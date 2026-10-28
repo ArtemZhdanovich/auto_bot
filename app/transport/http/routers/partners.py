@@ -1,7 +1,8 @@
 """Партнёрский контур (P2-11): тонкий транспорт.
 
 Admin (X-Internal-Token): создание партнёра, ключи (ротация/отзыв), статистика.
-Partner (X-API-Key): /me (ЛК), пул лидов, эксклюзивный claim, фидбек качества.
+Partner (X-API-Key): /me (ЛК), пул лидов, эксклюзивный claim, фидбек качества,
+/market (сводка рынка + выгодные лоты).
 
 Здесь нет SQL, сессии и денежных правил: контроллер разбирает ввод, вызывает
 сценарий (`app.application.partners`) и маппит результат в схему.
@@ -38,6 +39,7 @@ from app.transport.http.deps.use_cases import (
     PartnerBillingDep,
     PartnerFeedbackDep,
     PartnerLeadsDep,
+    PartnerMarketDep,
     PartnerOverviewDep,
     PartnerTopUpDep,
     ReadLeadsDep,
@@ -52,6 +54,8 @@ from app.transport.http.schemas.partner import (
     BillingTopupIn,
     ClaimOut,
     FeedbackIn,
+    MarketDealOut,
+    MarketOut,
     PartnerCreateIn,
     PartnerKeyOut,
     PartnerLeadOwnedOut,
@@ -114,7 +118,11 @@ admin_router = APIRouter(route_class=InternalDishkaRoute,
 async def create_partner(
     body: PartnerCreateIn, use_case: CreatePartnerDep
 ) -> PartnerKeyOut:
-    """Создать партнёра + первый API-ключ (raw-ключ отдаётся один раз)."""
+    """Создать партнёра + первый API-ключ (raw-ключ отдаётся один раз).
+
+    `owner_telegram_id` (если задан) — владелец счёта: пользователь
+    получает бессрочный Business сразу (422, если пользователя нет).
+    """
     try:
         issued = await use_case.execute(
             name=body.name,
@@ -123,6 +131,7 @@ async def create_partner(
             daily_quota=body.daily_quota,
             balance=body.balance,
             cpl_rate=body.cpl_rate,
+            owner_telegram_id=body.owner_telegram_id,
         )
     except InvalidInput as exc:
         raise HTTPException(
@@ -180,7 +189,11 @@ async def update_partner(
     use_case: UpdatePartnerDep,
     partner_id: PartnerIdPath,
 ) -> PartnerOut:
-    """Обновить plan/quota/status/cpl_rate (пишутся только изменения)."""
+    """Обновить plan/quota/status/cpl_rate/owner (пишутся только изменения).
+
+    Смена владельца или статуса синхронизирует тариф владельца:
+    active → Business, suspended → free (422, если владельца нет).
+    """
     try:
         view = await use_case.execute(
             partner_id,
@@ -189,9 +202,14 @@ async def update_partner(
             status=body.status,
             cpl_rate=body.cpl_rate,
             reset_cpl_rate=body.reset_cpl_rate,
+            owner_telegram_id=body.owner_telegram_id,
         )
     except NotFound as exc:
         raise _not_found(exc) from exc
+    except InvalidInput as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, exc.public_message
+        ) from exc
     return PartnerOut.model_validate(view)
 
 
@@ -242,6 +260,8 @@ async def partner_me(
         balance=overview.balance,
         cpl_cost=overview.cpl_cost,
         key_prefix=None,
+        placement_slots=overview.placement_slots,
+        placement_slots_used=overview.placement_slots_used,
     )
 
 
@@ -315,6 +335,36 @@ async def partner_billing(
             )
             for plan in billing.plans
         ],
+    )
+
+
+@router.get("/market", response_model=MarketOut)
+async def partner_market(
+    auth: PartnerAuthDep,
+    use_case: PartnerMarketDep,
+    rate: RateLimitDep,
+    make: str | None = Query(default=None, max_length=64),
+    model: str | None = Query(default=None, max_length=64),
+    limit: int = Query(default=10, ge=1, le=50),
+) -> MarketOut:
+    """Сводка рынка (объём, мин/медиана/макс) + выгодные лоты.
+
+    Инструмент сотрудников партнёра: без `make` — срез по всему каталогу
+    (общая медиана, без группировки по моделям). Доступен только по
+    API-ключу партнёра (`X-API-Key`), обычным пользователям не виден.
+    """
+    partner_id = auth.partner_id
+    await enforce_rate_limit(rate, partner_id)
+    report = await use_case.execute(make=make, model=model, deals_limit=limit)
+    summary = report.summary
+    return MarketOut(
+        make=summary.make,
+        model=summary.model,
+        count=summary.count,
+        min_price=summary.min_price,
+        max_price=summary.max_price,
+        median_price=summary.median_price,
+        deals=[MarketDealOut.model_validate(deal) for deal in report.deals],
     )
 
 

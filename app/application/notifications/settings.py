@@ -68,10 +68,13 @@ class UpdateNotifySettings:
         if not target.is_active:
             raise Forbidden("User is deactivated")
 
-        # Tier-bypass guard: Free не может включить instant ни на одном фильтре.
+        # Tier-bypass guard: instant при публикации — только Business;
+        # Free/Pro получают дайджест (раз в неделю / раз в день).
         if command.notify_mode == "instant" and not tier_config(target).instant:
             raise Forbidden(
-                "Instant notifications are a Pro feature — upgrade via /subscribe"
+                "instant_business_only: уведомление сразу при публикации — "
+                "тариф Business; на Pro подборка приходит дайджестом раз в "
+                "день (/subscribe)"
             )
 
         if command.quiet_hours_clear and command.quiet_hours is not None:

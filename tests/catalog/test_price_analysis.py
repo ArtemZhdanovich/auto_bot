@@ -144,7 +144,7 @@ def test_run_analysis_llm_down_stats_fallback():
 def test_run_analysis_quota_free_exceeded(monkeypatch):
     from app.infrastructure.services import price_analysis as pa
 
-    async def fake_quota(session, user_id, listing_id):
+    async def fake_quota(session, user_id, tier="free"):
         return 0
 
     monkeypatch.setattr(pa, "quota_left", fake_quota)
@@ -154,14 +154,34 @@ def test_run_analysis_quota_free_exceeded(monkeypatch):
 
 
 def test_run_analysis_quota_paid_tier_skips(monkeypatch):
+    """Business — безлимит: квота не проверяется вовсе."""
     from app.infrastructure.services import price_analysis as pa
 
-    async def fake_quota(session, user_id, listing_id):
-        raise AssertionError("pro не должен проверять квоту")
+    async def fake_quota(session, user_id, tier="free"):
+        raise AssertionError("business не должен проверять квоту")
 
     monkeypatch.setattr(pa, "quota_left", fake_quota)
     session = _session_with_ctx([30000, 31000], with_quota=False)
     out = asyncio.run(
-        run_analysis(session, _FakeLLM(None), _listing(), user_id=7, tier="pro")
+        run_analysis(session, _FakeLLM(None), _listing(), user_id=7, tier="business")
     )
     assert out["verdict"] in ("deal", "fair", "overpriced")
+
+
+def test_run_analysis_quota_pro_daily_window(monkeypatch):
+    """Pro — окно сутки, 30 разборов/день (квота проверяется)."""
+    from app.infrastructure.services import price_analysis as pa
+
+    seen: dict[str, object] = {}
+
+    async def fake_quota(session, user_id, tier="free"):
+        seen["tier"] = tier
+        return 0  # дневной лимит 30 израсходован
+
+    monkeypatch.setattr(pa, "quota_left", fake_quota)
+    session = _session_with_ctx([])
+    with pytest.raises(QuotaExceeded):
+        asyncio.run(
+            run_analysis(session, _FakeLLM("{}"), _listing(), user_id=7, tier="pro")
+        )
+    assert seen["tier"] == "pro"

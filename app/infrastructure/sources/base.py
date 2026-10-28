@@ -137,6 +137,7 @@ class BaseApiAdapter:
         timeout: int = 30,
         capabilities: dict[str, Any] | None = None,
         http_client: HttpClient | None = None,
+        translator: Any = None,
     ) -> None:
         if rate_limit <= 0:
             raise ValueError(f"rate_limit must be > 0, got {rate_limit}")
@@ -152,6 +153,11 @@ class BaseApiAdapter:
         # Внимание: при передаче http_client параметр `timeout` игнорируется —
         # за таймаут отвечает переданный клиент.
         self.http = http_client or HttpClient(timeout=timeout)
+        # Переводчик (микросервис NLLB): объект с async translate(texts,
+        # source_lang, target_lang) -> list[str | None]. Используется
+        # источниками с корейским контентом (encar) для полей объявления
+        # и отчёта осмотра. None — перевод выключен (остаётся оригинал).
+        self.translator = translator
         logger.debug(
             "adapter_initialized source=%s rate_limit=%d timeout=%d capabilities=%s",
             source_name,

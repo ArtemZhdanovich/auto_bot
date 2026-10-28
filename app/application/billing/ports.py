@@ -21,8 +21,35 @@ class PaymentRepository(Protocol):
     ) -> int:
         """Создать pending-платёж и вернуть его id (фиксирует строку)."""
 
+    async def create_pending_placement(
+        self,
+        *,
+        user_id: int,
+        amount: int,
+        listing_id: int,
+        weeks: int,
+    ) -> int:
+        """Pending-платёж продления размещения (kind='placement').
+
+        `period_days = 7*weeks` — ConfirmPayment добавляет дни к дедлайну.
+        """
+
     async def get_payment(self, payment_id: int) -> PaymentRecord | None:
         """Снимок платежа или `None`, если платежа нет."""
+
+    async def get_placement_deadlines(
+        self, listing_id: int
+    ) -> tuple[datetime | None, datetime | None] | None:
+        """`(placement_free_until, placement_paid_until)` лота или `None`."""
+
+    async def save_placement_paid_until(
+        self, listing_id: int, *, user_id: int, until: datetime
+    ) -> bool:
+        """Записать `placement_paid_until` и активировать свой лот.
+
+        Возвращает `False`, если лот не найден или чужой (в текущей
+        транзакции, commit — в сценарии).
+        """
 
     async def get_subscription(self, user_id: int) -> SubscriptionState | None:
         """Подписка пользователя или `None`, если пользователя нет."""

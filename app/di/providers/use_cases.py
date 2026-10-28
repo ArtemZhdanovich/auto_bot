@@ -11,8 +11,78 @@ from __future__ import annotations
 from dishka import Provider, Scope, provide, provide_all
 
 from app.application.catalog.ports import Enqueuer
+from app.application.chat.governance import (
+    AdminKick,
+    ArchiveThread,
+    HandleReport,
+    KickParticipant,
+    LeaveThread,
+    ListAdminReports,
+    ListThreadEvents,
+    ReportThread,
+    ToggleMute,
+)
+from app.application.chat.link_preview import GetLinkPreview
+from app.application.chat.bot import ReplySupportBot
+from app.application.chat.summary import SummarizeThread
+from app.application.chat.ports import (
+    ChatPublisher,
+    ChatRepository,
+    ThreadEventPublisher,
+    WsTokenFactory,
+)
+from app.application.chat.publisher import ParticipantEventPublisher
+from app.application.chat.use_cases import (
+    CountOperatorUnread,
+    CreateGroupThread,
+    CreateInvite,
+    CreateSellerThread,
+    CreateSupportThread,
+    GetOnlineUsers,
+    HandleSubscribeProxy,
+    IssueWsToken,
+    JoinByCode,
+    ListMessages,
+    ListMyThreads,
+    ListOperatorMessages,
+    ListOperatorThreads,
+    ListPartnerThreads,
+    MarkRead,
+    SendMessage,
+    SendOperatorMessage,
+    SendTyping,
+    SummonOperator,
+)
+from app.application.market.partner_inspection import (
+    GetPartnerInspection,
+    UpdatePartnerLotHistory,
+    UpsertPartnerInspection,
+)
+from app.application.market.description import GenerateDescription
+from app.application.market.moderation import ScreenMarketLot
+from app.application.market.photos import UploadMarketPhoto
+from app.application.market.use_cases import (
+    AddMarketOffer,
+    BuyPackage,
+    CloseMarketLot,
+    ClosePartnerLot,
+    CreateMarketLot,
+    CreatePartnerLot,
+    ExtendLot,
+    ListMarketOffers,
+    ListModerationQueue,
+    ListMyLots,
+    ListPackages,
+    ListPartnerLots,
+    ListPartnerOffers,
+    ModerateLot,
+    ModeratePatch,
+    RemoveMarketOffer,
+    SubmitLot,
+    UpdateLot,
+)
 from app.application.shared.ports import CachePort
-from app.application.shared.ports import IdempotencyGuard
+from app.application.shared.ports import IdempotencyGuard, UnitOfWork
 
 from app.application.admin.use_cases import (
     AskAssistant,
@@ -57,7 +127,11 @@ from app.application.dialog.use_cases import (
     SendDialogMessage,
     TriggerFetch,
 )
+from app.application.analysis.history import ListMyAnalyses
+from app.application.analysis.similar import FindSimilar
 from app.application.analysis.use_cases import GetLatestAnalysis, RunAnalysis
+from app.application.leads.deals import RequestAgent, RequestContact
+from app.application.partners.market import GetPartnerMarket
 from app.application.favorites.use_cases import (
     IsFavorite,
     ListFavoriteCards,
@@ -80,6 +154,7 @@ from app.application.listings.use_cases import (
     ListListings,
     UpsertInspection,
 )
+from app.application.listings.history_report import BuildHistoryReport
 from app.application.metrics.use_cases import GetMetricsSnapshot
 from app.application.notifications.settings import (
     TriggerScan,
@@ -162,6 +237,10 @@ _AUTO_WIRED = (
     # AI-анализ цены
     RunAnalysis,
     GetLatestAnalysis,
+    ListMyAnalyses,
+    FindSimilar,
+    RequestAgent,
+    RequestContact,
     # Партнёрский контур
     AuthenticateApiKey,
     GetPartnerOverview,
@@ -178,6 +257,7 @@ _AUTO_WIRED = (
     RotatePartnerKey,
     RevokePartnerKeys,
     UpdatePartner,
+    GetPartnerMarket,
     # Платежи и подписка
     GetSubscriptionStatus,
     GetUserSubscription,
@@ -195,6 +275,74 @@ _AUTO_WIRED = (
     CreateGuestSession,
     LoginWebUser,
     GetCurrentUser,
+    # Чаты (редизайн часть 5)
+    ListMyThreads,
+    ListPartnerThreads,
+    CreateSupportThread,
+    CreateSellerThread,
+    ListMessages,
+    MarkRead,
+    HandleSubscribeProxy,
+    GetLinkPreview,
+    # RAG-бот поддержки (B2, §6)
+    ReplySupportBot,
+    # Операторский контур: зов оператора + админ-чаты (§2/§6)
+    SummonOperator,
+    ListOperatorThreads,
+    CountOperatorUnread,
+    ListOperatorMessages,
+    SendOperatorMessage,
+    # Личный канал (09 §1): typing-событие и онлайн-статусы
+    SendTyping,
+    GetOnlineUsers,
+    # Переговорные чаты (07 §2)
+    CreateGroupThread,
+    CreateInvite,
+    JoinByCode,
+    # Говернанс переговорных (08 §2, §4-§6): kick/leave/archive, mute,
+    # жалобы + админ-контур (события пишутся в тех же сценариях).
+    KickParticipant,
+    LeaveThread,
+    ArchiveThread,
+    ToggleMute,
+    ReportThread,
+    ListAdminReports,
+    HandleReport,
+    AdminKick,
+    ListThreadEvents,
+    # Внутренний рынок
+    ListMarketOffers,
+    ListPartnerOffers,
+    AddMarketOffer,
+    RemoveMarketOffer,
+    # Лоты рынка с владельцем + монетизация размещений (редизайн части 6)
+    CreateMarketLot,
+    ListMyLots,
+    CloseMarketLot,
+    ExtendLot,
+    ListPackages,
+    BuyPackage,
+    CreatePartnerLot,
+    ListPartnerLots,
+    ClosePartnerLot,
+    # Жизненный цикл лота (редизайн часть 10): черновик/submit/правки,
+    # авто-модерация и админ-очередь решений.
+    ScreenMarketLot,
+    SubmitLot,
+    UpdateLot,
+    ListModerationQueue,
+    ModerateLot,
+    ModeratePatch,
+    # Фото лотов + партнёрские чеки/история (07 §1, §3)
+    UploadMarketPhoto,
+    GetPartnerInspection,
+    UpsertPartnerInspection,
+    UpdatePartnerLotHistory,
+    # ИИ доверия (12 §1-§3): отчёт истории, генерация описания,
+    # выжимки диалогов для оператора/партнёра.
+    BuildHistoryReport,
+    GenerateDescription,
+    SummarizeThread,
 )
 
 
@@ -229,6 +377,86 @@ class UseCaseProvider(Provider):
             Готовый `MessageRateLimiter`.
         """
         return MessageRateLimiter(cache)
+
+    @provide
+    def thread_event_publisher(
+        self, chats: ChatRepository, publisher: ChatPublisher
+    ) -> ThreadEventPublisher:
+        """Собрать единую точку публикации событий треда (09 §1).
+
+        Обёртка над канальным паблишером: собирает участников треда и
+        рассылает копию события в их личные каналы `user:{id}` /
+        `partner:{id}` (публикаций в `thread:{id}` больше нет).
+
+        Args:
+            chats: Репозиторий чатов (участники и запись треда).
+            publisher: Канальный паблишер centrifugo.
+
+        Returns:
+            Паблишер событий треда в личные каналы.
+        """
+        return ParticipantEventPublisher(chats, publisher)
+
+    @provide
+    def optional_thread_event_publisher(
+        self, publisher: ThreadEventPublisher
+    ) -> ThreadEventPublisher | None:
+        """Тот же паблишер под union-ключом (опциональный параметр).
+
+        `ClaimLead` принимает пушер как `ThreadEventPublisher | None` —
+        пуш system-строки подключения агента не должен быть обязательным.
+
+        Args:
+            publisher: Паблишер событий треда.
+
+        Returns:
+            Тот же паблишер (`ThreadEventPublisher | None`).
+        """
+        return publisher
+
+    @provide
+    def send_message(
+        self,
+        chats: ChatRepository,
+        publisher: ThreadEventPublisher,
+        uow: UnitOfWork,
+        settings: Settings,
+    ) -> SendMessage:
+        """Собрать отправку сообщений (маскировка контактов — 08 §3).
+
+        `bot_username` — t.me-ссылки на нашего бота не маскируются;
+        пустое значение = маскировать все t.me (безопаснее, 08 §9).
+
+        Args:
+            chats: Репозиторий чатов.
+            publisher: Публикация в личные каналы участников (09 §1).
+            uow: Границы транзакции.
+            settings: Настройки (bot_username из BOT_USERNAME).
+
+        Returns:
+            Готовый `SendMessage`.
+        """
+        return SendMessage(
+            chats, publisher, uow, bot_username=settings.bot_username
+        )
+
+    @provide
+    def issue_ws_token(
+        self, signer: WsTokenFactory, settings: Settings
+    ) -> IssueWsToken:
+        """Собрать выдачу ws-токенов (URL — из настроек, TTL — константа dto).
+
+        Args:
+            signer: Подпись HS256 (секрет CENTRIFUGO_SECRET).
+            settings: Настройки приложения (centrifugo_url).
+
+        Returns:
+            Готовый `IssueWsToken`.
+        """
+        return IssueWsToken(
+            signer,
+            settings.centrifugo_public_url or settings.centrifugo_url,
+        )
 
     @provide
     def admin_listing_raw(

@@ -114,19 +114,19 @@ async def test_free_user_cannot_set_instant(
         headers=internal_headers,
     )
     assert r.status_code == 403
-    assert "Pro" in r.json()["detail"]
+    assert "Business" in r.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_pro_user_can_set_instant(
+async def test_business_user_can_set_instant(
     client: AsyncClient,
     internal_headers: dict[str, str],
     session: AsyncSession,
-    pro_user: User,
+    business_user: User,
 ):
     session.add(
         UserFilter(
-            user_id=pro_user.telegram_id,
+            user_id=business_user.telegram_id,
             name="f1",
             criteria={},
             notify_mode="digest",
@@ -135,7 +135,7 @@ async def test_pro_user_can_set_instant(
     await session.commit()
     r = await client.post(
         "/api/notifications/settings",
-        json={"user_id": pro_user.telegram_id, "notify_mode": "instant"},
+        json={"user_id": business_user.telegram_id, "notify_mode": "instant"},
         headers=internal_headers,
     )
     assert r.status_code == 200

@@ -1,16 +1,22 @@
-/** Экраны админ-панели (UI/UX ТЗ §3.4–3.6). */
+/** Экраны админ-панели (UI/UX ТЗ §3.4–3.6 + поддержка, 05 §2/§6). */
 
 import { useCallback, useEffect, useState } from "react";
+
+import "./admin-chats.css";
 
 import {
   AdminApiError,
   aapi,
+  fetchAdminChats,
+  fetchAdminUnreadChats,
   type AdminLead,
   type AdminPartner,
+  type AdminSupportThread,
   type PartnerKeyOut,
   type SourceConfig,
   type SourceHealth,
 } from "./api";
+import { AdminChatRoom } from "./AdminChatRoom";
 import { useToast } from "../ui/Toast";
 import { EmptyState, ErrorState } from "../ui/States";
 
@@ -436,6 +442,150 @@ export function AdminLeads({ onUnauthorized }: { onUnauthorized: () => void }) {
       )}
       <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>
         Действия с лидами (экспорт CSV, детали) — на следующих этапах.
+      </p>
+    </>
+  );
+}
+
+// --- Поддержка (операторский контур, 05-chats-marketplace.md §2/§6) ---
+
+/** Интервал поллинга списка тредов (сек). */
+const SUPPORT_POLL_SEC = 30;
+
+/** Время последнего юзер-сообщения: «14:32» / «14.10» / «—». */
+function formatLastUserMessage(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const sameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  return sameDay
+    ? hm
+    : `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function Support({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const [threads, setThreads] = useState<AdminSupportThread[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [pausedOnly, setPausedOnly] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  /** Выбранный тред — открыта комната оператора (поллинг 10с внутри). */
+  const [selected, setSelected] = useState<AdminSupportThread | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      fetchAdminChats({ type: "support", paused: pausedOnly ? true : undefined, limit: 50 }),
+      fetchAdminUnreadChats(),
+    ])
+      .then(([list, unreadCount]) => {
+        setThreads(list);
+        setUnread(unreadCount);
+      })
+      .catch((e) => {
+        if (e instanceof AdminApiError && e.status === 401) return onUnauthorized();
+        setError((e as Error).message);
+      })
+      .finally(() => setLoading(false));
+  }, [pausedOnly, onUnauthorized]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Поллинг списка 30с: без сокета админке хватает (§3 — поллинг).
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      fetchAdminChats({ type: "support", paused: pausedOnly ? true : undefined, limit: 50 })
+        .then(setThreads)
+        .catch(() => undefined);
+      fetchAdminUnreadChats()
+        .then(setUnread)
+        .catch(() => undefined);
+    }, SUPPORT_POLL_SEC * 1000);
+    return () => window.clearInterval(timer);
+  }, [pausedOnly]);
+
+  // Ответ оператора в комнате мог снять паузу — после возврата освежаем список
+  const backToList = () => {
+    setSelected(null);
+    load();
+  };
+
+  if (selected) {
+    return (
+      <AdminChatRoom
+        thread={selected}
+        onBack={backToList}
+        onUnauthorized={onUnauthorized}
+      />
+    );
+  }
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 className="pa-page-title">
+          Поддержка
+          {unread > 0 && (
+            <span className="badge badge--accepted" style={{ marginLeft: 8 }} title="Треды, где юзер писал позже последнего ответа оператора">
+              ждут ответа: {unread}
+            </span>
+          )}
+        </h1>
+        <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 14 }}>
+          <input
+            type="checkbox"
+            checked={pausedOnly}
+            onChange={(e) => setPausedOnly(e.target.checked)}
+          />
+          🔕 Только с паузой бота
+        </label>
+      </div>
+
+      {loading ? (
+        <div className="panel">Загрузка…</div>
+      ) : error ? (
+        <ErrorState description={error} onRetry={load} />
+      ) : threads.length === 0 ? (
+        <EmptyState
+          title={pausedOnly ? "Тредов с паузой бота нет" : "Обращений в поддержку нет"}
+          description="Список обновляется автоматически каждые 30 секунд"
+        />
+      ) : (
+        <div className="ac-threads">
+          {threads.map((t) => (
+            <button
+              type="button"
+              key={t.id}
+              className={`ac-thread${t.bot_paused ? " ac-thread--paused" : ""}`}
+              aria-label={`Чат: ${t.user_name || `Клиент #${t.user_id}`}`}
+              onClick={() => setSelected(t)}
+            >
+              <span className="ac-thread__top">
+                <b>{t.user_name || `Клиент #${t.user_id}`}</b>
+                {t.bot_paused && <span className="ac-thread__paused">🔕 бот на паузе</span>}
+                {t.status === "closed" && <span className="badge">закрыт</span>}
+              </span>
+              <span className="ac-thread__snippet">
+                {t.last_user_message_snippet ?? "Сообщений от клиента ещё не было"}
+              </span>
+              <span className="ac-thread__time">
+                {formatLastUserMessage(t.last_user_message_at)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+        Ответ оператора ставит бота на паузу в этом треде (§2); список и комната
+        обновляются поллингом — сокет не используется.
       </p>
     </>
   );

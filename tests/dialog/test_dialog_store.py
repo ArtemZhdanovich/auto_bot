@@ -327,6 +327,7 @@ async def test_cleanup_expired_dialogs(fake_session):
     from app.infrastructure.services.dialog import cleanup_expired_dialogs
 
     deleted = await cleanup_expired_dialogs(fake_session)
-    assert deleted == 0  # FakeSession.rowcount отсутствует → 0
+    # FakeSession._Result.rowcount = 1 (добавлен для mark_paid) → 1
+    assert deleted == 1
     assert fake_session.committed
     assert fake_session.executed  # выполнен DELETE-запрос

@@ -19,7 +19,11 @@ from app.application.catalog.dto import AnalysisCommand
 from app.application.errors import AppError, Forbidden, NotFound
 from app.application.dialog.use_cases import AiUnavailable
 from app.transport.http.deps.auth import CurrentUserDep
-from app.transport.http.deps.use_cases import GetLatestAnalysisDep, RunAnalysisDep
+from app.transport.http.deps.use_cases import (
+    FindSimilarDep,
+    GetLatestAnalysisDep,
+    RunAnalysisDep,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,29 @@ class AnalysisOut(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
     source: str = "ai"
     created_at: str | None = None  # ISO — «разбор от …» в UI
+
+
+class SimilarItemOut(BaseModel):
+    """Похожая машина с объяснением (кнопка «Найти похожие»)."""
+
+    id: int
+    make: str | None = None
+    model: str | None = None
+    year: int | None = None
+    price: float | None = None
+    currency: str | None = None
+    mileage_km: int | None = None
+    image: str | None = None  # первое фото объявления
+    url: str
+    reason: str
+    score: float = 0.0
+
+
+class SimilarOut(BaseModel):
+    """Итог поиска похожих машин."""
+
+    source: str  # ai — LLM-реранк, stats — фолбэк по цене
+    items: list[SimilarItemOut] = Field(default_factory=list)
 
 
 def _raise_http(exc: AppError) -> NoReturn:
@@ -121,6 +148,41 @@ async def get_analysis(
     except AppError as exc:
         _raise_http(exc)
     return _to_analysis_out(payload) if payload else None
+
+
+def _first_image(images: tuple[str, ...]) -> str | None:
+    """Первое непустое фото карточки (для превью похожих)."""
+    return next((str(u) for u in images if isinstance(u, str) and u), None)
+
+
+@router.post("/{listing_id}/similar", response_model=SimilarOut)
+async def find_similar(
+    user: CurrentUserDep,
+    use_case: FindSimilarDep,
+    listing_id: int = Path(ge=1),
+) -> SimilarOut:
+    """Похожие машины (LLM-реранк, при сбое — фолбэк по цене)."""
+    try:
+        result = await use_case.execute(listing_id)
+    except AppError as exc:
+        _raise_http(exc)
+    items = [
+        SimilarItemOut(
+            id=item.card.id,
+            make=item.card.make,
+            model=item.card.model,
+            year=item.card.year,
+            price=float(item.card.price) if item.card.price is not None else None,
+            currency=item.card.currency,
+            mileage_km=item.card.mileage_km,
+            image=_first_image(item.card.images),
+            url=item.card.url,
+            reason=item.reason,
+            score=item.score,
+        )
+        for item in result.items
+    ]
+    return SimilarOut(source=result.source, items=items)
 
 
 @bot_router.post("/{listing_id}/analysis", response_model=AnalysisOut)

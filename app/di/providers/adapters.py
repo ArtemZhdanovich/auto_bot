@@ -12,7 +12,7 @@ from typing import Any
 
 from dishka import Provider, Scope, provide
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.admin.use_cases import AdapterClasses
 from app.application.admin.ports import RawPayloadStoragePort
@@ -36,7 +36,24 @@ from app.application.dialog.dto import (
     DialogReply,
     UserProfile,
 )
+from app.application.chat.ports import (
+    ChannelPresencePort,
+    ChatPublisher,
+    LinkFetcherPort,
+    WsTokenFactory,
+)
+from app.application.chat.publisher import ParticipantEventPublisher
+from app.application.chat.bot import (
+    ReplySupportBot,
+    SupportBotSpawner,
+    SupportLLMPort,
+    SupportRagPort,
+)
 from app.application.catalog.ports import Enqueuer
+from app.application.market.ports import (
+    MarketEventPublisher,
+    PhotosStoragePort,
+)
 from app.application.partners.ports import PartnerRateLimiter
 from app.application.shared.ports import (
     CachePort,
@@ -52,13 +69,24 @@ from app.infrastructure.cache.dialog_store import RedisDialogStore
 from app.infrastructure.cache.quota import RedisQuotaStore
 from app.infrastructure.cache.redis import RedisCache
 from app.infrastructure.db.models import User
+from app.infrastructure.db.outbox import OutboxDAO
 from app.infrastructure.db.repositories.analytics import (
     SqlAlchemyAnalyticsRepository,
 )
+from app.infrastructure.db.repositories.chat import SqlAlchemyChatRepository
+from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from app.infrastructure.messaging.legacy_worker import enqueue_task
 from app.infrastructure.services.analytics import EVENT_DIALOG_MESSAGE, track
+from app.infrastructure.services.centrifugo import CentrifugoPublisher
+from app.infrastructure.services.link_preview import HttpLinkFetcher
 from app.infrastructure.services.partners.rate_limit import RedisRateLimiter
+from app.infrastructure.services.support_bot import (
+    SessionSupportBotRunner,
+    SupportLLMAdapter,
+    SupportRagAdapter,
+)
 from app.infrastructure.sources import ADAPTER_CLASSES
+from app.infrastructure.storage.photos import photos_storage_from_settings
 from app.infrastructure.storage.s3 import storage_from_settings
 
 logger = logging.getLogger(__name__)
@@ -228,6 +256,21 @@ class AdapterProvider(Provider):
         return _llm
 
     @provide
+    def optional_llm_factory(self, factory: LLMFactory) -> LLMFactory | None:
+        """Та же фабрика под union-ключом (опциональный параметр).
+
+        `FindSimilar` получает LLM как `LLMFactory | None` — фолбэк без
+        LLM работает и там, где фабрика не забинджена.
+
+        Args:
+            factory: Обязательная фабрика LLM.
+
+        Returns:
+            Та же фабрика (`LLMFactory | None`).
+        """
+        return factory
+
+    @provide
     def user_profile_port(self, session: AsyncSession) -> UserProfilePort:
         """`UserProfilePort` → адаптер поверх таблицы `users`.
 
@@ -250,6 +293,24 @@ class AdapterProvider(Provider):
             Чтение профиля для AI-разбора цены.
         """
         return UserProfileAdapter(session)
+
+    @provide
+    def optional_user_lookup_port(
+        self, lookup: UserLookupPort
+    ) -> UserLookupPort | None:
+        """Тот же адаптер под union-ключом (опциональный параметр).
+
+        Гейтинг чеков осмотра в `GetInspection` получает порт как
+        `UserLookupPort | None` — продаём обязательный инстанс и под
+        union-ключом.
+
+        Args:
+            lookup: Обязательный адаптер профиля.
+
+        Returns:
+            Тот же адаптер (`UserLookupPort | None`).
+        """
+        return lookup
 
     @provide
     def dialog_analytics_port(self, session: AsyncSession) -> DialogAnalyticsPort:
@@ -364,6 +425,154 @@ class AdapterProvider(Provider):
             Колбэк записи события.
         """
         return TrackEvent(SqlAlchemyAnalyticsRepository(session)).execute
+
+    @provide
+    def channel_presence(self, publisher: ChatPublisher) -> ChannelPresencePort:
+        """`ChannelPresencePort` → тот же адаптер centrifugo (presence).
+
+        Онлайн-статусы (09 §1) спрашивают presence личных каналов тем же
+        HTTP-клиентом, что и публикация.
+
+        Args:
+            publisher: Публикатор (реализует оба порта).
+
+        Returns:
+            Адаптер presence-запросов centrifugo.
+        """
+        return publisher  # type: ignore[return-value]
+
+    @provide
+    def chat_publisher(self, settings: Settings) -> ChatPublisher:
+        """`ChatPublisher` → HTTP API centrifugo (fire-and-forget).
+
+        Args:
+            settings: Настройки с адресом и ключами centrifugo.
+
+        Returns:
+            Публикатор событий в каналы чатов (ошибки глотает).
+        """
+        return CentrifugoPublisher(
+            settings.centrifugo_url,
+            settings.centrifugo_http_api_key.get_secret_value(),
+            settings.centrifugo_secret.get_secret_value(),
+        )
+
+    @provide
+    def market_event_publisher(
+        self, publisher: ChatPublisher
+    ) -> MarketEventPublisher:
+        """`MarketEventPublisher` → тот же адаптер centrifugo (10 §3).
+
+        Событие `listing_status` публикуется напрямую в личный канал
+        владельца (`user:{id}` / `partner:{id}`) — метод publish уже есть.
+
+        Args:
+            publisher: Канальный публикатор чатов (общий HTTP-клиент).
+
+        Returns:
+            Публикатор событий жизненного цикла лотов.
+        """
+        return publisher  # type: ignore[return-value]
+
+    @provide(scope=Scope.APP)
+    def photos_storage(self) -> PhotosStoragePort:
+        """`PhotosStoragePort` → публичный bucket MinIO (07 §1).
+
+        APP-скоуп: объект хранит флаг «bucket создан» — ensure_bucket
+        выполняется один раз на процесс при первой загрузке
+        (put_bucket_policy идемпотентен). Тесты подменяют через
+        extra-провайдер (in-memory фейк).
+
+        Returns:
+            Хранилище фото лотов рынка (настройки — из `get_settings`).
+        """
+        return photos_storage_from_settings()
+
+    @provide
+    def support_rag(self, redis: Redis) -> SupportRagPort:
+        """`SupportRagPort` → RAG-клиент поддержки (общий breaker).
+
+        Args:
+            redis: Клиент Redis приложения (кэш ответов).
+
+        Returns:
+            Адаптер вопросов к базе знаний.
+        """
+        return SupportRagAdapter(redis)
+
+    @provide
+    def support_llm(self) -> SupportLLMPort:
+        """`SupportLLMPort` → LLM-диалог фолбэка бота.
+
+        Returns:
+            Адаптер хода LLM по истории треда (фабрика `_llm`).
+        """
+        return SupportLLMAdapter(_llm)
+
+    @provide
+    def support_bot_spawner(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        publisher: ChatPublisher,
+        redis: Redis,
+    ) -> SupportBotSpawner:
+        """`SupportBotSpawner` → фоновый ответ бота в своей сессии.
+
+        Сессия HTTP-запроса живёт до конца ответа, а бот генерирует
+        ответ секунды — задание открывает собственную сессию из
+        фабрики и коммитит её само.
+
+        Args:
+            session_factory: Фабрика сессий приложения.
+            publisher: Публикатор centrifugo (без соединений — переживёт
+                конец запроса).
+            redis: Клиент Redis (кэш RAG).
+
+        Returns:
+            Спавнер фоновых ответов бота поддержки.
+        """
+
+        def build_bot(session: AsyncSession) -> ReplySupportBot:
+            return ReplySupportBot(
+                chats=SqlAlchemyChatRepository(session),
+                users=UserProfileAdapter(session),
+                # 09 §1: события треда идут в личные каналы участников;
+                # репозиторий — из сессии задания (не из запроса).
+                publisher=ParticipantEventPublisher(
+                    SqlAlchemyChatRepository(session), publisher
+                ),
+                rag=SupportRagAdapter(redis),
+                llm=SupportLLMAdapter(_llm),
+                uow=SqlAlchemyUnitOfWork(
+                    session,
+                    OutboxDAO(session),
+                    publisher=None,
+                    use_outbox=False,
+                ),
+            )
+
+        return SessionSupportBotRunner(session_factory, build_bot)
+
+    @provide
+    def ws_token_factory(self, publisher: ChatPublisher) -> WsTokenFactory:
+        """Тот же адаптер centrifugo под ключ подписи ws-токенов.
+
+        Args:
+            publisher: Публикатор (реализует оба порта).
+
+        Returns:
+            Фабрика браузерных JWT (`WsTokenFactory`).
+        """
+        return publisher  # type: ignore[return-value]
+
+    @provide
+    def link_fetcher(self) -> LinkFetcherPort:
+        """`LinkFetcherPort` → httpx-загрузчик с SSRF-фильтром.
+
+        Returns:
+            Загрузчик HTML внешних страниц (512KB, 3с, один редирект).
+        """
+        return HttpLinkFetcher()
 
     @provide(scope=Scope.APP)
     def raw_payload_storage(self) -> RawPayloadStoragePort:

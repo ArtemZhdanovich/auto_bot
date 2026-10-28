@@ -14,8 +14,8 @@ const report: InspectionReport = {
   grade: "good",
   summary: "Машина в хорошем состоянии",
   marks: [
-    { zone: "front_bumper", type: "scratch", note: "скол на кромке" },
-    { zone: "door_rl", type: "dent" },
+    { zone: "trunk", type: "scratch", note: "скол на кромке", pos: [120, 235] },
+    { zone: "door_rl", type: "dent", pos: [33, 165] },
   ],
   items: [
     { key: "engine", status: "ok" },
@@ -35,23 +35,24 @@ describe("InspectionSection", () => {
     expect(screen.getByText(/Машина в хорошем состоянии/)).toBeTruthy();
   });
 
-  it("подсвечивает зоны с дефектами на SVG-схеме", () => {
+  it("рисует маркеры повреждений на диаграммах Encar", () => {
     const { container } = render(<InspectionSection report={report} />);
-    const marked = container.querySelectorAll(".inspection__zone--mark");
-    expect(marked.length).toBe(2);
+    // Две диаграммы (внешние панели + силовая структура)
+    expect(container.querySelectorAll(".inspection__diagram").length).toBe(2);
+    // Маркеры — по одному на зону с повреждением
+    expect(container.querySelectorAll(".inspection__pin").length).toBe(2);
     // Легенда: 9 типов повреждений (включая repair/frame из классического чека)
     expect(container.querySelectorAll(".inspection__legend-item").length).toBe(9);
   });
 
-  it("тап по зоне открывает детали повреждения", () => {
+  it("тап по маркеру открывает детали повреждения", () => {
     const { container } = render(<InspectionSection report={report} />);
-    // SVG <title> тоже содержит название зоны — проверяем именно панель деталей
     expect(container.querySelector(".inspection__zone-title")).toBeNull();
-    const paths = document.querySelectorAll(".inspection__zone--mark");
-    fireEvent.click(paths[0]);
+    const pins = container.querySelectorAll(".inspection__pin");
+    fireEvent.click(pins[0]);
     expect(
       container.querySelector(".inspection__zone-title")?.textContent,
-    ).toContain(ZONE_LABEL.front_bumper);
+    ).toContain(ZONE_LABEL.trunk);
     const marks = container.querySelectorAll(".inspection__zone-mark");
     expect(marks.length).toBe(1);
     expect(marks[0].textContent).toContain("Царапина");
@@ -59,5 +60,38 @@ describe("InspectionSection", () => {
     // закрытие
     fireEvent.click(screen.getByLabelText("Закрыть"));
     expect(container.querySelector(".inspection__zone-title")).toBeNull();
+  });
+
+  // ---- Новые состояния: карта не исчезает при пустых marks (encar) ----
+
+  it("при пустых marks карта остаётся: диаграммы без пинов + зелёная плашка", () => {
+    const { container } = render(
+      <InspectionSection report={{ ...report, marks: [] }} />,
+    );
+    // Обе диаграммы Encar на месте — секция не пропала
+    expect(container.querySelectorAll(".inspection__diagram").length).toBe(2);
+    // Пинов нет, легенды цветов тоже (нечего объяснять)
+    expect(container.querySelectorAll(".inspection__pin").length).toBe(0);
+    expect(container.querySelectorAll(".inspection__legend-item").length).toBe(0);
+    // Плашка объясняет, почему пинов нет
+    expect(
+      screen.getByText(/Повреждений по чеку не зафиксировано/),
+    ).toBeTruthy();
+    // Чек-лист при этом рендерится
+    expect(screen.getByText("Чек-лист")).toBeTruthy();
+    expect(screen.getByText("Двигатель")).toBeTruthy();
+  });
+
+  it("marks и items пустые — карта с плашкой и хотя бы сводка (факты)", () => {
+    const { container } = render(
+      <InspectionSection
+        report={{ ...report, marks: [], items: [], summary: "Кузов в порядке · салон чистый" }}
+      />,
+    );
+    expect(container.querySelectorAll(".inspection__diagram").length).toBe(2);
+    expect(screen.getByText(/Повреждений по чеку не зафиксировано/)).toBeTruthy();
+    // Сводка не потерялась: факты из summary списком
+    expect(screen.getByText("Кузов в порядке")).toBeTruthy();
+    expect(screen.getByText("салон чистый")).toBeTruthy();
   });
 });

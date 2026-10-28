@@ -31,8 +31,44 @@ def test_prod_accepts_strong_secret():
         database_url="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
         rabbitmq_url="amqp://svc:pw@mq.internal:5672/",
         redis_url="redis://redis.internal:6379/0",
+        centrifugo_secret="cs" * 16,  # чаты: дев-секрет centrifugo в prod запрещён
+        centrifugo_http_api_key="ck" * 16,
     )
     assert s.app_env == "prod"
+
+
+# --- Чаты (05 §4): дев-секреты centrifugo в prod запрещены ----------------
+
+
+def test_prod_rejects_default_centrifugo_secret():
+    """change-me позволяет фальшивый ws-JWT → чужой канал user:{id}."""
+    with pytest.raises(ValidationError, match="CENTRIFUGO_SECRET"):
+        Settings(
+            _env_file=None,
+            app_env="prod",
+            app_secret_key="a" * 64,
+            internal_token="i" * 48,
+            llm_provider="mock",
+            database_url="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
+            rabbitmq_url="amqp://svc:pw@mq.internal:5672/",
+            redis_url="redis://redis.internal:6379/0",
+            centrifugo_http_api_key="ck" * 16,
+        )
+
+
+def test_prod_rejects_default_centrifugo_api_key():
+    with pytest.raises(ValidationError, match="CENTRIFUGO_HTTP_API_KEY"):
+        Settings(
+            _env_file=None,
+            app_env="prod",
+            app_secret_key="a" * 64,
+            internal_token="i" * 48,
+            llm_provider="mock",
+            database_url="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
+            rabbitmq_url="amqp://svc:pw@mq.internal:5672/",
+            redis_url="redis://redis.internal:6379/0",
+            centrifugo_secret="cs" * 16,
+        )
 
 
 # --- TECHDEBT 1.6: дев-дефолты URL в prod запрещены ----------------------
@@ -49,6 +85,8 @@ def test_prod_rejects_default_db_url():
             database_url="postgresql+asyncpg://app:app@localhost:5432/autoselect",
             rabbitmq_url="amqp://svc:pw@mq.internal:5672/",
             redis_url="redis://redis.internal:6379/0",
+            centrifugo_secret="cs" * 16,
+            centrifugo_http_api_key="ck" * 16,
         )
 
 
@@ -63,6 +101,8 @@ def test_prod_rejects_default_rabbitmq_url():
             database_url="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
             rabbitmq_url="amqp://guest:guest@localhost:5672/",
             redis_url="redis://redis.internal:6379/0",
+            centrifugo_secret="cs" * 16,
+            centrifugo_http_api_key="ck" * 16,
         )
 
 
@@ -78,6 +118,8 @@ def test_prod_rejects_rabbitmq_guest_creds():
             database_url="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
             rabbitmq_url="amqp://guest:guest@mq.internal:5672/",
             redis_url="redis://redis.internal:6379/0",
+            centrifugo_secret="cs" * 16,
+            centrifugo_http_api_key="ck" * 16,
         )
 
 
@@ -92,4 +134,6 @@ def test_prod_rejects_default_redis_url():
             database_url="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
             rabbitmq_url="amqp://svc:pw@mq.internal:5672/",
             redis_url="redis://localhost:6379/0",
+            centrifugo_secret="cs" * 16,
+            centrifugo_http_api_key="ck" * 16,
         )

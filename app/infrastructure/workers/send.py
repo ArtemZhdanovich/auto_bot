@@ -6,29 +6,41 @@
   send_listing_notification (rate limit 30 сек/пользователь, тихие часы);
 - digest: cron 09:00 и 20:00 UTC, 3–5 карточек одним сообщением;
 - подписки: cron 12:00 UTC — напоминания за 3/1 день, даунгрейд;
+- проданные избранного: cron 04:30 UTC — сообщение «продана, ищем похожие?»
+  и удаление из избранного в любом случае (успех/ошибка отправки);
 - антидубли: sent_log + notified:{uid}:{lid} (TTL 7 дней) — в Redis;
 - Telegram Bot API напрямую через httpx, обработка 429 (retry_after).
 """
 
 import asyncio
+import html
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
 from redis.asyncio import Redis
 
 from app.config import get_settings
+from app.application.market.dto import (
+    LISTING_STATUS_ACCEPTED,
+    LISTING_STATUS_EXPIRED,
+)
+from app.domain.subscription.policies import effective_tier
 from app.infrastructure.db.models import Listing, ListingPriceHistory, User, UserFilter
 from app.infrastructure.db.session import get_session, session_factory
 from app.infrastructure.messaging.legacy_worker import QUEUE_SEND, CronSpec, TaskPublisher, TaskWorker
 from app.infrastructure.services import rate_limit
+from app.infrastructure.services.centrifugo import CentrifugoPublisher
 from app.infrastructure.services.dialog import cleanup_expired_dialogs
 from app.infrastructure.services.notify import (
+    SOLD_FAV_KIND,
     _fmt_price,
     buffer_for_digest,
     clear_digest,
     collect_for_filters,
+    collect_sold_favorites,
+    drop_favorites,
     event_audience,
     format_listing_card,
     in_quiet_hours,
@@ -63,9 +75,16 @@ TELEGRAM_API = "https://api.telegram.org"
 
 
 async def send_telegram_message(
-    bot_token: str, chat_id: int, text: str
+    bot_token: str,
+    chat_id: int,
+    text: str,
+    reply_markup: dict[str, Any] | None = None,
 ) -> tuple[bool, str | None]:
     """sendMessage с parse_mode=HTML. 429 → ждём retry_after и повторяем раз.
+
+    `reply_markup` — опциональная инлайн-клавиатура сырым словарём Bot API
+    (воркер ходит в Telegram httpx'ом, без aiogram-типов); существующие
+    вызовы без кнопок остаются без изменений (дефолт None).
 
     Перед отправкой — Token Bucket (ТЗ п. 12.6): ~30 msg/s глобально,
     ~1 msg/s на чат; Redis лежит → отправка не блокируется (fail-open).
@@ -85,6 +104,8 @@ async def send_telegram_message(
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     for attempt in (1, 2):
         try:
             # TECHDEBT 9.7: один httpx.AsyncClient на процесс (пул соединений),
@@ -298,8 +319,24 @@ async def notify_new_listings(
     return counts
 
 
-async def digest_job(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Cron (09:00 и 20:00 UTC): дайджест 3–5 карточек одним сообщением."""
+def _digest_due(tier: str, slot: str, now=None) -> bool:
+    """Каденс дайджеста по тарифу (экономика 2026-10).
+
+    - free: раз в НЕДЕЛЮ — утренний слот понедельника;
+    - pro: каждый день (утро) + вечерний слот;
+    - business: буфер обычно пуст (instant при публикации), но досылаем
+      утром и вечером на случай тихих часов.
+    """
+    from datetime import datetime as _dt
+
+    current = now or _dt.now(timezone.utc)
+    if slot == "evening":
+        return tier in ("pro", "business")
+    return tier != "free" or current.weekday() == 0  # Monday == 0
+
+
+async def _digest_run(ctx: dict[str, Any], slot: str) -> dict[str, Any]:
+    """Прогон дайджеста: карточки одним сообщением по каденсу тарифа."""
     redis: Redis = ctx["redis"]
     bot_token: str = ctx.get("bot_token", "")
     sent = skipped = 0
@@ -319,6 +356,13 @@ async def digest_job(ctx: dict[str, Any]) -> dict[str, Any]:
             continue
 
         async with session_factory() as session:
+            user = await session.get(User, user_id)
+            if user is None or not user.is_active:
+                await clear_digest(redis, user_id)
+                continue
+            if not _digest_due(effective_tier(user), slot):
+                continue  # free ждёт понедельника — буфер не трогаем
+
             cards: list[str] = []
             for listing_id in ids:
                 listing = await session.get(Listing, listing_id)
@@ -327,7 +371,7 @@ async def digest_job(ctx: dict[str, Any]) -> dict[str, Any]:
                 cards.append(format_listing_card(listing))
 
             if cards:
-                header = f"📬 <b>Дайджест:</b> {len(cards)} новых вариантов\n\n"
+                header = f"\U0001F4EC <b>Дайджест:</b> {len(cards)} новых вариантов\n\n"
                 ok, _err = await send_telegram_message(
                     bot_token, user_id, header + "\n\n".join(cards)
                 )
@@ -345,8 +389,18 @@ async def digest_job(ctx: dict[str, Any]) -> dict[str, Any]:
         if ok:
             await clear_digest(redis, user_id)
 
-    logger.info("digest_sent: sent=%s kept=%s", sent, skipped)
+    logger.info("digest_sent: slot=%s sent=%s kept=%s", slot, sent, skipped)
     return {"sent": sent, "kept": skipped}
+
+
+async def digest_job_morning(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron 09:00 UTC: всем тарифам (free — только по понедельникам)."""
+    return await _digest_run(ctx, "morning")
+
+
+async def digest_job_evening(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron 20:00 UTC: Pro/Business (вечерняя подборка)."""
+    return await _digest_run(ctx, "evening")
 
 
 async def subscription_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
@@ -354,6 +408,9 @@ async def subscription_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
 
     - за 3 дня и за 1 день до окончания — уведомление;
     - после окончания (не позднее 3 дней) — возврат на Free + сообщение.
+
+    Бессрочный Business (subscription_until IS NULL, выдан партнёрским
+    контуром) в выборку не попадает и не даунгрейдится.
     """
     redis: Redis = ctx["redis"]
     bot_token: str = ctx.get("bot_token", "")
@@ -425,6 +482,208 @@ async def dialog_cleanup_job(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"dialog_sessions_deleted": deleted}
 
 
+# --- проданные избранного (требование владельца) --------------------------------
+
+
+SOLD_FAV_MAX_PER_MESSAGE = 5  # до 5 машин одним сообщением одному пользователю
+
+
+def _sold_fav_title(listing: Any) -> str:
+    """Заголовок для списка проданных: переведённый тайтл или make model year."""
+    title = getattr(listing, "title_ru", None) or " ".join(
+        str(part) for part in (listing.make, listing.model, listing.year) if part
+    )
+    return title or "Объявление"
+
+
+def format_sold_favorites_card(items: list[Any]) -> str:
+    """Сообщение «машина из избранного продана» (до 5 машин одним списком)."""
+    titles = [html.escape(_sold_fav_title(item)) for item in items]
+    if len(titles) == 1:
+        return f"🚗 <b>{titles[0]}</b> продана — убрали из избранного. Ищем похожие?"
+    lines = ["🚗 <b>Машины из избранного проданы</b> — убрали их:"]
+    lines.extend(f"• <b>{title}</b>" for title in titles)
+    lines.append("Ищем похожие?")
+    return "\n".join(lines)
+
+
+def _sold_fav_reply_markup(
+    items: list[Any], miniapp_url: str
+) -> dict[str, Any] | None:
+    """Кнопки «Ищем похожие» → мини-апп `/analyses?similar={listing_id}`.
+
+    Markup — сырой словарь Bot API (воркер шлёт httpx, без aiogram-типов);
+    web_app-кнопка требует https (как `_miniapp_button` в боте), http-адрес
+    открываем обычной url-кнопкой. Пустой miniapp_url — без кнопки, только текст.
+    """
+    base = (miniapp_url or "").strip()
+    if not base:
+        return None
+    rows: list[list[dict[str, Any]]] = []
+    for listing in items:
+        url = f"{base.rstrip('/')}/analyses?similar={listing.id}"
+        label = html.escape(_sold_fav_title(listing)[:32])
+        text = "🔎 Ищем похожие" if len(items) == 1 else f"🔎 Похожие: {label}"
+        button = (
+            {"text": text, "web_app": {"url": url}}
+            if url.startswith("https://")
+            else {"text": text, "url": url}
+        )
+        rows.append([button])
+    return {"inline_keyboard": rows}
+
+
+async def favorites_sold_job(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron 04:30 UTC (после stale_check_job 04:00 в fetch-воркере): машины
+    из избранного проданы → сообщение и удаление из избранного.
+
+    Одному пользователю с несколькими проданными — одно сообщение со
+    списком до SOLD_FAV_MAX_PER_MESSAGE машин; хвост — следующим прогоном.
+    Favorite удаляем в любом случае (успех/ошибка отправки) — требование
+    владельца. Антидубль — kind='sold_fav' (sent_log + Redis TTL).
+    """
+    settings = get_settings()
+    redis: Redis = ctx["redis"]
+    bot_token: str = ctx.get("bot_token", "")
+    removed = notified = send_failed = 0
+
+    async with session_factory() as session:
+        by_user: dict[int, list[Listing]] = {}
+        for user_id, _listing_id, listing in await collect_sold_favorites(
+            session, redis
+        ):
+            by_user.setdefault(user_id, []).append(listing)
+
+        for user_id, listings in by_user.items():
+            batch = listings[:SOLD_FAV_MAX_PER_MESSAGE]
+            ids = [item.id for item in batch]
+            ok, _err = await send_telegram_message(
+                bot_token,
+                user_id,
+                format_sold_favorites_card(batch),
+                reply_markup=_sold_fav_reply_markup(batch, settings.miniapp_url),
+            )
+            # из избранного убираем в любом случае — даже если отправка не прошла
+            await drop_favorites(session, user_id, ids)
+            if ok:
+                await mark_sent_many(session, redis, user_id, ids, kind=SOLD_FAV_KIND)
+                notified += len(ids)
+            else:
+                send_failed += len(ids)
+            removed += len(ids)
+
+    if notified or send_failed:
+        logger.info(
+            "favorites_sold_done: removed=%s notified=%s send_failed=%s",
+            removed,
+            notified,
+            send_failed,
+        )
+    return {"removed": removed, "notified": notified, "send_failed": send_failed}
+
+
+async def market_placement_expiry(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron 03:40 UTC: экспирация размещений user-лотов рынка (06 §2-§3, 10 §1).
+
+    - включённые лоты платных тарифов не трогаем (`effective_tier != free`);
+    - активный лот без placement-дат у free-владельца — даунгрейд
+      включённого лота после ухода с тарифа: `free_until = now+7d`
+      (однократно: дальше у лота есть дата и работает экспирация);
+    - `max(free, paid) < now` у одобренного лота — `status='expired'`
+      (is_active НЕ трогаем — 10 §1: статус жизни в `status`, is_active
+      остаётся для совместимости старых фильтров) и событие
+      `listing_status` в личный канал centrifugo `user:{owner_user_id}`.
+    Needs_payment-лоты (неактивные без дат) не выбираются — им нечего
+    экспирировать; expired-лоты повторно не матчатся (фильтр по статусу).
+    """
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    publisher: CentrifugoPublisher | None = ctx.get("centrifugo")
+    downgraded = expired = 0
+    expired_lots: list[tuple[int, int]] = []  # (owner_user_id, listing_id)
+
+    async with session_factory() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Listing).where(
+                        Listing.owner_type == "user",
+                        Listing.owner_user_id.is_not(None),
+                        Listing.is_active.is_(True),
+                        Listing.status == LISTING_STATUS_ACCEPTED,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        owners = {
+            row.owner_user_id
+            for row in rows
+            if row.owner_user_id is not None
+        }
+        users: dict[int, Any] = {}
+        if owners:
+            users = {
+                u.telegram_id: u
+                for u in (
+                    (
+                        await session.execute(
+                            select(User).where(User.telegram_id.in_(owners))
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            }
+
+        for row in rows:
+            owner = users.get(row.owner_user_id)
+            if owner is not None and effective_tier(owner) != "free":
+                continue  # включённый лот платного тарифа (§3)
+            moments = [
+                value.replace(tzinfo=timezone.utc)
+                if value.tzinfo is None
+                else value
+                for value in (row.placement_free_until, row.placement_paid_until)
+                if value is not None
+            ]
+            if not moments:
+                # Included-даунгрейд (§3): одна бесплатная неделя с момента,
+                # когда экспиратор впервые увидел лот у free-владельца.
+                row.placement_free_until = now + timedelta(
+                    days=settings.market_free_days
+                )
+                downgraded += 1
+                continue
+            if max(moments) < now:
+                # 10 §1: экспиратор пишет status вместо is_active=false.
+                row.status = LISTING_STATUS_EXPIRED
+                expired += 1
+                if row.owner_user_id is not None:
+                    expired_lots.append((row.owner_user_id, row.id))
+        await session.commit()
+
+    # Публикуем после commit: событие только про устоявшееся состояние.
+    if publisher is not None:
+        for owner_user_id, listing_id in expired_lots:
+            await publisher.publish(
+                f"user:{owner_user_id}",
+                {
+                    "type": "listing_status",
+                    "listing_id": listing_id,
+                    "status": "expired",
+                },
+            )
+    if downgraded or expired:
+        logger.info(
+            "market_placement_expiry: downgraded=%s expired=%s",
+            downgraded,
+            expired,
+        )
+    return {"downgraded": downgraded, "expired": expired}
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     # Redis (данные: дедуп, rate limit, digest-буферы, ключи подписок)
@@ -436,6 +695,12 @@ async def startup(ctx: dict[str, Any]) -> None:
     )
     ctx["bot_token"] = settings.bot_token.get_secret_value()
     ctx["publisher"] = TaskPublisher(settings.rabbitmq_url)
+    # Публикация lot_expired в личные каналы centrifugo (экспиратор рынка).
+    ctx["centrifugo"] = CentrifugoPublisher(
+        settings.centrifugo_url,
+        settings.centrifugo_http_api_key.get_secret_value(),
+        settings.centrifugo_secret.get_secret_value(),
+    )
     logger.info("send_worker_started")
 
 
@@ -456,17 +721,26 @@ HANDLERS = {
     "send_listing_status": send_listing_status,
     "notify_new_listings": notify_new_listings,
     "listing_status_scan": listing_status_scan,
-    "digest_job": digest_job,
+    "digest_job": digest_job_morning,  # имя задачи очереди сохранено
+    "digest_job_morning": digest_job_morning,
+    "digest_job_evening": digest_job_evening,
     "subscription_check_job": subscription_check_job,
+    "favorites_sold_job": favorites_sold_job,
+    "market_placement_expiry": market_placement_expiry,
 }
 
 # Дайджест 09:00 и 20:00 UTC, подписки — 12:00 UTC (ТЗ п. 8.6, 8.7),
-# чистка диалогов старше суток — 04:00 UTC
+# чистка диалогов старше суток — 04:00 UTC; проданные избранные — 04:30 UTC,
+# после stale_check_job (fetch-воркер, 04:00): Listing.is_active успевает
+# обновиться до выборки «проданных». Экспирация размещений рынка — 03:40 UTC
+# (06 §2): до статуса-скана и утреннего дайджеста.
 CRON_JOBS = [
-    CronSpec(digest_job, hour=9, minute=0),
-    CronSpec(digest_job, hour=20, minute=0),
+    CronSpec(digest_job_morning, hour=9, minute=0),
+    CronSpec(digest_job_evening, hour=20, minute=0),
     CronSpec(subscription_check_job, hour=12, minute=0),
     CronSpec(dialog_cleanup_job, hour=4, minute=0),
+    CronSpec(favorites_sold_job, hour=4, minute=30),
+    CronSpec(market_placement_expiry, hour=3, minute=40),
 ]
 
 

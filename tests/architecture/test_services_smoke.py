@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.infrastructure.db.models import PartnerAccount, User
 from app.infrastructure.security.tokens import create_access_token, create_refresh_token
 from services.admin.main import create_app as create_admin
+from services.chat.main import create_app as create_chat
 from services.billing.main import create_app as create_billing
 from services.catalog.main import create_app as create_catalog
 from services.dialog.main import create_app as create_dialog
@@ -32,6 +33,7 @@ SERVICES = {
     "partners": create_partners,
     "dialog": create_dialog,
     "admin": create_admin,
+    "chat": create_chat,
 }
 
 # Ровно те префиксы API, которые обязан обслуживать каждый сервис
@@ -42,6 +44,7 @@ EXPECTED_PREFIXES: dict[str, set[str]] = {
     "partners": {"/api/partner", "/api/admin", "/api/leads"},
     "dialog": {"/api/dialog", "/api/ai"},
     "admin": {"/api/admin"},
+    "chat": {"/api/chats", "/api/market", "/api/partner"},
 }
 
 
@@ -128,13 +131,17 @@ def test_smoke_no_context_leaks_across_services():
             if any(p.startswith(prefix) for p in route_set)
         }
 
-    assert owners("/api/listings") == {"catalog"}
     assert owners("/api/dialog") == {"dialog"}
     assert owners("/api/payments") == {"billing"}
-    assert owners("/api/partner") == {"partners"}
+    # партнёрский префикс делят partners (лиды/биллинг) и chat (витрина/чаты)
+    assert owners("/api/partner") == {"partners", "chat"}
     assert owners("/api/auth") == {"identity"}
     # billing легитимно отдаёт внутренний тариф (payments-роутер), identity — остальное
     assert owners("/api/users") == {"identity", "billing"}
+    # листинги остаются в catalog; seller-чат — форма /api/chats/seller/{id}
+    assert owners("/api/listings") == {"catalog"}
+    assert owners("/api/chats") == {"chat"}
+    assert owners("/api/market") == {"chat"}
 
 
 async def _client_for(app, session=None, redis=None) -> AsyncClient:
@@ -243,3 +250,56 @@ async def test_smoke_admin_adapters(monkeypatch):
     # ADAPTER_CLASSES — это классы адаптеров, а не имена источников
     assert "EncarApiAdapter" in resp.json()["adapters"]
 
+
+
+async def test_smoke_chat_ws_token():
+    """chat: /api/chats/ws-token выпускает centrifugo-JWT без обращения к БД."""
+    import jwt as pyjwt
+
+    from app.config import get_settings
+
+    app = create_chat()
+    session = FakeSession()
+    session.add(User(telegram_id=111111, subscription_tier="free", is_active=True))
+    async with await _client_for(app, session=session) as http:
+        resp = await http.get("/api/chats/ws-token", headers=_headers())
+    assert resp.status_code == 200
+    body = resp.json()
+    claims = pyjwt.decode(
+        body["token"],
+        get_settings().centrifugo_secret.get_secret_value(),
+        algorithms=["HS256"],
+    )
+    assert claims["sub"] == "user:111111"
+    st = get_settings()
+    assert body["url"] == (st.centrifugo_public_url or st.centrifugo_url)
+
+
+async def test_smoke_chat_subscribe_proxy_requires_token():
+    """chat: subscribe-proxy закрыт — без X-Internal-Token ответ 401."""
+    app = create_chat()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://svc.test"
+    ) as http:
+        resp = await http.post(
+            "/api/chats/subscribe-proxy",
+            json={"client": "c", "channel": "user:1", "user": "user:1"},
+        )
+    assert resp.status_code == 401
+
+
+async def test_smoke_catalog_agent_gets_chat_repository():
+    """catalog (micro): gateway ведёт POST /api/listings/{id}/agent в catalog
+    (routing.py), а RequestAgent там обязан получить ChatRepository —
+    общий контейнер биндит его во все сервисы; без бинда заявки на агента
+    молча теряли бы deal-тред (chats=None → только лид)."""
+    from app.application.leads.deals import RequestAgent
+
+    app = create_catalog()
+    container = install_test_container(app, session=FakeSession(), redis=FakeRedis())
+    try:
+        async with container() as request_scope:
+            use_case = await request_scope.get(RequestAgent)
+        assert use_case._chats is not None
+    finally:
+        await container.close()

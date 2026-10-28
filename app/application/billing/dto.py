@@ -23,7 +23,7 @@ class PaymentDraft:
 
 @dataclass(frozen=True, slots=True)
 class PaymentRecord:
-    """Снимок платежа для активации подписки."""
+    """Снимок платежа для активации подписки/продления размещения."""
 
     id: int
     user_id: int
@@ -31,6 +31,10 @@ class PaymentRecord:
     tier: str | None
     period_days: int | None
     amount: Decimal
+    # Вид платежа (миграция 0027): подписка или продление размещения лота
+    # рынка. Для старых строк — дефолт 'subscription'.
+    kind: str = "subscription"
+    listing_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +60,13 @@ class SubscriptionSnapshot:
     ai_daily_limit: int | None
     instant: bool
     prices: dict[str, int]
+    # Прод-экономика (ревизия 2026-10): каденс дайджеста, доступ к чекам,
+    # отправка агента, лимит разборов цены и его окно.
+    digest: str = "weekly"
+    inspection: bool = False
+    agent: bool = False
+    analyses_limit: int | None = None
+    analyses_window_days: int = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,11 +80,18 @@ class UserSubscriptionView:
 
 @dataclass(frozen=True, slots=True)
 class PaymentConfirmation:
-    """Итог `successful_payment`: подписка активна до `subscription_until`."""
+    """Итог `successful_payment`: подписка активна до `subscription_until`.
+
+    Для kind='placement' (продление размещения лота рынка) `tier=None`,
+    дедлайн — в `placement_paid_until`, предмет — в `listing_id`.
+    """
 
     activated: bool
     tier: str | None
     subscription_until: datetime | None
+    kind: str = "subscription"
+    listing_id: int | None = None
+    placement_paid_until: datetime | None = None
 
 
 # Валюта и провайдер Telegram Stars (контракт платёжного провайдера).

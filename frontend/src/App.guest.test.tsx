@@ -4,7 +4,7 @@
  * initData нет → автоматический гостевой вход → лента и демо-баннер;
  * /login доступен гостю; Personal-функции ведут к полноценному входу.
  */
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Моки API-слоя (App и экраны импортируют только эти два модуля) ---
@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   clearGuest: vi.fn(),
   api: vi.fn(),
   getAccessToken: vi.fn((): string | null => null),
+  isTelegramContext: vi.fn((): boolean => true),
 }));
 
 vi.mock("./api/auth", () => ({
@@ -24,7 +25,7 @@ vi.mock("./api/auth", () => ({
   isGuest: mocks.isGuest,
   clearGuest: mocks.clearGuest,
   getWebApp: () => null,
-  isTelegramContext: () => false,
+  isTelegramContext: mocks.isTelegramContext,
   haptic: vi.fn(),
   logout: vi.fn(),
   tgUser: () => null,
@@ -35,8 +36,10 @@ vi.mock("./api/auth", () => ({
 vi.mock("./api/client", () => ({
   api: mocks.api,
   getAccessToken: mocks.getAccessToken,
+  getRefreshToken: vi.fn(),
   setTokens: vi.fn(),
   clearTokens: vi.fn(),
+  setSessionExpiredHandler: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -85,13 +88,24 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Тесты проверяют Mini App: лендинг на «/» (NAV-V2) показывается только
+  // в браузере — мокаем контекст Telegram, как в реальном Mini App.
+  mocks.isTelegramContext.mockReturnValue(true);
   mocks.getAccessToken.mockReturnValue(null);
   mocks.isGuest.mockReturnValue(true);
   mocks.authorize.mockResolvedValue(null); // вне Telegram
   mocks.guestLogin.mockResolvedValue({ access_token: "a", refresh_token: "r", user: USER });
   mocks.api.mockImplementation(async (path: string) => {
-    if (path.startsWith("/listings")) return { total: 1, items: [LISTING] };
+    if (path.startsWith("/listings?")) return { total: 1, items: [LISTING] };
+    // карточка лота (стек поверх табов): другой автомобиль, чтобы тексты
+    // карточки и скрытой ленты не конфликтовали в запросах testing-library
+    if (path.startsWith("/listings/undefined"))
+      throw new Error("422: id must be a number (регрессия useParams)");
+    if (path.startsWith("/listings/") && path.endsWith("/inspection")) return null;
+    if (path.startsWith("/listings/"))
+      return { ...LISTING, make: "Hyundai", model: "Sonata" };
     if (path === "/filters") return [];
+    if (path === "/favorites") return [];
     if (path === "/me") return USER;
     if (path === "/me/onboarded") return undefined;
     return undefined;
@@ -100,6 +114,8 @@ beforeEach(() => {
   vi.stubGlobal("IntersectionObserver", class {
     observe() {} unobserve() {} disconnect() {}
   });
+  // jsdom не умеет scrollIntoView (AiSearch: автоскролл чата к последнему сообщению)
+  Element.prototype.scrollIntoView = () => undefined;
   // jsdom не умеет matchMedia (useIsDesktop)
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -147,5 +163,111 @@ describe("гостевой режим сайта", () => {
     await waitFor(() => screen.getByText(/Kia/));
     expect(mocks.guestLogin).not.toHaveBeenCalled();
     expect(screen.queryByText(/Демо без регистрации/)).toBeNull();
+  });
+});
+
+describe("keep-alive таб-экранов", () => {
+  /** Запросы именно ленты (не карточки лота /listings/:id). */
+  const listingsCalls = () =>
+    mocks.api.mock.calls.filter(([p]) => String(p).startsWith("/listings?")).length;
+
+  /** Ждём ленту и возвращаем мобильный таббар (кликабельные вкладки). */
+  async function renderWithFeed(): Promise<HTMLElement> {
+    render(<App />);
+    await waitFor(() => expect(screen.getByText(/Kia/)).toBeTruthy());
+    const tabbar = document.querySelector(".app-tabbar") as HTMLElement;
+    expect(tabbar).toBeTruthy();
+    return tabbar;
+  }
+
+  it("переключение вкладок прячет ленту классом, но не размонтирует её", async () => {
+    const tabbar = await renderWithFeed();
+    const before = listingsCalls();
+    const kiaCard = screen.getByText(/Kia/);
+
+    within(tabbar).getByText("Авто").click();
+    // Авто смонтировался (сегменты Избранное/История); лента скрыта
+    // .keepalive-hidden, но в DOM (keep-alive внутри Главной)
+    await waitFor(() => expect(screen.getByTestId("auto-screen")).toBeTruthy());
+    expect(screen.getByText(/Kia/).closest(".keepalive-hidden")).not.toBeNull();
+
+    within(tabbar).getByText("Главная").click();
+    await waitFor(() =>
+      expect(screen.getByText(/Kia/).closest(".keepalive-hidden")).toBeNull(),
+    );
+    // тот же DOM-узел и ноль новых запросов — ремаунта ленты не было (keep-alive)
+    expect(screen.getByText(/Kia/)).toBe(kiaCard);
+    expect(listingsCalls()).toBe(before);
+  });
+
+  it("карточка лота — keep-alive: смена вкладки прячет её, но не размонтирует", async () => {
+    const tabbar = await renderWithFeed();
+    const before = listingsCalls();
+
+    // deep-link-стиль: открываем /listing/7 (ListingKeepAlive)
+    window.history.pushState(null, "", "/listing/7");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() =>
+      expect(document.querySelector('[class*="listing-page"]')).not.toBeNull(),
+    );
+    expect(screen.getByText(/Kia/).closest(".keepalive-hidden")).not.toBeNull();
+
+    // уходим на другую вкладку: карточка скрыта, но ЖИВА (keep-alive)
+    within(tabbar).getByText("Профиль").click();
+    await waitFor(() =>
+      expect(screen.getByText("Подписка")).toBeTruthy(),
+    );
+    await waitFor(() => {
+      const page = document.querySelector('[class*="listing-page"]');
+      expect(page?.closest(".keepalive-hidden")).not.toBeNull();
+    });
+
+    // на табе-источнике (Главная) — плашка возврата к живой карточке
+    within(tabbar).getByText("Главная").click();
+    await waitFor(() =>
+      expect(screen.getByText("← Вернуться к карточке")).toBeTruthy(),
+    );
+    // клик по плашке возвращает карточку (тот же DOM-узел — без ремаунта)
+    screen.getByText("← Вернуться к карточке").click();
+    await waitFor(() =>
+      expect(document.querySelector('[class*="listing-page"]')?.closest(".keepalive-hidden")).toBeNull(),
+    );
+    // лента не перезапрашивалась всё это время
+    expect(listingsCalls()).toBe(before);
+  });
+});
+
+describe("персистентная сессия (F5 не разлогинивает)", () => {
+  it("с токенами из прошлого запуска guestLogin повторно не вызывается", async () => {
+    mocks.getAccessToken.mockReturnValue("stale-jwt");
+    render(<App />);
+    // лента грузится на старых токенах (авто-refresh включится при 401)
+    await waitFor(() => expect(screen.getByText(/Kia/)).toBeTruthy());
+    expect(mocks.guestLogin).not.toHaveBeenCalled();
+    expect(mocks.authorize).toHaveBeenCalledOnce();
+  });
+});
+
+describe("маршрут /chats (таб «Чаты», NAV-V2)", () => {
+  it("гость: /chats рендерится заглушкой «Войдите», список не запрашивается", async () => {
+    window.history.pushState(null, "", "/chats");
+    render(<App />);
+    // конверт-экран смонтировался (KEEPALIVE_TABS) — заглушка гостя
+    await waitFor(() => expect(screen.getByText(/после входа/i)).toBeTruthy());
+    // «Войти» есть и в гостевом баннере — проверяем ссылку заглушки чатов
+    expect(
+      screen
+        .getAllByText("Войти")
+        .some((el) => el.getAttribute("href") === "/login"),
+    ).toBe(true);
+    expect(mocks.api.mock.calls.some(([p]) => p === "/chats")).toBe(false);
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("мусорный путь не редиректит /chats, а карточка лота остаётся стеком", async () => {
+    window.history.pushState(null, "", "/chats/t-uuid");
+    render(<App />);
+    await waitFor(() => expect(screen.getByText(/после входа/i)).toBeTruthy());
+    window.history.replaceState(null, "", "/");
   });
 });

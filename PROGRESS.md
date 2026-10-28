@@ -1,5 +1,665 @@
 
 
+## 97. Документация и чистка репозитория (2026-10-28)
+
+- **Запрос:** переписать доки/README на актуальные, удалить временные
+  ТЗ и мусор; документация должна быть максимально актуальной.
+- **Удалено:** 30 tracked-мусорных файлов (логи парс-расследований
+  _mdsl/_insp/_res/_fem, shots/), untracked-остатки; PLAN.md,
+  REVIEW.md (устарели), docs/UIUX_TZ.md, docs/REDESIGN/ (12 рабочих
+  спеки волн — суть перенесена в актуальные доки), docs/REFACTOR/,
+  .zwork/, скрипты-пробы. .gitignore закрепил паттерны (_*.log и пр.).
+- **README.md** — переписан: актуальные возможности (Mini App/рынок/
+  чаты/переговорные/AI-контур/партнёрский кабинет/админка), ASCII-
+  схема архитектуры с Centrifugo/S3, поэтапный быстрый старт,
+  таблица документации.
+- **docs/ переписаны (9):** ARCHITECTURE (слои, личный канал, данные,
+  degradation, frontend), API (полный актуальный реестр эндпоинтов
+  юзер/партнёр/админ), SOURCES (адаптеры, S3-зеркало с порядком,
+  stale-cleanup, перевод), AI (анализ/история/описания/quality/
+  summary/RAG-бот), MONETIZATION (таблица тарифов, размещения+пакеты,
+  lifecycle-модерация, CPL, идемпотентность Stars), TESTING (структура
+  ~1470 тестов, флэйк-RAG), SECURITY (гейты/маскировка/SSRF/uploads),
+  RUNBOOK (DLQ/circuit breaker/centrifugo/stale-образы), ADR (реестр
+  12 решений). OPERATIONS дополнен (ступенчатые профили, актуальные
+  env-ключи рынка/centrifugo/S3; фикс пути бота app.transport.bot).
+- **TECHDEBT.md** — сжат до актуальных долгов (мобильный UX, vision-
+  дефекты, гео-блок диаграмм, typing-user_id и пр.).
+- **Проверка:** pytest 1473/7skip (test_rag — известный живой-RAG
+  флэйк, изолированно 27/27), vitest 547/547; git-status чист от
+  мусора (286 позиций — только легитимные правки волн 5-12).
+
+
+## 96. ИИ доверия: отчёт истории, генерация описаний, качество, выжимки (2026-10-28)
+
+- **Запрос (приоритеты):** MVP = суммаризатор истории из Кореи (лот →
+  отчёт на русском) — калькулятор «под ключ» и диалоговый поиск УЖЕ в
+  проде; далее генерация описаний + «Качество объявления»; суммаризация
+  диалогов для менеджеров. Спека: docs/REDESIGN/12-ai-trust.md.
+- **B12:** GET /api/listings/{id}/history-report — факт-парсер ДТП по
+  РЕАЛЬНЫМ данным 271 отчёта БД (два семейства: канонический русский
+  адаптера + машиннопереведённые «accident history/DTA/DTS»; счётчик,
+  вина, последнее ДТП+выплата, владельцы, регистрация, Clean-флаг) +
+  LLM-вывод (сбой → только факты), кэш 24ч. POST /api/market/
+  description — генерация описания из полей (гварды: только факты,
+  RU, 400-800 зн.; free 5/день → 429). listing_quality — чистая функция
+  (фото/описание/цена±20% медианы → score+tips) в my-lots/create.
+  SummarizeThread — выжимка ≤600 зн. последних 50 сообщений, кэш 1ч;
+  админ + партнёрские роуты. Тесты: history 5, description 4, quality
+  7, summary 4 (итого pytest 1473/7skip, test_rag — живой RAG вместо
+  стаба — экологический флейк).
+- **F12 (547 vitest):** PDP «🤖 Отчёт истории» (кнопка → факты +
+  «Вывод» + Обновить; 404-строка; гость скрыт); SellCar шаг 3 —
+  «✨ Сгенерировать описание» (photos_count по done-фото, confirm при
+  повторе, 429-тост) + live «Качество объявления» чек-лист; Profile
+  my-lots — пилюля «Качество: N/100» (deal/warn/danger) + tip;
+  «📄 Выжимка» в AdminChatRoom и PartnerChatRoom (обновляемая).
+- **Живой смоук:** history-report 200 (факты: машина, ДТП-блок,
+  mileage_confirmed, owner_history; LLM-вывод «Palisade 2023,
+  пробег 15 000 км подтверждён...»); description 200 («Продаётся Kia
+  Sorento 2022...»); quality {score 50, tips}; summary 200 после
+  пересборки admin (образ был стейл — routes без summary).
+- Деплой: catalog/chat/partners/miniapp/admin пересобраны.
+
+
+## 95. Резильентность: поэтапный деплой + S3-зеркалирование фото (2026-10-28)
+
+- **Запрос:** graceful degradation, ядро независимо от периферии,
+  постепенное развёртывание; фото/инфо объявлений при парсинге — в S3
+  с гарантией порядка; при удалении с источника — чистить хранилища.
+  Спека: docs/REDESIGN/11-resilience-s3-ingest.md.
+- **Ступени compose** (OPERATIONS.md «Поэтапное развёртывание»):
+  base(postgres+redis) → core(backend-монолит+bot+miniapp) →
+  storage(minio) → workers(rabbitmq+fetch/send+translate) →
+  realtime(centrifugo+chat) → ai(dialog+qdrant+rag) → micro(gateway+8).
+  depends_on rabbitmq/minio → required:false (ядро стартует без них).
+  Деградация уже в коде: centrifugo fire-and-forget + поллинг-фоллбэк,
+  translate → оригинал, RAG→LLM→фолбэк, S3 → 503 photos_unavailable.
+- **Зеркалирование фото (11 §3):** PhotosStorage.mirror_photo/has_mirror/
+  delete_lot_mirror — ключ mirror/{source}/{source_id}/{NNN}.jpg
+  (индекс = порядок); фоновая задача mirror_photos_task (батч 40 лотов,
+  первые 5 фото; частичный сбой → откат зеркала, порядок не мешаем;
+  успех → listings.images = наши S3-URL). Триггер из fetch при
+  new|updated. job_timeout очереди 120→360 (encar с чеками+NLLB не
+  влезал — DLQ 96 задач, вычищен). Живой прогон: kcar mirrored=29,
+  images заменены на market-photos/mirror/kcar/{id}/NNN.jpg.
+- **Очистка (11 §4):** stale_check_job → gone_external_rows (только
+  внешние, owner-лоты не трогаем) → delete_lot_mirror + raw_key
+  delete (best-effort, ошибки не роняют stale).
+- **Тесты:** test_s3_mirror.py (4: полный флоу/skip/disabled/stale-
+  purge); тесты фронт-зеркал? нет — бэк. pytest 1451/7skip.
+- **Осталось (R3, прервано usage-лимитом агентов):** мобильный
+  UX-полиш мини-аппа и партнёрки (Фиттс/Хик/формы) — агенты упали на
+  лимите, задача переоткрыта; frontend витесты 525/525 на текущем.
+
+
+## 94. Жизненный цикл объявления: автомат статусов + модерация + версии (2026-10-28)
+
+- **Запрос:** полный lifecycle от черновика до архива: конечный автомат,
+  гибридная модерация (авто-правила + risk score + ручная очередь),
+  версия-на-модерации при редактировании (старая видна), real-time
+  статусы через личный канал, UX со статусами/причинами/исправлением.
+  Спека: docs/REDESIGN/10-listing-lifecycle.md.
+- **B:** миграция 0030 (status CHECK 6 состояний + backfill: внешние/
+  живые owner → accepted, needs_payment → draft; rejected_reason,
+  moderation_payload, pending_patch + индексы очередей). Общий модуль
+  contact-детекта app/domain/shared/contacts.py (chat/privacy
+  переиспользует). Модерация screen_lot: contacts/forbidden_words
+  (hard reject), price_outlier/short_desc/new_user/duplicate (risk),
+  пороги reject≥80|hard / manual≥30; партнёры авто-accept + 10% sampling.
+  Use-cases: Create(draft|submit) → SubmitLot (синхронный скрининг →
+  accepted/manual/rejected; placement-решение общее с create —
+  needs_payment не блокирует модерацию), UpdateLot (draft/rejected
+  прямые правки; accepted → pending_patch; прочие 409), админ-очереди
+  moderate/patch (approve/reject/patch_accept/patch_reject) с
+  применением патча и причинами. События {type:'listing_status'} в
+  личный канал owner'а/партнёра после commit. Лента/PDP: только
+  accepted; экспиратор → status='expired' (+оплата возвращает);
+  снятие → archived. Словарь forbidden слов в конфиге (17 RU/EN).
+- **F:** SellCar — «Сохранить черновик»/«Отправить на публикацию»,
+  ветки accepted/needs_payment/moderation/rejected; edit-режим
+  ?edit={id} (предзаполнение, PATCH для accepted с баннером старой
+  версии, PATCH+submit для draft/rejected); «Мои объявления»:
+  lifecycle-пилюли (Черновик/На проверке/Одобрено—оплата/Опубликовано/
+  Отклонено+причина+violations/Правки на проверке/Снято/Истёк),
+  CTA Продолжить/Исправить/Редактировать/Оплатить/Восстановить;
+  live: chatStore-ветка listing_status → тосты + refresh my-lots
+  (useListingStatus).
+- **Живой смоук:** draft создан (в my-lots, в ленте нет) → submit →
+  accepted (needs_payment из-за included-лота — «Одобрено, ждёт
+  оплаты», монетизация не блокирует модерацию) → лот с телефоном в
+  описании → rejected contacts_in_text с причиной. Backfill: 382 лота
+  accepted.
+- **Итог:** pytest 1447/7skip (test_rag — преждесуществующий флак),
+  vitest 525/525, ruff чист; chat/catalog/admin/miniapp/partners/
+  worker_send пересобраны. Долги: выборочная проверка (sampling) не
+  имеет админ-приоритизации; price_outlier по avg (не медиане) для
+  редких моделей шумноват; патчи фото: новые грузятся сразу (могут
+  осиротеть при reject патча).
+
+
+## 93. Личный канал Centrifugo + единый стор + двухколоночный UI (2026-10-28)
+
+- **Запрос:** эталонный паттерн Centrifugo (GrandChat): один личный
+  канал на пользователя вместо «канал на диалог», бэк — дирижёр, UI —
+  виджеты над единым состоянием. Спека: docs/REDESIGN/09.
+- **B (бэк):** ParticipantEventPublisher.publish_to_participants —
+  единая точка: событие (message/read/typing/system/claim) уходит в
+  личные каналы ВСЕХ участников (user:{tg}/partner:{id}, уникально,
+  exclude отправителя); все прежние thread:{id}-публикации заменены;
+  message-пейлоад = полный MessageView; POST typing (user+partner,
+  rate 1/2с, 429 typing_rate_limit); GET online?ids= — presence
+  личных каналов через Centrifugo HTTP API (параллельно, ≤50).
+- **F (фронт):** lib/chatStore — единый стор (треды/unread/typing
+  TTL/lot_expired, авто-read открытого, pendingUnread+throttle 10с на
+  неизвестный тред) + транспорт подписывается ТОЛЬКО на user:{uid};
+  поллинг-фоллбэк: раз в 5с список + after_id открытого; typing-отправка
+  debounce 1.5с; двухколоночный десктоп ≥900px (сайдбар 340px + комната,
+  выбор без ухода, активная строка, «Выберите диалог»); онлайн-точки
+  (полл 30с, 1:1 в шапке, group в чипах); ChatBadge live-unread.
+- **P0-находка при смоук-тесте:** ws-подписка на user:{id} падала
+  «unknown channel» — namespace user/partner/thread не был объявлен в
+  конфиге Centrifugo (v6: без namespace-опций каналы с двоеточием
+  запрещены; ФРОНТ ВСЁ ВРЕМЯ ЖИЛ НА ПОЛЛИНГ-ФОЛЛБЭКЕ). Фикс конфига:
+  namespaces user/partner/thread {subscribe_proxy_enabled, presence}.
+- **Живой смоук (ws):** подписка user:111111 → сообщение от u2
+  (send 201) пришло в личный канал {type:message, thread_id, body}
+  < 1с; typing 200 пришёл {type:typing}; повтор typing 429;
+  online?ids=111111 при подключённом клиенте → [111111] (presence).
+- **Итог:** pytest 1435/7skip, vitest 504/504, ruff чист;
+  chat/partners/miniapp/worker_send пересобраны. NOTE: v6-синтаксис
+  namespace: флаг subscribe_proxy_enabled + presence, вложенный
+  proxy-ключ невалиден (warn unknown key) — зафиксировано.
+
+
+## 92. Говернананс переговорных: роли, приватность, антифрод, аудит (2026-10-28)
+
+- **Решение владельца:** переговорная до 5 — норм, если привязана к
+  сделке и с говернансом (роли, приватность, антифрод, аудит,
+  уведомления/выход). Спека: docs/REDESIGN/08-group-governance.md.
+- **B1:** миграция 0029 (participants role/muted, threads.closed_at,
+  chat_events, chat_reports + partial unique). Привязка: group только
+  по листингу (409 group_needs_listing), title-автоген. Роли: owner/
+  member; приглашает только owner (403), кик owner→member, owner-leave
+  только последним (409 owner_must_archive), пустая комната закрывается;
+  архив → read-only (403 thread_archived), идемпотентен. Приватность:
+  mask_contacts (телефоны ≥9 цифр с +/8; wa.me/whatsapp; t.me кроме
+  нашего бота и share) в seller/deal/group (support не трогаем) —
+  до валидации длины; 16 юнит-тестов паттерна. Антифрод: rate-limit
+  20/мин (user+partner), жалобы (4 причины, идемпотент partial-unique),
+  админ: список/PATCH/kick любого. Аудит: chat_events на все операции,
+  GET admin events; retention 90д — скрытие фильтром (без cron).
+  Mute: свои уведомления, ThreadOut.muted/role + participants[].role
+  (три коррелированных подзапроса в списке тредов).
+- **F1:** создание переговорной — лот обязателен (заглушка без истории
+  просмотров); комната: меню ⋯ (mute/жалоба/покинуть/архивировать,
+  owner-подсказка), чипы участников с короной, кик по тапу (confirm),
+  панель жалобы с reason-чипами, confirm-диалоги, плашка «Архив»
+  вместо композера; список: секция «Архив», muted 🔕 без счётчика;
+  бейдж конверта не считает muted; партнёрский минимум (mute/leave).
+- **Живой смоук:** 409 без лота; group по Palisade → title-автоген в
+  БД; сообщение «+7 999… wa.me/…» → оба замаскированы; join вторым →
+  роли [owner, member]; mute 200; жалоба 201/повтор 200; кик 200;
+  архив 200; сообщение после → 403.
+- **Итог:** pytest 1422/7skip, vitest 470/470, ruff чист; chat/miniapp/
+  partners пересобраны. Долги: POST-ответ создания group не отдаёт
+  title (косметика), typing-событие без user_id (наследие), маска
+  может зацепить длинные заказ-номера с 8-префиксом (задокументировано
+  в тестах).
+
+
+## 91. Волна 07: продажа v2, переговорные, партнёрские чеки «как в Корее» (2026-10-27)
+
+- **Запрос:** переработать добавление машины в продажу и чаты («ущербные»);
+  UI/UX чатов (меню: диалоги + переговорные до 5 человек); партнёрам —
+  создавать чеки осмотра и историю машины как в Корее.
+- **Спека:** docs/REDESIGN/07-sell-chats-partner-inspection.md (оркестратор).
+- **B1:** миграция 0028 (type+'group', chat title, listings.owner_history);
+  POST /api/market/photos — multipart → MinIO bucket market-photos
+  (public-read policy, сниф магики, 8MB, uuid-ключи); group-чаты
+  (create/invite-код redis 7д/join с advisory-lock и лимитом 5,
+  participants с именами в ThreadOut — только для group); партнёрские
+  GET/PUT inspection (InspectionReportIn reuse, source='partner',
+  bypass тариф-гейта только владельцу) + PUT history (≤50 событий).
+- **F1:** SellCar v2 — визард 3 шага (Авто→Фото→Цена), drag&drop с
+  мгновенной загрузкой и прогрессом, черновик в sessionStorage, счётчик
+  n/10; чаты v2 — сегмент «Диалоги | Переговорные», создание переговорной
+  (title + лот из истории просмотров), инвайт-код с копированием, join по
+  коду (409 «заполнена»), group-шапка с участниками «Вы, Имя · 3/5»,
+  имя автора над пузырями; UX: скелетоны, дата-разделители, inline-ошибки
+  с «Повторить», safe-area композера, typing с именем.
+- **F2:** раздел «Чеки и история» в кабинете — диаграммы Encar с
+  hotspot-зонами (карта координат из encar.py), пины повреждений
+  (тип+заметка), чек-лист 12 агрегатов × статусы, шапка чека
+  (центр/дата/оценка), история-таймлайн CRUD; индикатор «чек есть/нет»
+  на списке лотов.
+- **Деплой-фиксы оркестратора (живые):** MinIO policy без Version →
+  MalformedPolicy (добавлена), gateway /api/partner/listings → chat
+  (404 в partners), marker_subquery без correlate → декартов JOIN в
+  GET /api/chats (more than one row) — correlate(ChatThread).
+- **Ревизор:** 503 photos_unavailable вместо 500 при лежащем S3, ранний
+  отсев размера по UploadFile.size, идемпотентный двойной join под
+  advisory-lock, PDP-блок «История машины» (таймлайн из owner_history),
+  снос мёртвой копии policy.
+- **Живой смоук:** фото PNG → 201 → public-URL 200; group create →
+  invite CSJ9CD → join юзером 222222 → 2 участника в GET /api/chats;
+  partner inspection PUT 200, history PUT 200 → ListingOut 2 события.
+- **Итог:** pytest 1393/7skip, vitest 444/444, ruff чист; chat/catalog/
+  partners/miniapp пересобраны, стек healthy. Долги: encar-диаграммы
+  тянутся с encar.com (гео-блок РФ — завендорить в MinIO/assets),
+  осиротевшие фото без cleanup, typing-событие без user_id.
+
+
+## 90. Разворот рынка: владельцы, размещения, чаты user-user (2026-10-27)
+
+- **Запрос владельца:** чаты только после входа; «сообщения к источнику
+  парсера» не имеют экономического смысла; рынок = единая абстракция лотов
+  партнёров; размещения объявлений пользователями (free-период → символика
+  20★/нед; включённый лот на платных; пакеты партнёрам); чаты user↔user и
+  user↔partner.
+- **Спека:** docs/REDESIGN/06-market-user-listings.md (писал оркестратор;
+  агент падал по DNS-сбоям — дважды перезапуск, частичные правки
+  подхватывались).
+- **B1 (бэк):** миграция 0027 (owner-колонки listings + слоты партнёра +
+  закрытие старых операторских seller-тредов); POST /api/market/lots
+  (free 7д → needs_payment, включённый для платных, квота 3 доп.),
+  my-lots/extend (Stars kind='placement', вебхук идемпотентен),
+  пакеты партнёров со баланса (атомарные UPDATE…WHERE инварианты),
+  partner/market/lots со слотами; лента source=market → owner-based
+  (JOIN витрины убран); чаты: гость 403 на всех /api/chats* (вкл.
+  ws-token), seller-chat: внешний лот 409 market_lot_required,
+  owner=user → тред двух юзеров (participant владельца);
+  экспиратор cron 03:40 (деактивация + publish lot_expired,
+  included-даунгрейд +7д).
+- **F1 (фронт):** экран «Продать авто» (+FAB на ленте), «Мои объявления»
+  в профиле (пилюли статусов, продление 1/4 нед через openInvoice,
+  снятие), бейджи «🏪 Салон»/«👤 Частник», PDP «От владельца» и кнопка
+  продавца только для owner-лотов, партнёрский раздел «Объявления»
+  (пакеты/размещение/снятие), конверт чатов скрыт гостю. 383 vitest.
+- **Ревизор (P0!):** 1) оплата размещений была СЛОМАНА — pre_checkout
+  бота принимал только sub:, plc: отклонялся (Telegram не давал платить);
+  whitelist+сообщение «Объявление продлено»; 2) дыра бесконечных
+  free-недель ротацией (снять→новый лот→новые 7д) — кулдаун 30д
+  (market_free_cooldown_days по first_seen_at owner-лотов); 3)
+  контракт-дрейв фронта (id/photos vs listing_id/images и т.п.) —
+  нормализовано; 4) гонка openInvoice vs вебхук — bounded-поллинг PDP.
+- **Живой смоук:** юзер business создал лот (included, feed owner=user),
+  seller-chat self-тред 201, гость ws-token 403; партнёр: пакеты 10/50/
+  200 (500/1800/5000₽), покупка со баланса (slots_free=10), размещение
+  Palisade (slot), market feed = [partner Palisade, user Sportage];
+  внешний encar seller-chat 409 market_lot_required.
+- **Итог:** pytest 1360 passed / 7 skipped (test_rag — флейк под
+  нагрузкой, изолированно зелёный), vitest 383/383, ruff чист;
+  chat/gateway/catalog/partners/bot/miniapp/worker_send пересобраны.
+  Риски ревизора — ЗАКРЫТЫ (2026-10-27, вечер): условный mark_paid
+  (UPDATE…WHERE status!='paid', rowcount=0 → replay-ответ; подписки и
+  размещения), advisory-lock pg_advisory_xact_lock на создание user-лота
+  (гонка двойного POST), слоты партнёра в /me (проброс PartnerAccountState
+  → Overview → /me; попутно найдено: ORM-модель PartnerAccount не имела
+  колонок-слотов — добавлены), «included»-пилюля для живого лота платного
+  тарифа (free_until от даунгрейда не показывает «истёк»); оживление
+  снятого лота оплатой — осознанно оставлено (юзер заплатил).
+- **Операторский контур (субагент):** POST /api/chats/{id}/summon-operator
+  («Позвать человека» теперь реален: bot_paused + system-msg + publish;
+  кнопка ChatRoom зовёт бэк, подтверждение по сокету); операторские API
+  /api/admin/chats* (X-Internal-Token): список support-тредов (paused-
+  фильтр, сниппеты юзера), unread-count, сообщения от operator (repo сам
+  ставит/снимает bot_paused); админ-фронт «Поддержка» (поллинг 30с,
+  AdminChatRoom с markdown, поллинг 10с). Живой смоук: summon 200 →
+  оператор ответил → юзер увидел «Оператор на связи!» → unread 0.
+- **Итог:** pytest 1370 passed / 7 skipped (test_rag — флейк живого RAG,
+  изолированно зелёный), vitest 392/392; chat/gateway/admin/partners/bot/
+  miniapp/worker_send пересобраны, 21 контейнер healthy.
+
+
+## 89. Чаты, поддержка и внутренний рынок: Centrifugo-контур (2026-10-26)
+
+- **Запрос:** меню поддержки (RAG+чаты), чаты с продавцами, внутренний
+  рынок с услугой «агент на сделку» в чатах, стек Centrifugo, Markdown
+  и превью ссылок (внутр./внешн.), встроить в оба контура.
+- **Спека:** docs/REDESIGN/05-chats-marketplace.md (написана
+  оркестратором — агенты дважды падали по сети на генерации).
+- **B1 (инфра+API):** модели ChatThread/ChatMessage/ChatParticipant/
+  PartnerOffer (миграция 0026, применена); REST: треды support/seller/
+  deal, сообщения (before/after-пагинация), read-маркеры, ws-token,
+  subscribe-proxy (по sub из JWT centrifugo), link-preview (internal
+  карточка + OG с SSRF: приватные IP/редиректы/лимит 512KB/кэш 24ч);
+  партнёрские зеркала + витрина offers CRUD; сервис chat (8107) +
+  gateway-маршруты; centrifugo v6 (compose, конфиг-шаблон с подстановкой
+  env — JSON env не умеет; тег v6, т.к. v6.12.0 блокирован зеркалом
+  registry). Seller-chat: POST /api/chats/seller/{listing_id}.
+  Мои доводки B1: func.literal→sqlalchemy literal, семантика пагинации
+  «ближайшие к курсору», unread включает system, фикс тестов.
+- **B2 (интеграции):** RAG-бот поддержки (SessionSupportBotRunner —
+  собственная сессия, RAG→LLM-фолбэк с историей треда, bot_paused,
+  free 15/24ч → апселл-сообщение, typing→publish до генерации);
+  POST /agent создаёт deal-тред + system-msg (reuse по lead_id);
+  ClaimLead привязывает partner_id треда + «агент подключился»;
+  лента: source=market (JOIN partner_offers) + has_market в карточках.
+- **F1/F2 (фронты):** ядро — transport (centrifuge-js + поллинг-fallback
+  5с, единые payload'ы), markdown (marked+DOMPurify), internal-карточки
+  ссылок /listing/N, OG-превью внешних; экран «Чаты» (список+комната,
+  ✓/✓✓, typing), конверт-бейдж (сайдбар/моб-флоат, poll 60с + личный
+  канал), PDP «Спросить продавца» и «Агент» ведут в треды, чипс
+  «🏪 Рынок» в ленте; партнёрский кабинет: разделы «Чаты» (seller/deal,
+  партнёр справа) и «Витрина» (добавить/убрать лот). Мои доводки F2:
+  тернарник api.ts, мок-дефолты списков, ассерты витрины/OG.
+- **Ревизор (P0-находки):** мини-апп-чат был неработоспособен против
+  реального бэка (плоские centrifugo-payload и REST-ответы vs ожидание
+  конвертов — нормализаторы добавлены); ChatBadge-эффект перевзводится
+  по autobot:auth; prod-guard секретов centrifugo (change-me запрещён);
+  агент-кнопка ведёт в deal-тред; smoke: RequestAgent в catalog-профиле
+  получает chat-репозиторий (общий DI-контейнер).
+- **Деплой-доводка:** Dockerfile + services/chat (контейнер падал
+  ModuleNotFound); конфиг-шаблон centrifugo (env-подстановка, слушает
+  8000, публикация 8008→8000, subscribe-proxy→gateway); CENTRIFUGO_
+  PUBLIC_URL для браузера (ws-token отдаёт публичный, publish ходит на
+  внутренний); rag_api force-recreate (API_TOKEN не подхватился после
+  docker start); healthcheck «любой HTTP-ответ = жив» (GET /health в
+  v6.10 нет).
+- **Живые смоуки:** ws-token (sub=user:111111), support-тред: бот
+  отвечает (RAG-пусто → LLM по делу: «топ корейских моделей»), RAG-ask
+  OK после рекреации; GET /api/chats отдаёт тред с unread; centrifugo
+  /api info OK; все контейнеры healthy.
+- **Итог:** pytest 1338 passed / 7 skipped; vitest 345/345; ruff чист.
+  Долги (от ревизора): TOCTOU DNS-rebinding в OG, гость может писать в
+  support через API (15/день на сессию), контур операторов (вклинивание
+  человека) без HTTP-путей — ОСТАЮТСЯ. Закрыто на следующий день:
+  «Отметить сделкой» из deal-треда партнёра (lead_id/lead_status в
+  ThreadOut + CTA → feedback deal), идемпотентность POST /messages
+  (Idempotency-Key, Redis SETNX 24ч, replay 200 без publish; фронт
+  шлёт uuid-ключ), бейдж «🏪 Рынок» на карточках ленты.
+- **Browser-use визуальный проход (26.10):** гость-заглушка Чатов;
+  юзер: конверт-бейдж «4», список с сниппетом бота, комната поддержки
+  с отрендеренным Markdown (strong/списки) и ✓; лента: чипс Рынка
+  (после оффера партнёра — 1 авто Santa Fe MX5); PDP витринного лота:
+  галерея 40 фото «1/40 +34», правая колонка, все кнопки; живой
+  end-to-end: «Спросить продавца» → тред создан → сообщение ✓ →
+  партнёр видит unread=2 в кабинете.
+
+
+## 88. Сведение контуров: контакт партнёра в мини-аппе + карусели + полиш (2026-10-25)
+
+- **Запрос:** «свести пользовательский и партнёрский контуры — нет
+  механик взаимодействия/монетизации»; «анализ вправо на PDP как было»;
+  отдельные субагенты на правки вёрстки и на галерею/карточки (скролл
+  только на ПК, индикаторы, лимит 5 фото в ленте).
+- **Контакт партнёра (монетизация CPL):** POST /api/listings/{id}/contact
+  — любой тариф: лид source='web' падает в пул партнёров; rate-гейт 24ч
+  (sent_log kind='contact', ON CONFLICT DO UPDATE — окно скользит);
+  идемпотентность contact:{user}:{listing}:{date} (partial unique ловит
+  гонки: второй получает 201 с тем же lead_id); гость → 403. Фронт:
+  primary «Связаться с менеджером» в CTA-панели PDP, инлайн-форма с
+  опц. комментарием (макс 500), тосты, localStorage-флаг отправленного,
+  гость → логин-промпт. Ревизор: контракт/гонки/пул проверены + 2 фикса
+  (дубль дефолт-комментария — теперь null с бэка; maxLength на textarea).
+  Смоук живьём: 201 → лид #3 в пуле, повтор → 409 duplicate_contact.
+- **PDP-колонка (фидбек «анализ вправо»):** desktop ≥768 — grid
+  minmax(0,1fr) + clamp(340px,32vw,380px): слева контент, справа sticky
+  `<aside>`: карточка AI-анализа + CTA-карточка (цена/статус → Связаться
+  primary → Источник + hint → Избранное/Поделиться → Агент(business) →
+  Доставка). Мобайл — одна колонка (анализ сразу после цены). Дублей
+  CTA нет; sticky-mobile-bar не тронут.
+- **Карусель карточек ленты (только ≥768):** scroll-snap + скрытый
+  скроллбар, drag-to-scroll мышью (смещение >6px подавляет переход в
+  PDP), точки-индикаторы (кликабельные, синхрон со скроллом, aria),
+  ЛИМИТ 5 фото + «+N фото» градиент на последнем слайде; мобайл —
+  одно фото как раньше. Галерея PDP: точки 2–10 фото (синхрон с
+  треком/превью/лайтбоксом), >10 — счётчик «N / M»; snap-превью,
+  автоскролл к активной миниатюре. prefers-reduced-motion respected.
+- **Полиш вёрстки (19 артефактов):** inline-flex .btn (иконки/высоты),
+  кнопки на 320px (nowrap→wrap), AiSearch композер под таб-баром,
+  ai-chat__head wrap, двойные гаттеры .filter-pair в редакторе сигналов,
+  Calc max-width/отступы/hero-wrap, пустые состояния центрированы
+  (state--page/--panel), z-index плашки возврата в шкалу, партнёр:
+  pa-quick/kpi/sheet-footer/toolbar переполнения на 320–360px.
+- **Проверки:** бэкенд 1278 passed / 7 skipped; фронт 272/272 (30
+  файлов, +12 карусель, +8 контакт); ruff чист; catalog+miniapp
+  пересобраны; browser-use: PDP-колонка скрин, карусели рендер (20 шт),
+  галерея 38 фото → счётчик; контакт live 201/409.
+
+
+## 87. Фидбек-волна 2026-10-25: меню v3, история просмотров, «продано из избранного», лендинг, партнёрский кабинет (в работе)
+
+- **Запрос:** меню-перегруппировка не зашла; карточка сбрасывается при
+  смене вкладки (гость); хранить историю просмотров; проданные из
+  избранного → уведомление с похожими и удаление; лента без границ и
+  пагинации; типографика; фильтры криво; + редизайн партнёрского
+  контура и лендинг-вход; процесс «исполнитель → ревизор → проверка».
+- **Меню v3 (Shell):** Лента, AI, Избранное, История, Профиль —
+  «Сигналы» ушли из таб-бара (секция «Мои сигналы» в Профиле + чипсы
+  ленты). «История» = Просмотры + Разборы (сегменты).
+- **История просмотров:** lib/viewHistory (localStorage по sub JWT,
+  cap 50, дедуп; гостю тоже), запись событием listing:view из карточки;
+  «Очистить историю»; deep-link ?similar= жив.
+- **Keep-alive карточки:** ListingKeepAlive — карточка не размонтируется
+  при переключении вкладок (hidden классом), новый id = новый key;
+  плашка «← Вернуться к карточке» на табе-источнике; попутно найден и
+  починен БАГ feedCache (POP-эвристика воскресала протухшим кэшем в
+  новых сессиях — первый монтаж теперь никогда не восстанавливает).
+- **Ревизор B (5 фиксов):** /filters отвечает массивом (Profile читал
+  .items — всегда пусто), stale-гость в Истории (событие autobot:auth),
+  deep-link ?similar раз за монтаж, плашка ниже фолда, width:fit-content.
+- **Продано из избранного (бэкенд):** favorites_sold_job cron 04:30 —
+  одним SQL выборка неактивных+неотправлявшихся, сообщение со списком
+  до 5 машин + web_app-кнопки /analyses?similar=, favorite удаляется в
+  ЛЮБОМ случае, антидубль kind='sold_fav'. Тесты 21, полный прогон 1271.
+- **Лендинг-вход:** браузер + «/» без выбора → Landing (пользователи /
+  партнёры → /partner); в Telegram и по deep-link — сразу приложение;
+  выбор в localStorage autobot.surface (без перезагрузки).
+- **Партнёрский редизайн:** дока docs/REDESIGN/04 (35 находок, IA:
+  Обзор/Пул/Мои/Рынок/Биллинг, таб-бар на мобиле) → имплементация.
+- **Лента (C, субагент + ревизор):** ограниченная область прокрутки
+  (.feed-viewport + .feed-scroll с внутренним скроллом и body.feed-locked
+  только на активной ленте), IO подгрузки с root=контейнер, шит фильтров
+  через portal (фикс: шит позиционировался от колонки, пары селектов
+  сжимались, двойной скролл, футер уезжал), ListingCard-пасс (бейджи
+  поверх фото, clamp-2 модели, hover/focus, равная высота ряда),
+  eyebrow-счётчик CAPS, tabular-nums. Ревизор C+L+P2: +7 фиксов
+  (шит переживал уход с ленты, гонка logout в партнёрке, лендинг на
+  пути query-deep-link, nowrap второй цены, мёртвый font-shorthand,
+  focus карточек лендинга, favicon+viewport-fit).
+- **Browser-use визуальный проход (web-gui-tester):** лендинг → приложение;
+  лента desktop 1280 (3 колонки, две цены, чек-бейдж); PDP (перевод,
+  цены, пейволл чеков, один primary, hint про блокировку); История
+  (просмотры записались у гостя, сегменты); тёмная тема; мобайл 390
+  (таб-бар, bounded-область); кабинет партнёра (KPI, квота, лоты дня,
+  dual-links). НАЙДЕНЫ И ПОЧИНЕНЫ: 1) P0-баг keep-alive карточки —
+  ListingScreen без Route-обёртки читал useParams → undefined →
+  /api/listings/undefined 422 (фикс: Routes с location-подменой +
+  регрессионный тест с 422-моком); 2) регрессия переводов — ночной
+  fetch ловил 422 батчами >64 строк (лимит микросервиса) → чанкование
+  по 48 в kcar-адаптере; база дочищена (хангыль 0, мусор 0, VIN 276+).
+- **Итог:** бэкенд 1271 passed / 7 skipped; фронт 252/252 (29 файлов);
+  ruff чист; miniapp+worker_fetch+worker_send пересобраны и живы.
+
+
+## 86. Редизайн: имплементация волнами + red team + деплой (2026-10-24, ночь)
+
+- **Волны имплементации (субагенты, параллельно по файловым зонам):**
+  I1 — Shell (5 табов: Лента/AI/Сигналы/Избранное/Профиль, aria-current,
+  тач ≥44), Tooltip (portal+fixed, flip/clamp, Esc), токены §9 (z-шкала
+  toast>modal фикс, --text-primary алиас), onboarding 1 шаг, motion
+  (fade-in-up, skeleton-pulse, prefers-reduced-motion). I2 — ListingCard
+  (.lcard: 2 цены $+₽ tabular-nums, источник текстом без ссылки, 3 спека,
+  бейджи чек/⬇️/🔴) и PDP по P1–P9 (один primary, тултипы вместо
+  hint-строк, инлайн «Похожие», один hint про блокировку, осмотр
+  свёрнут до сводки) и Feed (F1–F4/F10: суббар, bottom-sheet фильтров с
+  живым счётчиком «N авто», чипсы «Мои сигналы»). I3 — AiSearch
+  («Понял так», пост-финал «Показать в ленте»), Сигналы (карточки,
+  inline-валидация, подтверждение удаления, тарифный гейт «⚡ Сразу»),
+  Favorites/Analyses (verdict-бейджи, пустые состояния, квота-апселл),
+  Profile/Calc/Compare на токены; apiErrorText — маппинг detail→русский.
+- **Red team (11 фиксов):** P0×3 — deep-links/префиллы игнорировались
+  на смонтированных keep-alive экранах (лента A2, Calc ?price=, Compare
+  сид) → эффекты по location.search; P1×3 — ScrollManager (стек от
+  верха, позиции табов сохраняются), Esc в LoginPrompt, скелетоны на
+  .lcard (тёмная тема); P2×5 — catch удаления избранного, дедуп тостов,
+  «Сигнал #N» везде, мёртвый CSS/классы снесены.
+- **has_inspection (F7):** EXISTS в запросе страницы (инвариант одного
+  SELECT для keyset сохранён); смоук: encar=True.
+- **Чистка NLLB-склеек:** «K5ko»/«W167ko» (токен языка приклеен) —
+  чистилка + regexp-чистка 53 строк в БД; кэш tr:* сброшен.
+- **Деплой (минимальный docker):** miniapp+catalog+translate (3 сборки),
+  бандл index-OEoJj03N.js (редизайн), has_inspection в API живой.
+- **Итог проверок:** бэкенд pytest 1265 passed / 7 skipped; фронт
+  `npm run build` OK + vitest 192/192 (25 файлов); ruff чист (app+tests).
+
+
+## 85. Редизайн Mini App: дизайн-фаза + волны имплементации (2026-10-24, вечер)
+
+- **Запрос владельца:** «фронт говно, переделывай всё»: пропали карты
+  чеков, сброс состояния вкладок, «Поделиться» не работает, сессия
+  умирает при F5, тултипы ломают вёрстку; + полный дизайн-бриф
+  (senior product designer) с требованием декомпозиции на субагентов.
+- **Дизайн-фаза (docs/REDESIGN/):** 01-ux-audit-ia.md (49 находок с
+  файл:строка, IA: таб-бар 6→5 — Лента/AI/Сигналы/Избранное/Профиль,
+  «Анализы» расформированы, фильтры+сигналы = один bottom-sheet,
+  онбординг 3→1 шаг, deep-links filter_<id>), 02-design-system.md
+  (метафора «закрытый автосалон»: монохром + деньги-акцент, «тик» 3×18
+  у цены, табличные токены light/dark с проверкой контраста WCAG,
+  --surface/--deal/--warn/--danger/--accent-soft/--dur-*/z-шкала),
+  03-content-a11y.md (~180 строк микрокопии, маппинг detail→русский
+  для 23 ошибок, WCAG-чеклист, реестр 14 иконочных кнопок с aria).
+- **Волна фиксов:** сессия — access/refresh/гость в localStorage,
+  авто-refresh 401 (single-flight) с тихим уходом в гостя, выход —
+  только кнопкой; keep-alive всех таб-экранов (display:none, лента
+  держит фильтры, AI-чат историю); «Поделиться» — t.me/share/url с
+  карточкой (в браузере navigator.share/clipboard); блок чеков всегда
+  виден (403 пейволл, 404 «у kcar чеков нет», пустые marks = «не
+  зафиксировано» + фото чека в галерее).
+- **Волна оболочки (I1):** Shell (5 табов, aria-current, тач ≥44px,
+  sidebar-кнопки), Tooltip (portal+fixed, flip/clamp, 240px, Esc),
+  токены §9 в index.css (+ z-toast>z-modal фикс), onboarding 1 шаг,
+  motion (fade-in-up 200ms, skeleton-pulse, prefers-reduced-motion).
+- **Бэкенд-минимум из аудита (F7):** has_inspection в ListingOut —
+  EXISTS в том же запросе страницы (инвариант «1 SELECT на keyset-
+  страницу» сохранён, тест пройден).
+- **NLLB-циклы («Tesla yko model yko…»):** no_repeat_ngram_size=4 +
+  repetition_penalty + _clean_translation (срез токена языка/дублей);
+  глоссарий +45 терминов чека (교환→замена, 도색→окрас…) и слитные
+  올뉴/더뉴; чистка базы scripts/fix_data_quality.py + точечные UPDATE:
+  299 лотов, хангыль 0, циклы 0, VIN 276/299, чеки 270 у encar
+  (102 с отметками). kcar search-API игнорирует фильтр марки (тот же
+  top-100 на любой запрос — все дубли) — объём kcar ограничен самим
+  источником (~19-100 в выдаче).
+
+
+## 84. Прод-ревизия: экономика 4 моделей, «Мои анализы», агент на сделку, партнёрский рынок, темы UI, пересбор базы (2026-10-24)
+
+- **Запрос:** доработать до прода: бизнес-логика/экономика (баг «бизнесу
+  предлагают про»), 4 модели пользователя, скрытость партнёрского
+  инструментария, вкладка «мои анализы» с историей и поиском похожих
+  через RAG/LLM, UI/UX (темы, карточки, путь), баг ссылок на источники,
+  перевод/данные kcar — снести и перепарсить.
+- **Экономика (policies.py, полная переделка):** Free — 1 AI-разбор в
+  НЕДЕЛЮ на все машины (квота окна стала глобальной, ок week), дайджест
+  раз в неделю (утренний слот понедельника), чеки осмотра закрыты (403
+  inspection_locked). Pro (500★) — 30 разборов/день, чеки, дайджест
+  ежедневно (утро) + вечер. Business (2500★) — безлимит, instant при
+  публикации, «агент на сделку», «глубокий» разбор (в LLM-контекст
+  подмешивается выжимка чека осмотра — `_inspection_digest`). Partner —
+  не тариф, а роль: `PartnerAccount.owner_telegram_id` (миграция 0024),
+  create/update счёта выдаёт владельцу БЕССРОЧНЫЙ business
+  (`grant_partner_business`: until IS NULL; suspended → free),
+  `effective_tier` считает NULL-until бизнесом вечным, subscription_check
+  его не трогает. Квота: `rules.py` — `ANALYSES_LIMITS {free:1/wk, pro:30/d}`,
+  `count_recent_user` (все машины юзера) вместо per-listing.
+- **Апселл-баг:** Profile.tsx и бот `_send_subscribe_options` строили
+  кнопки по иерархии рангов (free→pro/business, pro→business,
+  business→ничего/«бессрочная партнёрская»); везде `can_upgrade/tier_rank`.
+- **Нотификации по тарифам:** `notify.effective_channel(filter_mode, tier)`
+  — instant реально уходит только business (Pro с instant-фильтром →
+  дайджест); `collect_for_filters` собирает по ЭФФЕКТИВНОМУ каналу;
+  digest_job → `_digest_run(slot)`: утро (все, free только пн) / вечер
+  (pro+business); instant-фильтр создать/включить можно только business
+  (filters + notify settings, 403 с апселлом).
+- **«Мои анализы» + похожие:** GET `/api/me/analyses` (история разборов с
+  карточкой машины, `list_for_user` в репо + AnalysisHistoryItem),
+  POST `/api/listings/{id}/similar` — SQL-кандидаты (та же марка/модель,
+  ±3 года, цена ±35%, сортировка по близости) + LLM-реранк топ-5 с
+  reason/score (сбой модели → фолбэк по цене, source=stats). Фронт:
+  вкладка «Анализы» (BarChart3): история с verdict-бейджами, «Найти
+  похожие», история поиска из фильтров, гостю — заглушка.
+- **Агент на сделку:** POST `/api/listings/{id}/agent` (business-only,
+  `RequestAgent` → CreateLead source=agent, идемпотентен
+  agent:{user}:{listing}) — лид падает в пул партнёров/менеджмента.
+  Кнопка на PDP только при sub.agent.
+- **Партнёрский контур (отдельная поверхность /partner, API-ключ):**
+  GET `/api/partner/market?make=&model=` — сводка (count/min/median/max)
+  + выгодные лоты (price < 0.93×median, discount_pct) — инструмент
+  сотрудников партнёров; фронт-экран «Рынок» (TrendingUp). Владелец
+  счёта — в админ-API create/PATCH.
+- **UI/UX:** система тем lib/theme.ts (system/light/dark, localStorage,
+  dataset.theme + color-scheme, подписка на ОС) + полная тёмная палитра
+  `:root[data-theme="dark"]` (переведены хардкоды, грейды осмотра);
+  переключатель в профиле; карточки сравнения тарифов (3 колонки);
+  6-й таб «Анализы» с короткими подписями на мобиле.
+- **Ссылки на источники (баг):** URL в БД валидны и отвечают 200, но
+  encar/kcar гео-блокированы в РФ (парсим через прокси, у юзера — нет) →
+  UX-фикс: тост после «Открыть у источника» + подсказка «источник может
+  быть недоступен в РФ — все фото и данные уже здесь».
+- **kcar:** адаптер переводит make/model/generation/color/title батчем
+  через NLLB (`_translate_items`, общий модуль common/translate.py);
+  `enrich_listing_specs` переводит остатки хангыля (цвет «진주색» и пр.).
+  **Пересбор базы:** scripts/reparse_listings.py — снос listings (каскад)
+  → повторный fetch encar+kcar (перевод на лету, чеки при enrichment) →
+  батч-обогащение спеков (VIN/привод/объём) → перевод остатков →
+  бэкфилл чеков. Запуск в worker_fetch (docker cp, MSYS_NO_PATHCONV).
+- **Миграции:** 0024 (owner_telegram_id) и 0025 (leads.idempotency_key —
+  схема-дрейф: колонка жила в ORM без миграции, POST /agent на живой БД
+  падал ProgrammingError; аудит остальных таблиц — дрейфа нет).
+- **Микро-профиль:** deals-роутер смонтирован в services/catalog (gateway
+  проксирует /api/listings/* в catalog — без этого /agent давал 404);
+  SubscriptionOut дополнен новыми полями (digest/inspection/agent/
+  analyses_limit — response_model их отфильтровывал).
+- **NLLB-фикс:** смешанный латиница+хангыль вход гонял модель в повтор
+  n-грамм и утечку токена языка («ru Allko New Tusan», inspector
+  «ru tokkaservis…») — no_repeat_ngram_size=4, repetition_penalty=1.15,
+  max_new_tokens=96 + _clean_translation (срез токена языка/дублей);
+  кэш tr:* в Redis сброшен, залитые строки почищены (UPDATE 79+79).
+- **Проверка:** полный pytest **1261+ passed** (новые: партнёры 22,
+  похожие/анализы 19, темы 11; известный флейк test_rag в изоляции
+  зелёный), ruff app+tests чист, фронт `npm run build` ОК + vitest
+  107/107; все образы пересобраны, контейнеры перезапущены, gateway
+  /health ok; смоук новых эндпоинтов — см. ниже.
+
+
+- **Запрос:** «избавляемся от транслитерации в korean.py — есть микросервис
+  переводчик, юзаем его; машинка всё равно говно; взять данные с
+  fem.encar.com/cars/report/{inspect,accident,diagnosis}/{id} и сделать чётко».
+- **Развивка fem-страниц:** SPA-оболочки → XHR пойманы headless-браузером:
+  inspect = `/v1/readside/inspection/vehicle/{id}` (уже юзали), diagnosis =
+  `.../diagnosis/vehicle/{id}` (тоже), accident = НОВЫЙ
+  `.../record/vehicle/{id}/open?vehicleNo=…` — история ДТП из госданных
+  (госномер в detail.manage.vehicleNo): счётчики + полный список аварий
+  с датами/выплатами, гибель/наводнение/угон/владельцы/залог/первая регистрация.
+- **Перевод:** korean.py УДАЛЁН. `BaseApiAdapter` получил `translator`
+  (объект с async translate(texts, source, target) → list[str|None] — это
+  `TranslateClient`, NLLB-микросервис с Redis-кэшем и breaker). AdapterRegistry
+  пробрасывает его адаптерам (воркер собирает до registry); encar.py —
+  `_translate_korean()`: сбор хангыль-строк (make/model/generation/color +
+  inspector/summary/notes отчёта) → глоссарий (`domain/translation/glossary`,
+  уже существующий) → батч в микросервис → подстановка in-place. Ошибки/выключенный
+  сервис → остаётся оригинал (как тайтлы).
+- **Карта повреждений — официальные диаграммы Encar:** в JS классического
+  mdsl-чека найден fnStats с координатами всех 38 панелей
+  (`pos:'left:X;top:Y'`) и картинки-диаграммы (вид сверху, 254x282):
+  `www.encar.com/images/pop/check/img_inspection01.gif` (внешние) и
+  `img_inspection02_new.gif` (силовая структура). В адаптере — таблица
+  `_ZONE_POS` (zone → diagram,x,y; frame-метки сняты с общей канвы x-340),
+  каждый mark несёт `pos` (схема InspectionMark + lib/inspection.ts дополнены).
+  Фронт `Inspection.tsx` переписан: вместо самодельных SVG-«машинок» — эти
+  диаграммы-картинки с кликабельными маркерами (номер отметок в зоне, цвет =
+  тип повреждения, ПЕРЕД/ЗАД подписи); CSS `.inspection__diagram/__pin/__dir`.
+- **БД:** `scripts/backfill_inspection.py` (теперь с переводчиком) перегнал
+  все 100 отчётов: pos в marks, история ДТП в summary, корейские тексты →
+  русский через микросервис. `scripts/translate_db_russian.py` переписан с
+  транслитерации на микросервис (идемпотентный, батчи по 48, глоссарий).
+- **Проверка:** pytest adapter 23/23 (+тесты: record/open-факты, FakeTranslator
+  подставляет перевод, без translator остаётся оригинал), ruff чист; tsc +
+  vitest Inspection 3/3; miniapp и worker_fetch пересобраны.
+
 ## 82. Хангыль → русский + нормальные «машинки» осмотра (2026-10-24)
 
 - **Запрос:** «переводить всё корейское в объяве на русский; схемы кузова
@@ -2375,3 +3035,59 @@ Cooldown Redis 6 ч (`doctor:{source}`, LLM платный). Любой сбой
 - `[tool.ruff]` в pyproject зафиксирован (E4/E7/E9/F; ignores — устоявшийся
   стиль); ruff по app+tests — чисто.
 - Новый счётчик TECHDEBT: ✅ 107 / 🟡 27 / ⬜ 22 из 156.
+
+## 2026-10-28: NAV-V2 — лендинг всегда на «/», меню v4 (мини-апп 4 таба + партнёрка 5+«Ещё»)
+
+Решения владельца (AskUserQuestion): «Всегда на «/» + быстрый вход»,
+«4 таба: Главная/Авто/Чаты/Профиль», «5 табов + «Ещё»». Спека — docs/NAV-V2.md.
+
+### Мини-апп
+- **Лендинг** (screens/Landing.tsx): в браузере на «/» без query показывается
+  ВСЕГДА; последний выбор (autobot.surface) только сортирует карточки и
+  ставит метку «● последний вход» — ничего не запирает. chooseSurface
+  принимает user|partner; resetSurface + кнопка «Сменить поверхность» в
+  Профиле ведут на «/» (полная загрузка → лендинг). Telegram и deep-links
+  с query — сразу приложение, как раньше.
+- **4 таба** (components/Shell.tsx): Главная /, Авто /auto, Чаты /chats,
+  Профиль /profile. Бейдж непрочитанных — на табе «Чаты» (useChatUnread,
+  гостю скрыт); ChatEnvelopeFloat и ChatBadge из сайдбара удалены
+  (компонент + CSS + тест). Чаты активны и на /chats/:id (оверлей).
+- **Главная** (screens/Home.tsx): сегмент «Лента | AI-поиск» (пилюли
+  .hist-seg), обе панели в keep-alive (сменяются .keepalive-hidden);
+  FeedScreen получил проп inactive — на AI-сегменте сам снимает
+  body.feed-locked (скролл страницы). FAB «+ Продать» остался только на
+  «/» (SellFab самоскрывается на остальных путях).
+- **Авто** (screens/Auto.tsx): сегменты Избранное | История | Мои
+  объявления, активный — в ?tab= (deep-link/редиректы); гостю сегмента
+  «Мои объявления» нет. Панель «Мои объявления» вынесена из Профиля в
+  screens/MyLotsPanel.tsx (placement/lifecycle-пилюли, extend/remove/
+  restore, live listing_status — без изменений логики).
+- **Редиректы-совместимость** (App.tsx OverlayRoutes): /ai → /,
+  /favorites → /auto?tab=favorites, /analyses → /auto?tab=history
+  (query ?similar= сохраняется). KEEPALIVE_TABS: /, /auto, /filters,
+  /calc, /compare, /profile, /chats.
+- **Фикс вёрстки** (найден browser-use): body.feed-locked превращает
+  .app-content во флекс, а его margin:0 auto отключает cross-stretch —
+  контент растягивался до ~987px (гор. скролл, карточки 951px). Лечение:
+  width:100% на body.feed-locked .app-content + min-width:0 в
+  .home-screen/.home-screen__panel цепочке.
+
+### Партнёрский кабинет (волна F-partner, агент + ревизия)
+- PartnerApp.tsx: TAB_ITEMS (Обзор/Пул/Мои/Чаты) + кнопка «Ещё»
+  (aria-haspopup=dialog, aria-expanded) → bottom-sheet (Sheet) с Рынок/
+  Витрина/Объявления/Чеки/Биллинг; шторка закрывается при смене пути,
+  активный раздел группы подсвечивает таб «Ещё» (.pa-tab__dot);
+  десктоп-сайдбар — все 9 пунктов. Тест partnerChats.test.tsx
+  переписан структурно (jsdom не воспроизводит aria-expanded; живой
+  клик проверен browser-use — работает).
+
+### Деплой и проверки
+- npm run build зелёный; vitest **552/552** (44 файла, threads=2:
+  minThreads=1 обязателен — tinypool конфликтует с дефолтной min).
+- miniapp пересобран и задеплоен (compose --profile micro).
+- browser-use (IAB 390x844): лендинг → вход без перезагрузки; 4 таба;
+  сегменты Главная/Авто; редиректы /favorites,/ai; «Сменить поверхность»
+  → лендинг; метка «● последний вход» после перезагрузки; партнёрка:
+  вход по ключу (тест-партнёр «NavV2 Check» id=2, plan=starter, создан
+  через /api/admin/partners — можно удалить из БД), «Ещё»-шторка живым
+  кликом открывается/закрывается, переход «Рынок» подсвечивает «Ещё».

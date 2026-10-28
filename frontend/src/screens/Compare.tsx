@@ -4,13 +4,14 @@
  * или query ?v=18000x2000x2022,15000x1600x2021 (deep-link из бота).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
 import { haptic } from "../api/auth";
 import { type Region, digits, getRegion, parseQueryVariants, setRegion, type Variant } from "../lib/fx";
 import { BackButton } from "../ui/BackButton";
+import { apiErrorText } from "./apiErrorText";
 
 interface CompareItem {
   title: string;
@@ -77,20 +78,33 @@ export function CompareScreen() {
       setItems(out.items);
       haptic("medium");
     } catch (e) {
-      setError((e as Error).message);
+      // Ошибки API — по маппингу 03 §3.2 (сырой detail не показываем)
+      setError(apiErrorText(e));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Автосравнение при входе с сид-данными (из калькулятора или deep-link)
+  // Автосравнение при входе с сид-данными (из калькулятора или deep-link).
+  // Экран в keep-alive: применяем сид при каждом его изменении, а не только
+  // при первом монтировании — повторное «Сравнить» из калькулятора с новыми
+  // цифрами не должно показывать прошлогодний результат.
+  const appliedSeed = useRef("");
   useEffect(() => {
-    const ready = (fromQuery.length ? fromQuery : seed ? [seed] : []).filter(
-      (v) => digits(v.price) && digits(v.year),
-    );
+    const key = `${location.search}|${JSON.stringify(location.state ?? null)}`;
+    if (key === appliedSeed.current) return;
+    appliedSeed.current = key;
+    const seeded = fromQuery.length ? fromQuery : seed ? [seed] : [];
+    if (!seeded.length) return;
+    if (fromQuery.length) {
+      setVariants(fromQuery);
+    } else if (seed) {
+      setVariants([seed, { price: "", cc: "2000", year: "" }]);
+    }
+    const ready = seeded.filter((v) => digits(v.price) && digits(v.year));
     if (ready.length) void compare(ready, region);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.search, location.state]);
 
   const pickRegion = (r: Region) => {
     haptic("light");
@@ -202,8 +216,16 @@ export function CompareScreen() {
       </div>
 
       {error && (
-        <div className="state">
-          <div className="state__title">{error}</div>
+        <div className="calc-error" role="alert">
+          {error}
+        </div>
+      )}
+
+      {/* Пустое состояние: подсказка до первого сравнения */}
+      {!error && !loading && !(items && items.length >= 2) && (
+        <div className="calc-empty">
+          Добавьте минимум два варианта — сравним итог «под ключ» и покажем
+          разницу в долларах.
         </div>
       )}
 

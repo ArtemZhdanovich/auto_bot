@@ -760,7 +760,11 @@ async def cmd_subscribe(message: Message) -> None:
 
 
 async def _send_subscribe_options(message: Message, user_id: int) -> None:
-    """Карточка подписки для конкретного пользователя (TECHDEBT 6.1)."""
+    """Карточка подписки для конкретного пользователя (TECHDEBT 6.1).
+
+    Апселл по иерархии тарифов: Business НЕ получает кнопки Pro (раньше
+    это был баг), Pro — только Business, Free — оба платных.
+    """
     status = await backend.subscription_status(user_id)
     if status is None:
         await message.answer("Backend недоступен, попробуйте позже.")
@@ -774,26 +778,32 @@ async def _send_subscribe_options(message: Message, user_id: int) -> None:
     text = (
         f"{current}\n\n"
         "<b>Pro</b> — 500★/мес (~$10) или 4800★/год (−20%)\n"
-        "20 фильтров, 200 AI-поисков/день, instant-уведомления, price drop\n\n"
+        "30 разборов цены/день, чеки осмотра, дайджест каждый день\n\n"
         "<b>Business</b> — 2500★/мес (~$50)\n"
-        "Без лимитов, API, CRM-интеграция, приоритетная поддержка"
+        "Безлимит разборов, объявление сразу при публикации, агент на сделку"
     )
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(
-                text=_tier_label("pro", 30, 500),
-                callback_data="sub:buy:pro:30",
-            )],
-            [InlineKeyboardButton(
-                text=_tier_label("pro", 365, 4800) + " (−20%)",
-                callback_data="sub:buy:pro:365",
-            )],
-            [InlineKeyboardButton(
-                text=_tier_label("business", 30, 2500),
-                callback_data="sub:buy:business:30",
-            )],
-        ]
-    )
+    buttons: list[list[InlineKeyboardButton]] = []
+    rank = {"free": 0, "pro": 1, "business": 2}.get(tier, 0)
+    if rank < 1:
+        buttons.append([InlineKeyboardButton(
+            text=_tier_label("pro", 30, 500),
+            callback_data="sub:buy:pro:30",
+        )])
+        buttons.append([InlineKeyboardButton(
+            text=_tier_label("pro", 365, 4800) + " (−20%)",
+            callback_data="sub:buy:pro:365",
+        )])
+    if rank < 2:
+        buttons.append([InlineKeyboardButton(
+            text=_tier_label("business", 30, 2500),
+            callback_data="sub:buy:business:30",
+        )])
+    if not buttons:
+        # Business без даты — бессрочный тариф партнёрского контура:
+        # продлевать нечего, показываем только статус.
+        await message.answer(current + "\n\nПодписка бессрочная (партнёрский доступ).")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer(text, reply_markup=kb)
 
 
@@ -840,11 +850,14 @@ _SUB_INVOICE_AT: dict[int, float] = {}
 async def pre_checkout_query(query: PreCheckoutQuery) -> None:
     """Telegram ждёт подтверждение перед списанием Stars.
 
-    TECHDEBT 6.9: payload валидируется структурно — только `sub:<id>`.
-    Подделанный/чужой payload отклоняется, списания не происходит.
+    TECHDEBT 6.9: payload валидируется структурно — `sub:<id>` (подписка)
+    и `plc:<id>` (продление размещения лота рынка, 06 §2). Подделанный/
+    чужой payload отклоняется, списания не происходит.
     """
     payload = query.invoice_payload or ""
-    if not payload.startswith("sub:") or not payload[4:].isdigit():
+    parts = payload.split(":", 1)
+    valid = payload.startswith(("sub:", "plc:")) and len(parts) == 2 and parts[1].isdigit()
+    if not valid:
         logger.warning("pre_checkout_bad_payload: %r", payload)
         await query.answer(
             ok=False,
@@ -856,7 +869,11 @@ async def pre_checkout_query(query: PreCheckoutQuery) -> None:
 
 @router.message(F.successful_payment)
 async def on_successful_payment(message: Message) -> None:
-    """Оплата прошла: активируем подписку через backend (ТЗ п. 8.7)."""
+    """Оплата прошла: подписка или продление размещения через backend.
+
+    kind='placement' (06 §2, payload `plc:<id>`) — объявление рынка
+    продлевается, отдельное сообщение без «Тариф … активирован».
+    """
     sp = message.successful_payment
     if sp is None:
         return
@@ -896,6 +913,15 @@ async def on_successful_payment(message: Message) -> None:
         ))
         await message.answer(
             "Оплата получена, но активация не удалась — напишите менеджеру."
+        )
+        return
+    if result.get("kind") == "placement":
+        # Продление размещения лота рынка (06 §2): не подписка — своё сообщение.
+        until = result.get("placement_paid_until")
+        await message.answer(
+            f"✅ Оплата принята ({sp.total_amount} Stars).\n"
+            "Объявление продлено"
+            + (f" до {str(until)[:10]}." if until else ".")
         )
         return
     tier = result.get("tier", "pro")

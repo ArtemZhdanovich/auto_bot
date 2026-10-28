@@ -1,6 +1,9 @@
-/** Тесты пагинации ленты: авто-подгрузка скроллом, ретрай после ошибки, конец списка. */
+/** Тесты пагинации и области прокрутки ленты: авто-подгрузка скроллом
+ *  внутри viewport-области, ретрай после ошибки, конец списка, skeleton,
+ *  IntersectionObserver с root = контейнер области. */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
+import { AppRoot } from "@telegram-apps/telegram-ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FeedScreen, resetFeedCache } from "./Feed";
@@ -11,20 +14,42 @@ vi.mock("../api/client", () => ({ api: vi.fn() }));
 vi.mock("../api/auth", () => ({ haptic: vi.fn() }));
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ show: vi.fn() }) }));
 
-// jsdom не умеет ни IntersectionObserver (стаб-заглушка: не срабатывает),
-// ни реальный скролл — авто-подгрузку в тестах триггерим событием scroll
-// (фолбэк-обработчик «близко к низу документа» в jsdom срабатывает всегда).
+// jsdom не умеет ни IntersectionObserver, ни реальный скролл. Стаб-заглушка
+// IO СОХРАНЯЕТ опции — тест проверяет, что root передан (контейнер области
+// прокрутки), а авто-подгрузку в тестах триггерим событием scroll на
+// контейнере (фолбэк «близко к низу» в jsdom: scrollHeight=0 → всегда true).
+const ioInstances: Array<{
+  opts: IntersectionObserverInit;
+  observed: Element[];
+}> = [];
 vi.stubGlobal(
   "IntersectionObserver",
   class {
-    observe() {}
+    opts: IntersectionObserverInit;
+    observed: Element[] = [];
+    constructor(_cb: IntersectionObserverCallback, opts: IntersectionObserverInit) {
+      this.opts = opts;
+      ioInstances.push(this);
+    }
+    observe(el: Element) {
+      this.observed.push(el);
+    }
     unobserve() {}
     disconnect() {}
   },
 );
 
-/** Имитация прокрутки ленты пользователем. */
-const scrollFeed = () => fireEvent.scroll(window);
+/** Имитация прокрутки ленты пользователем — событие scroll на контейнере
+ *  области (.feed-scroll), а не на window: вся прокрутка теперь внутренняя. */
+const scrollFeed = () => {
+  const el = document.querySelector('[data-testid="feed-scroll"]');
+  expect(el).not.toBeNull();
+  fireEvent.scroll(el as HTMLElement);
+};
+
+/** Контейнер области прокрутки ленты. */
+const feedScroll = () =>
+  document.querySelector('[data-testid="feed-scroll"]') as HTMLElement;
 
 const apiMock = vi.mocked(api);
 
@@ -57,27 +82,140 @@ const page = (offset: number, total: number, size: number) => ({
 
 const TOTAL = 45;
 
+/** Стандартное поведение API: фильтры/фасеты пустые, лента — страницами. */
+const listOk = async (path: string) => {
+  if (path.startsWith("/filters")) return [];
+  if (path.includes("/listings/facets")) {
+    return path.includes("make=") ? { models: ["Carnival", "K5"] } : { makes: ["Kia", "Hyundai"] };
+  }
+  const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset") ?? 0);
+  return page(offset, TOTAL, Math.min(20, TOTAL - offset));
+};
+
 beforeEach(() => {
   resetFeedCache(); // кэш ленты не должен перетекать между тестами
+  document.body.classList.remove("feed-locked");
+  ioInstances.length = 0;
   apiMock.mockReset();
-  apiMock.mockImplementation(async (path: string) => {
-    if (path.startsWith("/filters")) return [];
-    if (path.includes("/listings/facets")) {
-      return path.includes("make=") ? { models: ["Carnival", "K5"] } : { makes: ["Kia", "Hyundai"] };
-    }
-    const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset") ?? 0);
-    return page(offset, TOTAL, Math.min(20, TOTAL - offset));
-  });
+  apiMock.mockImplementation(listOk);
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  document.body.classList.remove("feed-locked");
+});
 
 const renderFeed = () =>
   render(
-    <MemoryRouter>
-      <FeedScreen />
-    </MemoryRouter>,
+    <AppRoot>
+      <MemoryRouter>
+        <FeedScreen />
+      </MemoryRouter>
+    </AppRoot>,
   );
+
+describe("Feed: область прокрутки (viewport-scroll)", () => {
+  it("лента живёт в фиксированной области: обёртка + контейнер прокрутки", async () => {
+    renderFeed();
+    expect(document.querySelector('[data-testid="feed-viewport"]')).not.toBeNull();
+    const scroll = feedScroll();
+    expect(scroll).not.toBeNull();
+    expect(scroll.className).toContain("feed-scroll");
+    // пока лента активна — скролл страницы заблокирован (класс на body)
+    expect(document.body.classList.contains("feed-locked")).toBe(true);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+  });
+
+  it("IntersectionObserver наблюдает сентинел относительно КОНТЕЙНЕРА области (root)", async () => {
+    renderFeed();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+    const io = ioInstances[ioInstances.length - 1];
+    expect(io).not.toBeUndefined();
+    expect(io.opts.root).toBe(feedScroll());
+    expect(io.observed.length).toBeGreaterThan(0);
+  });
+
+  it("первая загрузка — 4 skeleton-карточки той же геометрии в сетке", async () => {
+    let resolveList!: (v: unknown) => void;
+    apiMock.mockImplementation((path: string) =>
+      path.startsWith("/filters") || path.includes("/listings/facets")
+        ? Promise.resolve(path.includes("make=") ? { models: [] } : { makes: [] })
+        : new Promise((r) => {
+            resolveList = r;
+          }),
+    );
+    renderFeed();
+    const skel = document.querySelectorAll(".lcard[aria-hidden='true']");
+    expect(skel.length).toBe(4);
+    // геометрия карточки: фото 16:9 (skeleton в .lcard__media) + строки тела
+    expect(skel[0].querySelector(".lcard__media .skeleton")).not.toBeNull();
+    resolveList(page(0, TOTAL, 20));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+  });
+
+  it("ошибка первой загрузки — центрированное состояние с «Повторить», повтор загружает ленту", async () => {
+    apiMock.mockImplementation(async (path: string) => {
+      if (path.startsWith("/filters")) return [];
+      throw new Error("сеть");
+    });
+    renderFeed();
+    await waitFor(() => expect(screen.getByText("Что-то пошло не так")).toBeTruthy());
+    // состояние — внутри области прокрутки (не «в никуда»)
+    const state = document.querySelector(".feed-states");
+    expect(state?.closest('[data-testid="feed-scroll"]')).not.toBeNull();
+    apiMock.mockImplementation(listOk);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+  });
+
+  it("при открытом шите фильтров область под ним заблокирована (нет двойного скролла)", async () => {
+    renderFeed();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Фильтры/ })).toBeTruthy());
+    expect(feedScroll().className).not.toContain("feed-scroll--locked");
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Фильтры ленты" })).toBeTruthy());
+    expect(feedScroll().className).toContain("feed-scroll--locked");
+    // шит рендерится в portal на body — fixed-геометрия от вьюпорта
+    const sheet = screen.getByRole("dialog", { name: "Фильтры ленты" });
+    expect(sheet.parentElement).toBe(document.body);
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(feedScroll().className).not.toContain("feed-scroll--locked"),
+    );
+  });
+
+  it("уход с ленты (keep-alive) закрывает открытый шит: portal не остаётся в body", async () => {
+    // Шит рендерится в portal на document.body, а лента живёт в keep-alive:
+    // при переключении вкладки/переходе на PDP scrim и шит остались бы
+    // висеть над чужим экраном (клавиатурная навигация/Back при открытом шите).
+    function Harness() {
+      const navigate = useNavigate();
+      return (
+        <>
+          <button onClick={() => navigate("/ai")}>На AI</button>
+          <FeedScreen />
+        </>
+      );
+    }
+    render(
+      <AppRoot>
+        <MemoryRouter>
+          <Harness />
+        </MemoryRouter>
+      </AppRoot>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Фильтры ленты" })).toBeTruthy());
+    expect(document.body.classList.contains("feed-locked")).toBe(true);
+    fireEvent.click(screen.getByText("На AI"));
+    // шит исчез из body, лок страницы снят
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(feedScroll().className).not.toContain("feed-scroll--locked");
+    await waitFor(() =>
+      expect(document.body.classList.contains("feed-locked")).toBe(false),
+    );
+  });
+});
 
 describe("Feed pagination", () => {
   it("загружает первую страницу, затем авто-подгружает при скролле до конца списка", async () => {
@@ -192,5 +330,159 @@ describe("Feed pagination", () => {
     // повторного запроса ленты не было (1 вызов — от первого рендера)
     const listingCalls = apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings"));
     expect(listingCalls.length).toBe(1);
+  });
+
+  it("F10: пустой результат — «Сбросить фильтры» возвращает полную ленту", async () => {
+    apiMock.mockImplementation(async () => ({ total: 0, items: [] }));
+    renderFeed();
+    await waitFor(() => expect(screen.getByText("Ничего не найдено")).toBeTruthy());
+    expect(screen.getByText(/Под ваши фильтры машин сейчас нет/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Сбросить фильтры" })).toBeTruthy();
+    // сброс из пустого состояния (F10): действие вместо тупика
+    apiMock.mockImplementation(async (path: string) => {
+      if (path.startsWith("/filters")) return [];
+      const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset") ?? 0);
+      return page(offset, TOTAL, Math.min(20, TOTAL - offset));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20),
+    );
+  });
+
+  it("F2: панель фильтров — bottom-sheet (dialog) с живым счётчиком, Esc закрывает", async () => {
+    renderFeed();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Фильтры/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    // шит — модальный диалог с aria, id для aria-controls тумблера
+    const sheet = screen.getByRole("dialog", { name: "Фильтры ленты" });
+    expect(sheet.id).toBe("feed-panel");
+    // живой счётчик в футере (F2): total по черновику, debounce 350мс
+    await waitFor(() => expect(screen.getByText("45 авто найдено")).toBeTruthy(), {
+      timeout: 2000,
+    });
+    // Esc закрывает шит (03 §5.3)
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("keep-alive: deep-link /?… применяется и к уже смонтированной ленте (A2)", async () => {
+    // Лента живёт в keep-alive: переход из AI-поиска не размонтирует её,
+    // поэтому критерии из URL должны применяться на смонтированном экране.
+    function Harness() {
+      const navigate = useNavigate();
+      return (
+        <>
+          <button onClick={() => navigate("/?make=Kia&price_max=25000")}>
+            Показать в ленте
+          </button>
+          <FeedScreen />
+        </>
+      );
+    }
+    render(
+      <AppRoot>
+        <MemoryRouter>
+          <Harness />
+        </MemoryRouter>
+      </AppRoot>,
+    );
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBe(20));
+    fireEvent.click(screen.getByRole("button", { name: "Показать в ленте" }));
+    await waitFor(() => {
+      const listingCalls = apiMock.mock.calls
+        .map((c) => String(c[0]))
+        .filter((p) => p.includes("/listings"));
+      const last = listingCalls[listingCalls.length - 1] ?? "";
+      // критерии из URL ушли в запрос ($25 000 × 1350 = 33 750 000 вон)
+      expect(last.includes("make=Kia")).toBe(true);
+      expect(last.includes("price_max=33750000")).toBe(true);
+    });
+  });
+});
+
+describe("Feed: чипс «🏪 Рынок» (source=market, витрина партнёров)", () => {
+  /** Вызовы GET /listings (не фасеты и не limit=1-счётчик). */
+  const listingCalls = () =>
+    apiMock.mock.calls.map((c) => String(c[0])).filter((p) => p.includes("/listings?"));
+
+  it("клик по чипсу подставляет source=market в GET /listings, повторный — снимает", async () => {
+    renderFeed();
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBeGreaterThan(0),
+    );
+
+    const chip = screen.getByRole("button", { name: "🏪 Рынок" });
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(listingCalls().some((p) => p.includes("source=market"))).toBe(true),
+    );
+    // чипс активен, фильтр держится при перезагрузке той же страницы критериев
+    expect(
+      screen.getByRole("button", { name: "🏪 Рынок" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    // повторный клик снимает: последний запрос без source=market
+    fireEvent.click(screen.getByRole("button", { name: "🏪 Рынок" }));
+    await waitFor(() =>
+      expect(listingCalls()[listingCalls().length - 1].includes("source=market")).toBe(false),
+    );
+    expect(
+      screen.getByRole("button", { name: "🏪 Рынок" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+  });
+
+  it("чипс рынка не сбрасывает остальные критерии (toggle, не пресет)", async () => {
+    renderFeed();
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /Kia/ }).length).toBeGreaterThan(0),
+    );
+    // пресет «до $10 000» + рынок → в запросе и цена, и source
+    fireEvent.click(screen.getByRole("button", { name: "до $10 000" }));
+    await waitFor(() =>
+      expect(listingCalls().some((p) => p.includes("price_max=13500000"))).toBe(true),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "🏪 Рынок" }));
+    await waitFor(() => {
+      const last = listingCalls()[listingCalls().length - 1];
+      expect(last.includes("source=market")).toBe(true);
+      expect(last.includes("price_max=13500000")).toBe(true);
+    });
+  });
+});
+
+describe("Feed: шит фильтров — Хик: секции и «Ещё параметры»", () => {
+  it("редкие поля (цвет/привод/объём) свёрнуты в «Ещё параметры», частые — всегда видны", async () => {
+    renderFeed();
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Фильтры ленты" })).toBeTruthy());
+    // свёрнуто: редких полей в DOM нет, кнопка-раскрытие с aria-expanded
+    expect(screen.queryByLabelText("Цвет")).toBeNull();
+    expect(screen.queryByLabelText("Привод")).toBeNull();
+    expect(screen.queryByLabelText("Объём, л — от")).toBeNull();
+    const more = screen.getByRole("button", { name: /Ещё параметры/ });
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(more);
+    expect(screen.getByLabelText("Цвет")).toBeTruthy();
+    expect(screen.getByLabelText("Привод")).toBeTruthy();
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    // частые поля живут вне блока раскрытия — видны без раскрытия
+    expect(screen.getByLabelText("Цена $ до")).toBeTruthy();
+    expect(screen.getByLabelText("Пробег, км — не более")).toBeTruthy();
+  });
+
+  it("активный редкий фильтр раскрывает блок автоматически при повторном открытии шита", async () => {
+    renderFeed();
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Фильтры ленты" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Ещё параметры/ }));
+    fireEvent.change(screen.getByLabelText("Цвет"), { target: { value: "white" } });
+    fireEvent.click(screen.getByText("Применить"));
+    await waitFor(() => expect(screen.getByText("Фильтры · 1")).toBeTruthy());
+    // переоткрытие шита: цвет уже активен — «Ещё параметры» раскрыты сами
+    fireEvent.click(screen.getByRole("button", { name: /Фильтры/ }));
+    await waitFor(() => expect(screen.getByLabelText("Цвет")).toBeTruthy());
+    expect((screen.getByLabelText("Цвет") as HTMLSelectElement).value).toBe("white");
   });
 });

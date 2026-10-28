@@ -47,6 +47,17 @@ class ListingOut(BaseModel):
     # price_history дозаполняет только карточка (в ленте — N+1),
     # first_price — список избранного (бейдж «цена снизилась»).
     is_active: bool = True
+    # Бейдж «чек есть» на карточке ленты (аудит F7).
+    has_inspection: bool = False
+    # Лот внутреннего рынка — бейдж «🏪 Рынок» (06 §4: owner_type лота).
+    has_market: bool = False
+    # Владелец owner-лота (06 §4): 'user' («Частник») | 'partner' («Салон»).
+    owner_type: Optional[str] = None
+    # Описание от владельца — PDP-блок «От владельца» (06 §4).
+    owner_description: Optional[str] = None
+    # История машины «как в Корее» (07 §3): события [{date, title, note?}]
+    # партнёра, свежие первыми; пустой список — истории нет.
+    owner_history: list[dict[str, Any]] = Field(default_factory=list)
     first_seen_at: Optional[datetime] = None
     first_price: Optional[float] = None
     price_history: Optional[list[PricePointOut]] = None
@@ -121,6 +132,9 @@ class InspectionMark(BaseModel):
     zone: Literal[tuple(BODY_ZONES)]  # type: ignore[valid-type]
     type: Literal[tuple(MARK_TYPES)]  # type: ignore[valid-type]
     note: Optional[str] = Field(default=None, max_length=300)
+    # Пиксельные координаты метки на диаграмме Encar (вид сверху, 254x282);
+    # diagrams: outer → img_inspection01.gif, frame → img_inspection02_new.gif.
+    pos: Optional[tuple[int, int]] = None
 
 
 class InspectionItem(BaseModel):

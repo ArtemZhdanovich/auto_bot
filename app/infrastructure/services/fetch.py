@@ -217,6 +217,11 @@ async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
         if value is not None and getattr(listing, field, None) is None:
             setattr(listing, field, value)
             updates[field] = value
+    # Остатки хангыля (цвет «진주색» и пр., мимо глоссария normalize_*)
+    # → русский через микросервис; сбой не мешает обогащению.
+    await _translate_enriched_values(updates)
+    for field, value in updates.items():
+        setattr(listing, field, value)
     # 3.7: флаг ставится после ЛЮБОЙ попытки (успешной или «источник ничего
     # не отдал») — второй раз наружу за этим лотом не ходим.
     listing.specs_enriched_at = datetime.now(timezone.utc)
@@ -226,3 +231,34 @@ async def enrich_listing_specs(session: AsyncSession, listing: Listing) -> bool:
     else:
         await session.commit()
     return bool(updates)
+
+
+async def _translate_enriched_values(updates: dict[str, Any]) -> None:
+    """Перевести корейские значения обогащения (in-place в `updates`)."""
+    from app.domain.translation.glossary import apply_glossary
+    from app.infrastructure.sources.common.translate import HANGUL_RE
+
+    hangul = {
+        field: value
+        for field, value in updates.items()
+        if isinstance(value, str) and HANGUL_RE.search(value)
+    }
+    if not hangul:
+        return
+    from app.infrastructure.services.translate_client import (
+        translate_client_from_settings,
+    )
+
+    try:
+        translator = translate_client_from_settings()
+        translated = await translator.translate(
+            [apply_glossary(v)[:500] for v in hangul.values()],
+            source_lang="ko",
+            target_lang="ru",
+        )
+    except Exception:  # noqa: BLE001 — перевод не должен ломать enrichment
+        logger.warning("enrich_translate_failed fields=%s", sorted(hangul))
+        return
+    for (field, original), value in zip(hangul.items(), translated or []):
+        if value:
+            updates[field] = value

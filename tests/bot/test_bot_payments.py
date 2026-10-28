@@ -34,7 +34,7 @@ def _reset_cooldown():
 
 @pytest.mark.asyncio
 async def test_pre_checkout_rejects_bad_payload():
-    """6.9: payload не вида `sub:<id>` → ok=False, Stars не списываются."""
+    """6.9: payload не вида `sub:<id>`/`plc:<id>` → ok=False, Stars не списываются."""
     answers = []
 
     async def answer(**kw):
@@ -48,6 +48,10 @@ async def test_pre_checkout_rejects_bad_payload():
     await handlers.pre_checkout_query(query2)
     assert answers[-1]["ok"] is False
 
+    query3 = SimpleNamespace(invoice_payload="plc:xyz", answer=answer)
+    await handlers.pre_checkout_query(query3)
+    assert answers[-1]["ok"] is False
+
 
 @pytest.mark.asyncio
 async def test_pre_checkout_accepts_valid_payload():
@@ -57,6 +61,20 @@ async def test_pre_checkout_accepts_valid_payload():
         answers.append(kw)
 
     query = SimpleNamespace(invoice_payload="sub:123", answer=answer)
+    await handlers.pre_checkout_query(query)
+    assert answers == [{"ok": True}]
+
+
+@pytest.mark.asyncio
+async def test_pre_checkout_accepts_placement_payload():
+    """06 §2: инвойс продления размещения (plc:<id>) проходит pre-checkout —
+    иначе оплата Stars-размещения невозможна вовсе."""
+    answers = []
+
+    async def answer(**kw):
+        answers.append(kw)
+
+    query = SimpleNamespace(invoice_payload="plc:77", answer=answer)
     await handlers.pre_checkout_query(query)
     assert answers == [{"ok": True}]
 
@@ -160,3 +178,46 @@ async def test_payment_success_first_try_no_alert(monkeypatch):
     await handlers.on_successful_payment(message)
     assert len(attempts) == 1
     assert any("активирован" in (t or "") for t in sent)
+
+
+@pytest.mark.asyncio
+async def test_payment_success_placement_message(monkeypatch):
+    """06 §2: kind='placement' — сообщение про продление объявления,
+    без «Тариф … активирован»."""
+    attempts = []
+
+    async def payment_success(**kw):
+        attempts.append(kw)
+        return {
+            "activated": True,
+            "tier": None,
+            "subscription_until": None,
+            "kind": "placement",
+            "listing_id": 5,
+            "placement_paid_until": "2026-12-01T00:00:00Z",
+        }
+
+    async def no_sleep(*a, **kw):
+        return None
+
+    monkeypatch.setattr(handlers.backend, "payment_success", payment_success)
+    monkeypatch.setattr(handlers, "asyncio", SimpleNamespace(sleep=no_sleep))
+
+    sent = []
+
+    async def answer(text=None, **kw):
+        sent.append(text)
+
+    message = SimpleNamespace(
+        answer=answer,
+        from_user=SimpleNamespace(id=9),
+        successful_payment=SimpleNamespace(
+            invoice_payload="plc:78",
+            telegram_payment_charge_id="chg3",
+            total_amount=20,
+        ),
+    )
+    await handlers.on_successful_payment(message)
+    assert len(attempts) == 1
+    assert any("Объявление продлено" in (t or "") for t in sent)
+    assert not any("Тариф" in (t or "") for t in sent)

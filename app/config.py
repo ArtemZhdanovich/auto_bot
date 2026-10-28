@@ -1,5 +1,6 @@
 """Конфигурация приложения (ТЗ п. 11.6 — переменные окружения)."""
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
@@ -144,6 +145,19 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "INTERNAL_TOKEN обязателен в prod: fallback на APP_SECRET_KEY "
                     "связывает компрометацию JWT-секрета с доступом к internal API"
+                )
+            # Чаты (05 §4): дев-секрет centrifugo в prod позволяет фальшивый
+            # connection-JWT (sub=user:{любой id}) → подписка на чужой личный
+            # канал user:{id} уведомлений; api-ключ — публикацию в каналы.
+            if self.centrifugo_secret.get_secret_value() == "change-me":
+                raise ValueError(
+                    "CENTRIFUGO_SECRET не задан (dev-дефолт change-me) — в prod "
+                    "это запрещено: подделка ws-JWT открывает чужие каналы"
+                )
+            if self.centrifugo_http_api_key.get_secret_value() == "change-me":
+                raise ValueError(
+                    "CENTRIFUGO_HTTP_API_KEY не задан (dev-дефолт change-me) — "
+                    "в prod это запрещено: дев-ключ публикует в каналы чатов"
                 )
             # TECHDEBT 1.6: дев-дефолты URL (localhost/guest-креды) в prod —
             # верный способ «случайно» поднять прод на локальной БД или
@@ -321,6 +335,17 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     raw_retention_days: int = Field(default=180, gt=0)  # retention-крон: удалять объекты старше N дней
     raw_presign_ttl_sec: int = Field(default=600, gt=0)  # presigned GET для админки, 10 мин
+    # Фотографии лотов рынка (07 §1): отдельный bucket с public-read
+    # policy — фронт грузит <img> напрямую, без presign. Креды/endpoint
+    # общие с raw-payload (S3_*); публичный адрес собирается из
+    # S3_PUBLIC_URL (MinIO из браузера виден по localhost, не по minio).
+    s3_photos_bucket: str = "market-photos"
+    s3_public_url: str = "http://localhost:9000"
+    # Зеркалирование фото внешних лотов при парсинге (docs/REDESIGN/11 §3):
+    # первые N фото лота качаются в S3; 0 = выключено.
+    market_photo_mirror_limit: int = 5
+    # Лотов за один прогон фоновой задачи mirror_photos_task
+    market_mirror_batch: int = 40
 
     @model_validator(mode="after")
     def _check_s3_config(self) -> "Settings":
@@ -384,10 +409,76 @@ class Settings(BaseSettings):
     svc_partners_url: str = "http://localhost:8104"
     svc_dialog_url: str = "http://localhost:8105"
     svc_admin_url: str = "http://localhost:8106"
+    svc_chat_url: str = "http://localhost:8107"
+
+    # --- Centrifugo (чаты/внутренний рынок, редизайн часть 5) ---
+    # Сервер websocket-пушей: publish-API для бэкенда и точка подключения
+    # браузерных клиентов (JWT подписывается centrifugo_secret, публикация —
+    # по centrifugo_http_api_key). Dev-дефолты — локальный centrifugo.
+    centrifugo_url: str = "http://localhost:8008"
+    # URL для БРАУЗЕРА (ws-endpoint centrifugo): в docker внутренний
+    # centrifugo:8008 с хоста недостижим — публичный отдаётся в ws-token.
+    centrifugo_public_url: str = ""
+    centrifugo_secret: SecretStr = SecretStr("change-me")
+    centrifugo_http_api_key: SecretStr = SecretStr("change-me")
 
     # Guest rate limit (TECHDEBT 1.4): созданий гостевых сессий с одного IP
     # в минуту (фиксированное окно в Redis; превышение → 429).
     guest_ip_rate_limit: int = Field(default=5, gt=0)
+
+    # --- Рынок объявлений пользователей (редизайн часть 6, §3) ---
+    # Бесплатный период размещения лота юзера (дней) и цена недели
+    # продления в Stars (1 нед = market_week_stars, 4 нед = x3).
+    market_free_days: int = Field(default=7, gt=0)
+    market_week_stars: int = Field(default=20, gt=0)
+    # Сколько платных (по Stars) лотов сверх бесплатного/включённого.
+    market_user_max_paid_lots: int = Field(default=3, ge=1)
+    # Кулдаун бесплатного периода (дней): free-период даётся не чаще раза
+    # в N дней на юзера — иначе ротация «снять/создать» даёт бесконечные
+    # бесплатные недели (аудит 06 §3). 0 — отключить кулдаун.
+    market_free_cooldown_days: int = Field(default=30, ge=0)
+    # Пакеты размещений для партнёров: {"размер": цена_в_рублях}.
+    market_partner_packages: dict[str, int] = Field(
+        default_factory=lambda: {"10": 500, "50": 1800, "200": 5000}
+    )
+    # Словарь запрещённых слов авто-модерации лотов (10 §2: конкуренты,
+    # крипта, оружие, «инвестиции», обман-паттерны; RU+EN). Сравнение —
+    # подстрока без учёта регистра по описанию и марке/модели.
+    market_forbidden_words: list[str] = Field(
+        default_factory=lambda: [
+            "авито",
+            "avito",
+            "drom",
+            "авто.ру",
+            "auto.ru",
+            "крипта",
+            "криптовалюта",
+            "биткоин",
+            "bitcoin",
+            "оружие",
+            "казино",
+            "casino",
+            "инвестиции",
+            "заработок",
+            "обман",
+            "скам",
+            "scam",
+        ]
+    )
+
+    @property
+    def market_packages(self) -> dict[int, Decimal]:
+        """Пакеты партнёрских размещений: `{size: price_rub}` (Decimal).
+
+        Ключи конфига — строки (env/JSON), бизнес-логике нужны int-размеры
+        и точные суммы (баланс партнёра — Numeric(12,2)).
+        """
+        return {
+            int(size): Decimal(str(price))
+            for size, price in self.market_partner_packages.items()
+        }
+
+    # Alerting / мониторинг (этап 8, ТЗ п. 10)
 
     # Alerting / мониторинг (этап 8, ТЗ п. 10)
     alerts_enabled: bool = True  # алерты в Telegram на ADMIN_CHAT_ID

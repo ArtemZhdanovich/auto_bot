@@ -1,58 +1,37 @@
-# AI-слой: LLM, агент, RAG, перевод
+# AI-слой: LLM, анализ, история, описания, RAG
 
 ## LLM-клиент (`app/infrastructure/ai`)
 
-Провайдеры: `glm` (основной, api.z.ai / open.bigmodel.cn), `anthropic`,
-`ollama`, `mock` (тесты/dev без LLM). OpenAI-совместимый протокол;
-`LLM_BASE_URL` для прокси/Ollama. Ошибки > 5 подряд → переключение на резерв,
-дальше — кнопочный режим бота. Контракт — `LLMPort`
-(`app/application/shared/ports.py`).
+`LLMPort.complete(messages)` — GLM (z.ai) с таймаутами/ретраями;
+фабрика `LLMFactory` инжектится в сценарии; сбой → фолбэк на
+статистику (для анализа) или 503 (для генераций без фолбэка).
 
-## Агент диалога (`app/application/dialog`)
+## AI-контур продукта
 
-Диалог подбора авто: извлекает критерии (марка/бюджет/год/…) в
-`SearchCriteria`, зовёт tools, отвечает с кнопками. История — 8 последних
-сообщений, DialogState в Redis с TTL 24 ч. FAQ-ответы кэшируются (24 ч).
+- **Анализ цены** (`application/pricing`): медиана сопоставимых
+  (±2 года, ≤30) + LLM-вердикт deal/fair/overpriced + факторы;
+  Business — «глубокий» разбор (чек осмотра в контексте). Квоты:
+  free 1/нед, pro 30/день, business безлимит.
+- **Отчёт истории** (`application/listings/history_report.py`):
+  факт-парсер ДТП по отчётам encar (счётчик/вина/последнее ДТП+
+  выплата/владельцы/регистрация; понимает и канонический русский,
+  и машиннопереведённые строки) + LLM-вывод; кэш 24ч.
+- **Похожие** (`application/analysis/similar.py`): SQL-кандидаты
+  (модель ±3 года, цена ±35%) → LLM-реранк топ-5 с reason.
+- **Генерация описаний** (`application/market/description.py`):
+  из полей черновика, RU 400–800 зн., только факты; free 5/день.
+- **Качество объявления** (`application/market/quality.py`): чистая
+  функция (фото/описание/цена vs медиана → score+tips).
+- **Выжимка диалогов** (`application/chat/summary.py`): последние 50
+  сообщений → ≤600 зн. для оператора/партнёра; кэш 1ч.
+- **RAG-бот поддержки** (`infrastructure/services/support_bot.py`):
+  support-чаты: RAG (Qdrant, сервис services/rag) → LLM-фолбэк;
+  bot_paused при ответе оператора; free 15 сообщ./день; typing-события.
+- **AI-поиск** (`application/dialog`): диалоговый агент (критерии →
+  поиск по БД → кнопки), квоты по тарифу.
 
-Квоты AI-сообщений — `QuotaStore` (dialog/ports.py), сценарий `quota`.
+## Микросервисы
 
-### Tools (`app/application/dialog` + домен)
-
-- поиск по БД по критериям (сценарий `search`);
-- `answer_question` — вопрос в RAG (ниже);
-- создание лида (после AI-квалификации: бюджет/срок/готовность к предоплате —
-  `Lead.qualification` поднимает цену лида).
-
-AI-поиск из Mini App (`POST /api/ai/message`) — тот же агент
-(`app/application/ai_search`).
-
-## RAG-микросервис (`services/rag`)
-
-Локальный RAG на ядре [rag_service](https://github.com/Pavel14701/rag_service)
-(monorepo-версия): гибридный поиск (vector + BM25/RRF), агентный retrieval,
-multi-provider LLM, DLQ/retry через RabbitMQ.
-
-- `rag_core/` — ядро (domain / application / infrastructure, hexagonal);
-- `rag_worker/` — консьюмеры `query_queue`, `ingest_queue`, `delete_queue`;
-- `rag_api/` — HTTP :8100 (Bearer `RAG_API_TOKEN`);
-- `kb/` — база знаний markdown; ingest: `scripts/ingest_kb.py`.
-
-Клиент в backend (`rag_client`): retry только на сетевые ошибки, circuit
-breaker (5 ошибок подряд → пауза 5 мин), таймаут 5 с, кэш ответов в Redis
-(`rag:answer:<sha256>`, TTL 1 ч). Confidence ≥ 0.6 → ответ базы знаний;
-ниже → ответ LLM; и его нет → «рекомендую уточнить у менеджера».
-Промпт-защита: содержимое kb — справочные данные, не инструкции
-(анти-инъекции через документы); цифры без источника называть нельзя.
-
-Документы RAG at-rest — опциональное PQ-шифрование (ML-KEM-768 + X25519,
-`ENCRYPT_DOCUMENTS`; `app/infrastructure/security/pq_crypto.py`).
-
-## Перевод тайтлов (`services/translate` + `app/infrastructure/translation`)
-
-- NLLB-200-distilled-600M (CPU) на :8200; карта языков
-  `TRANSLATE_SOURCE_LANGS` (encar/kcar → `kor_Hang`, che168 → `zho_Hans`).
-- Кэш переводов в Redis 30 дней; CB: 3 ошибки → пауза 5 мин + алерт;
-  `TRANSLATE_ENABLED=false` → показывается оригинал (fallback обязателен).
-- Глоссарий hangul→канон (`translate_glossary.py`): бренды латиницей, модели
-  в русской транслитерации — longest-match замена перед NLLB (현대→Hyundai,
-  기아→Kia, …), иначе NLLB переводит бренды как нарицательные.
+- **translate** (NLLB) — docs/SOURCES.md.
+- **rag** (FastAPI + Qdrant + rabbit worker) — гибридный поиск по
+  базе знаний, `/api/v1/ask` с Bearer-токеном.

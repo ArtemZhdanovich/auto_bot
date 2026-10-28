@@ -1,7 +1,12 @@
 /** Авторизация Mini App: initData → POST /api/auth/telegram → JWT (ТЗ п. 9.1). */
 
 import { api, clearTokens, setTokens } from "./client";
+import { persistentGet, persistentRemove, persistentSet } from "../lib/persistentState";
 import type { AuthResponse } from "./types";
+
+/** Флаг гостевой сессии — персистентный (localStorage): F5 гостя не
+ *  разлогинивает (как и токены в api/client). */
+const GUEST_KEY = "autobot.guest";
 
 interface WebAppUser {
   id: number;
@@ -16,6 +21,8 @@ interface TelegramWebApp {
   initDataUnsafe?: { user?: WebAppUser; start_param?: string };
   ready: () => void;
   expand: () => void;
+  /** Тема клиента: "light" | "dark" — источник для system-режима (lib/theme). */
+  colorScheme?: string;
   themeParams?: Record<string, string>;
   HapticFeedback?: { impactOccurred: (s: string) => void };
   /** Открыть внешнюю ссылку из миниаппа (target="_blank"/window.open заблокированы WebView). */
@@ -110,22 +117,24 @@ export async function pollTelegramLogin(code: string): Promise<TelegramLoginPoll
 export async function guestLogin(): Promise<AuthResponse> {
   const resp = await api<AuthResponse>("/auth/guest", { method: "POST" });
   setTokens(resp.access_token, resp.refresh_token);
-  sessionStorage.setItem("autobot.guest", "1");
+  persistentSet(GUEST_KEY, "1");
   return resp;
 }
 
-/** Текущая сессия — гостевая? */
+/** Текущая сессия — гостевая? Флаг персистентный: после F5 гость
+ *  остаётся гостем (без повторного guestLogin, пока токен валиден). */
 export function isGuest(): boolean {
-  return sessionStorage.getItem("autobot.guest") === "1";
+  return persistentGet(GUEST_KEY) === "1";
 }
 
 /** Выход из гостевого режима (перед входом/регистрацией). */
 export function clearGuest(): void {
-  sessionStorage.removeItem("autobot.guest");
+  persistentRemove(GUEST_KEY);
 }
 
 export function logout(): void {
   clearTokens();
+  clearGuest(); // «Выход» — единственный способ разлогиниться: чистим всё
 }
 
 export function tgUser(): WebAppUser | null {

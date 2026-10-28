@@ -1,0 +1,8 @@
+{
+  "plugins": {
+    "enabledPlugins": {
+      "cloudbase-skills@zcode-plugins-official": false,
+      "zcode-mcp-app-dev@zcode-plugins-official": false
+    }
+  }
+}

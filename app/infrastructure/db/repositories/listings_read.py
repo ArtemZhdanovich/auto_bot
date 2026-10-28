@@ -8,9 +8,12 @@ USD, keyset-условие, `count(*)` только в offset-режиме и з
 
 from __future__ import annotations
 
+import dataclasses
+
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from sqlalchemy import exists
 from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +25,7 @@ from app.application.catalog.dto import (
     ListingFeedQuery,
     PricePoint,
 )
+from app.application.market.dto import LISTING_STATUS_ACCEPTED
 from app.infrastructure.db.models import (
     InspectionReport,
     Listing,
@@ -41,6 +45,8 @@ from app.infrastructure.sources.common.normalize import (
 # Курс для нормализации сортировки/фильтра в USD. TODO: вынести в Settings.usd_krw.
 _USD_KRW_FALLBACK = 1350.0
 _FACETS_LIMIT = 500
+# Окно цены для «похожих» машин: ±35% от цены исходного объявления.
+_SIMILAR_PRICE_TOLERANCE = Decimal("0.35")
 
 
 def _usd_price_expr():
@@ -54,6 +60,15 @@ def _usd_price_expr():
 def _escape_like(value: str) -> str:
     """Экранирует `%`, `_` и `\\` для `ILIKE ... ESCAPE '\\\\'`."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# Значение `source`-фильтра, включающее внутренний рынок (06 §4).
+_MARKET_SOURCE = "market"
+
+
+def _is_market_feed(query: ListingFeedQuery) -> bool:
+    """Чипс «🏪 Рынок»: source=market → owner-лоты (owner_type IS NOT NULL)."""
+    return bool(query.source) and query.source.strip().lower() == _MARKET_SOURCE
 
 
 def _to_card(row: Listing) -> ListingCard:
@@ -81,6 +96,14 @@ def _to_card(row: Listing) -> ListingCard:
         images=tuple(getattr(row, "images", None) or ()),
         options=[str(o) for o in (getattr(row, "options", None) or [])],
         is_active=True if is_active is None else bool(is_active),
+        # Владелец лота рынка (06 §4): бейдж «🏪 Салон»/«👤 Частник» на PDP.
+        owner_type=getattr(row, "owner_type", None),
+        owner_description=getattr(row, "owner_description", None),
+        # История машины (07 §3): события партнёра для PDP-таймлайна.
+        owner_history=[
+            dict(event)
+            for event in (getattr(row, "owner_history", None) or [])
+        ],
         first_seen_at=getattr(row, "first_seen_at", None),
         last_seen_at=getattr(row, "last_seen_at", None),
         updated_at=getattr(row, "updated_at", None),
@@ -133,7 +156,16 @@ class SqlAlchemyListingReadRepository:
         }[query.sort]
 
         limit = max(1, query.limit)
-        stmt = select(Listing).where(*conditions)
+        # Чипс «🏪 Рынок» (06 §4): owner-лоты — фильтр owner_type IS NOT NULL
+        # (JOIN partner_offers из ленты убран: рынок = лоты с владельцем).
+        # Бейдж «чек есть» (аудит F7) — EXISTS в том же запросе, без N+1.
+        # «🏪 Рынок» (06 §4) — owner_type самой строки, отдельный EXISTS не нужен.
+        has_check = exists().where(InspectionReport.listing_id == Listing.id)
+        stmt = select(
+            Listing,
+            has_check.label("has_inspection"),
+            Listing.owner_type.is_not(None).label("has_market"),
+        ).where(*conditions)
         if cursor is not None:
             # Keyset: строго после позиции курсора, без offset и count(*).
             stmt = stmt.where(
@@ -144,21 +176,35 @@ class SqlAlchemyListingReadRepository:
             stmt = stmt.offset(query.offset)
 
         # limit + 1 — чтобы отличить «страница заполнена» от «есть продолжение».
-        rows = (
+        result_rows = (
             await self._session.execute(
                 stmt.order_by(*order).limit(limit + 1)
             )
-        ).scalars().all()
-        has_more = len(rows) > limit
-        items = [_to_card(row) for row in rows[:limit]]
+        ).all()
+        has_more = len(result_rows) > limit
+        items = []
+        for entry in result_rows[:limit]:
+            # (Listing, has_inspection, has_market); фейки в тестах отдают
+            # только ORM-строку — недостающие флаги считаем False.
+            try:
+                row, *flags = entry
+                has_insp = bool(flags[0]) if len(flags) > 0 else False
+                has_mkt = bool(flags[1]) if len(flags) > 1 else False
+            except (TypeError, ValueError):
+                row, has_insp, has_mkt = entry, False, False
+            card = _to_card(row)
+            if has_insp:
+                card = dataclasses.replace(card, has_inspection=True)
+            if has_mkt:
+                card = dataclasses.replace(card, has_market=True)
+            items.append(card)
 
         total: int | None = None
         if cursor is None:
-            total = (
-                await self._session.execute(
-                    select(func.count()).select_from(Listing).where(*conditions)
-                )
-            ).scalar_one()
+            count_stmt = select(func.count()).select_from(Listing).where(
+                *conditions
+            )
+            total = (await self._session.execute(count_stmt)).scalar_one()
         return items, total, has_more
 
     def _conditions(self, query: ListingFeedQuery) -> list:
@@ -166,7 +212,15 @@ class SqlAlchemyListingReadRepository:
         # is_active — обязательный фильтр, не считается «пользовательским».
         conditions: list = [Listing.is_active.is_(True)]
 
-        if query.source:
+        if _is_market_feed(query):
+            # Рынок = owner-лоты (06 §4): владелец юзер или партнёр,
+            # источник лота (source='market') не фильтруется отдельно.
+            conditions.append(Listing.owner_type.is_not(None))
+            # Жизненный цикл (10 §1): только одобренные — draft/moderation/
+            # rejected/expired в ленте не видны. Внешним лотам backfill
+            # миграции 0030 проставил 'accepted' — условие единое для всех.
+            conditions.append(Listing.status == LISTING_STATUS_ACCEPTED)
+        elif query.source:
             conditions.append(func.lower(Listing.source) == query.source.lower())
         else:
             # MVP: только Корея — без `source` отдаём encar+kcar.
@@ -293,9 +347,22 @@ class SqlAlchemyListingReadRepository:
     # ------------------------------------------------------------------
 
     async def get_active(self, listing_id: int) -> ListingCard | None:
-        """Активное объявление или None."""
+        """Активное объявление или None.
+
+        Жизненный цикл (10 §1): владелец-лоты видны только в статусе
+        'accepted' (draft/moderation/rejected/expired → 404 на PDP);
+        внешние лоты после backfill 0030 всегда 'accepted', неактивные
+        по-прежнему отсекаются is_active.
+        """
         row = await self._session.get(Listing, listing_id)
         if row is None or not getattr(row, "is_active", True):
+            return None
+        # None толерантен только для нефлашнутых ORM-объектов в тестовых
+        # фейках: в БД колонка NOT NULL (миграция 0030).
+        if getattr(row, "status", LISTING_STATUS_ACCEPTED) not in (
+            None,
+            LISTING_STATUS_ACCEPTED,
+        ):
             return None
         return _to_card(row)
 
@@ -330,6 +397,58 @@ class SqlAlchemyListingReadRepository:
             )
             for row in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Похожие (кнопка «Найти похожие»)
+    # ------------------------------------------------------------------
+
+    async def similar_candidates(
+        self, listing_id: int, *, limit: int = 24
+    ) -> list[ListingCard]:
+        """Кандидаты «похожих машин» (та же модель, ±3 года, цена ±35%).
+
+        Активные объявления с той же `lower(make)`/`lower(model)`, кроме
+        исходного. Фильтр и сортировка по цене применяются только если у
+        исходного есть цена (иначе — только марка/модель/год); кандидат
+        без года включается, если фильтр года задан.
+        """
+        source = await self._session.get(Listing, listing_id)
+        if source is None:
+            return []
+
+        conditions: list = [Listing.is_active.is_(True), Listing.id != listing_id]
+        if source.make:
+            conditions.append(func.lower(Listing.make) == source.make.lower())
+        if source.model:
+            conditions.append(func.lower(Listing.model) == source.model.lower())
+        if source.year is not None:
+            # Кандидаты без года не отсекаются — «похоже и без года» лучше пустоты.
+            conditions.append(
+                Listing.year.is_(None)
+                | Listing.year.between(source.year - 3, source.year + 3)
+            )
+
+        price = source.price
+        if price is not None:
+            conditions.append(Listing.price.isnot(None))
+            # Окно «цена ±35%» (нечто похожее |price - исходная| <= 0.35*исходной).
+            conditions.extend(
+                (
+                    Listing.price >= price - price * _SIMILAR_PRICE_TOLERANCE,
+                    Listing.price <= price + price * _SIMILAR_PRICE_TOLERANCE,
+                )
+            )
+            order = (func.abs(Listing.price - price).asc(), Listing.id.desc())
+        else:
+            # Нечего сравнивать по цене — свежие кандидаты первыми (как лента).
+            order = (Listing.parsed_at.desc(), Listing.id.desc())
+
+        rows = (
+            await self._session.execute(
+                select(Listing).where(*conditions).order_by(*order).limit(limit)
+            )
+        ).scalars().all()
+        return [_to_card(row) for row in rows]
 
     # ------------------------------------------------------------------
     # Осмотр

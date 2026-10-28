@@ -1,8 +1,11 @@
 """SQL-реализация порта `PartnerRepository` на `AsyncSession`.
 
-Отвечает только за доступ к БД (ORM → доменные снимки). Логика use case'ов
-вынесена в `app.application.partners.use_cases`, фасады для легаси — в
-`app.infrastructure.services.partners.facades`.
+Отвечает за доступ к БД (ORM → доменные снимки) и за транзакционные
+побочные эффекты, которые нельзя сделать из сценария без второго
+коммита: авто-suspend при пустом балансе и синхронизацию тарифа
+владельца счёта (active → бессрочный Business, suspended → free).
+Логика use case'ов вынесена в `app.application.partners.use_cases`,
+фасады для легаси — в `app.infrastructure.services.partners.facades`.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from decimal import Decimal
 from sqlalchemy import Select, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.errors import InvalidInput
 from app.application.partners.dto import (
     IssuedKey,
     PartnerLeadView,
@@ -30,11 +34,13 @@ from app.domain.partners.ports import (
     PartnerAccountState,
     PartnerLead,
 )
+from app.domain.subscription.policies import grant_partner_business
 from app.infrastructure.db.models import (
     Lead,
     PartnerAccount,
     PartnerApiKey,
     PartnerTransaction,
+    User,
 )
 from app.infrastructure.security.partner_keys import (
     generate_api_key,
@@ -79,6 +85,8 @@ def _account_state(account: PartnerAccount) -> PartnerAccountState:
         balance=account.balance,
         daily_quota=account.daily_quota,
         cpl_rate=account.cpl_rate,
+        placement_slots=getattr(account, "placement_slots", 0) or 0,
+        placement_slots_used=getattr(account, "placement_slots_used", 0) or 0,
     )
 
 
@@ -129,6 +137,7 @@ def _admin_view(
         created_at=account.created_at,
         claimed_today=claimed_today,
         key_prefix=key_prefix,
+        owner_telegram_id=account.owner_telegram_id,
     )
 
 
@@ -368,7 +377,13 @@ class SqlAlchemyPartnerRepository:
         daily_quota: int,
         balance: Decimal,
         cpl_rate: Decimal | None,
+        owner_telegram_id: int | None = None,
     ) -> IssuedKey:
+        # Владелец счёта (если задан) обязан существовать: счёт не создаём,
+        # пока telegram_id не подтверждён (сценарий отдаст InvalidInput).
+        owner_user: User | None = None
+        if owner_telegram_id is not None:
+            owner_user = await self._require_owner(owner_telegram_id)
         account = PartnerAccount(
             name=name,
             contact=contact,
@@ -377,6 +392,7 @@ class SqlAlchemyPartnerRepository:
             status="active",
             balance=Decimal(balance),
             cpl_rate=cpl_rate,
+            owner_telegram_id=owner_telegram_id,
         )
         self._session.add(account)
         await self._session.flush()
@@ -391,6 +407,10 @@ class SqlAlchemyPartnerRepository:
                 status="active",
             )
         )
+        # Новый счёт активен: клиент/сотрудник партнёра сразу получает
+        # бессрочный Business (эффективность тарифа — `effective_tier`).
+        if owner_user is not None:
+            grant_partner_business(owner_user)
         await self._session.commit()
         return IssuedKey(
             partner_id=partner_id,
@@ -439,12 +459,48 @@ class SqlAlchemyPartnerRepository:
     ) -> None:
         if not changes:
             return
+        account = await self._session.get(
+            PartnerAccount, partner_id, populate_existing=True
+        )
+        if account is None:
+            return  # 404 уже отдал сценарий; менять нечего
+        final_owner = changes.get("owner_telegram_id", account.owner_telegram_id)
+        final_status = changes.get("status", account.status)
+
+        # Синхронизация тарифа владельца — только когда правка касается
+        # владельца или статуса (правки квоты/тарифа плана пользователя
+        # не трогают). Явно заданный владелец обязан существовать.
+        owner_user: User | None = None
+        if final_owner is not None and (
+            "owner_telegram_id" in changes or "status" in changes
+        ):
+            if "owner_telegram_id" in changes:
+                owner_user = await self._require_owner(final_owner)
+            else:
+                owner_user = await self._session.get(User, final_owner)
+
         await self._session.execute(
             update(PartnerAccount)
             .where(PartnerAccount.id == partner_id)
             .values(**changes)
         )
+        if owner_user is not None:
+            if final_status == "active":
+                grant_partner_business(owner_user)
+            else:
+                # Партнёр suspended — бессрочный Business снимается.
+                owner_user.subscription_tier = "free"
+                owner_user.subscription_until = None
         await self._session.commit()
+
+    async def _require_owner(self, telegram_id: int) -> User:
+        """Пользователь-владелец по `telegram_id` или `InvalidInput`."""
+        user = await self._session.get(User, telegram_id)
+        if user is None:
+            raise InvalidInput(
+                f"Owner user with telegram_id={telegram_id} not found"
+            )
+        return user
 
     async def get_admin_view(
         self, partner_id: int

@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.pricing.ports import (
+    AnalysisHistoryItem,
     ListingQuery,
     MarketContext,
     PriceAnalysisRecord,
@@ -39,6 +40,70 @@ class SqlAlchemyPriceAnalysisRepository:
             )
         )
         return int(result.scalar_one())
+
+    async def count_recent_user(self, user_id: int, *, since: datetime) -> int:
+        """Сколько разборов ЛЮБЫХ машин юзер запросил с `since`.
+
+        Квота окна считается по всем машинам суммарно: Free — 1 разбор
+        в неделю на всё, Pro — 30 в день.
+        """
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(PriceAnalysis)
+            .where(
+                PriceAnalysis.user_id == user_id,
+                PriceAnalysis.created_at >= since,
+            )
+        )
+        return int(result.scalar_one())
+
+    async def list_for_user(
+        self, user_id: int, *, limit: int = 50
+    ) -> list[AnalysisHistoryItem]:
+        """История разборов пользователя с карточкой машины («Мои анализы»)."""
+        result = await self._session.execute(
+            select(
+                PriceAnalysis,
+                Listing.make,
+                Listing.model,
+                Listing.year,
+                Listing.price,
+                Listing.currency,
+                Listing.images,
+            )
+            .join(Listing, Listing.id == PriceAnalysis.listing_id)
+            .where(PriceAnalysis.user_id == user_id)
+            .order_by(PriceAnalysis.created_at.desc(), PriceAnalysis.id.desc())
+            .limit(limit)
+        )
+        items: list[AnalysisHistoryItem] = []
+        for row in result.all():
+            analysis, make, model, year, price, currency, images = row
+            first_image = next(
+                (str(u) for u in (images or []) if isinstance(u, str) and u), None
+            )
+            items.append(
+                AnalysisHistoryItem(
+                    id=analysis.id,
+                    listing_id=analysis.listing_id,
+                    verdict=analysis.verdict,
+                    fair_min=(
+                        float(analysis.fair_min) if analysis.fair_min is not None else None
+                    ),
+                    fair_max=(
+                        float(analysis.fair_max) if analysis.fair_max is not None else None
+                    ),
+                    summary=analysis.summary,
+                    created_at=analysis.created_at,
+                    make=make,
+                    model=model,
+                    year=year,
+                    price=float(price) if price is not None else None,
+                    currency=currency,
+                    image=first_image,
+                )
+            )
+        return items
 
     async def context(self, listing: ListingQuery) -> MarketContext:
         """Сопоставимые цены (та же модель, ±2 года) и история цены."""

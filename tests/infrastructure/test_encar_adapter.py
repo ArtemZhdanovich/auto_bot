@@ -4,6 +4,7 @@
 с разделителем `_.` и корейскими значениями фасетов.
 """
 
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -220,13 +221,16 @@ def make_enrich_adapter(
     inspection: dict | None = None,
     insp_summary: dict | None = None,
     record: dict | None = None,
+    record_open: dict | None = None,
     diagnosis: dict | None = None,
     mdsl_html: str | None = None,
+    translator: Any = None,
 ) -> tuple[EncarApiAdapter, list[httpx.Request]]:
     """Адаптер с маршрутизацией по URL: search → выдача, detail/clean → ответы.
 
     Чек/страховая/диагностика: `None` → 404 (как у авто без этих данных).
     `mdsl_html` — HTML классической страницы чека (www.encar.com); `None` → 404.
+    `translator` — фейк/мок микросервиса перевода (по умолчанию выключен).
     """
 
     def _resp(payload: dict | None) -> httpx.Response:
@@ -253,6 +257,8 @@ def make_enrich_adapter(
                 return _resp(insp_summary)
             return _resp(inspection)
         if "/record/vehicle/" in url:
+            if "/open" in url:
+                return _resp(record_open)
             return _resp(record)
         if "/diagnosis/vehicle/" in url:
             return _resp(diagnosis)
@@ -263,6 +269,7 @@ def make_enrich_adapter(
     adapter = EncarApiAdapter(
         source_name="encar",
         http_client=HttpClient(transport=httpx.MockTransport(handler), timeout=10),
+        translator=translator,
     )
     return adapter, requests
 
@@ -344,22 +351,22 @@ async def test_fetch_builds_full_inspection_report():
     assert report is not None
 
     # Кто и когда осматривал
-    assert report["inspector"] == "Эмпарк автосервис АО таво паккихён"
+    assert report["inspector"] == "엠파크오토서비스(주)타워 박기현"
     assert report["inspected_at"] == "2026-08-21"
 
     # Зоны кузова: покраска левой двери (outer) + крышки багажника (диагностика);
     # NORMAL-зоны и бампер «없음» не попадают
-    assert {"zone": "door_fl", "type": "repaint", "note": "Окраска"} in report["marks"]
-    assert {"zone": "trunk", "type": "repaint", "note": "Окраска"} in report["marks"]
+    assert {"zone": "door_fl", "type": "repaint", "note": "도색", "pos": [33, 115]} in report["marks"]
+    assert {"zone": "trunk", "type": "repaint", "note": "도색", "pos": [120, 235]} in report["marks"]
     assert len(report["marks"]) == 2
 
     # Чек-лист: двигатель — подтекание масла (defect), тормоза — 불량 (defect);
     # S00 не маппится, «хороших» групп в фикстуре нет
     by_key = {i["key"]: i for i in report["items"]}
     assert by_key["engine"]["status"] == "defect"
-    assert "Цилиндр блок / масляный поддон — подтекание" in by_key["engine"]["note"]
+    assert "실린더 블록 / 오일팬 — подтекание" in by_key["engine"]["note"]
     assert by_key["brakes"]["status"] == "defect"
-    assert "Вакуумный усилитель — неисправен" in by_key["brakes"]["note"]
+    assert "배력장치 상태 — неисправен" in by_key["brakes"]["note"]
     assert "transmission" not in by_key  # в фикстуре группы S02/S03 пустые
 
     # Факты в summary
@@ -376,7 +383,7 @@ async def test_fetch_builds_full_inspection_report():
     assert "залог/кредит в истории" in summary
     assert "вердикт Encar: без ДТП" in summary
     assert "Диагностика Encar" in summary and "2026-09-18" in summary
-    assert "Инчхон Эмпарк-тауэр" in summary  # центр диагностики (переведён)
+    assert "인천 엠파크타워" in summary  # центр диагностики (переводится микросервисом)
     assert len(summary) <= 1000  # лимит InspectionReportOut
 
     # Фото чека → report["images"] (не в галерее): сперва скан DIAG2 + днище
@@ -454,7 +461,7 @@ def test_parse_mdsl_panels_ranks():
         {"zone": "wheelhouse_fl", "type": "frame", "note": None},  # B
         {"zone": "roof", "type": "repair", "note": None},          # 2랭크
         {"zone": "frame_floor", "type": "frame", "note": "C"},
-        {"zone": "fender_rl", "type": "repair", "note": None},     # 쿼터 = заднее крыло
+        {"zone": "fender_rl", "type": "repair", "note": None},     # 쿼터 = заднее кры로
         {"zone": "pillar_a_l", "type": "frame", "note": None},     # B, с value_old
     ]
 
@@ -476,12 +483,12 @@ async def test_fetch_merges_legacy_mdsl_marks():
 
     marks = report["marks"]
     # JSON-чек (door_fl 도색) + 5 панелей классического чека
-    assert {"zone": "door_fl", "type": "repaint", "note": "Окраска"} in marks
-    assert {"zone": "roof", "type": "repair", "note": None} in marks
-    assert {"zone": "fender_rl", "type": "repair", "note": None} in marks
-    assert {"zone": "frame_floor", "type": "frame", "note": "C"} in marks
-    assert {"zone": "wheelhouse_fl", "type": "frame", "note": None} in marks
-    assert {"zone": "pillar_a_l", "type": "frame", "note": None} in marks
+    assert {"zone": "door_fl", "type": "repaint", "note": "도색", "pos": [33, 115]} in marks
+    assert {"zone": "roof", "type": "repair", "note": None, "pos": [120, 170]} in marks
+    assert {"zone": "fender_rl", "type": "repair", "note": None, "pos": [37, 211]} in marks
+    assert {"zone": "frame_floor", "type": "frame", "note": "C", "pos": [174, 145]} in marks
+    assert {"zone": "wheelhouse_fl", "type": "frame", "note": None, "pos": [140, 77]} in marks
+    assert {"zone": "pillar_a_l", "type": "frame", "note": None, "pos": [115, 112]} in marks
     assert len(marks) == 6
     assert sum(1 for m in marks if m["zone"] == "door_fl") == 1  # без дублей
 
@@ -528,7 +535,7 @@ async def test_fetch_maps_to_unified_listing():
     assert item.source_id == "361895918"
     assert str(item.url) == "https://fem.encar.com/car/detail/361895918"
     assert item.make == "Hyundai"  # 현대 → Hyundai
-    assert item.model == "Palisade"  # 팰리세이드 → Palisade
+    assert item.model == "팰리세이드"
     assert item.title == "현대 팰리세이드"  # Subject больше нет в списке
     assert item.generation == "Caligraphy"
     assert item.year == 2022  # FormYear '2022' (Year 202208.0 → тоже 2022)
@@ -669,4 +676,114 @@ async def test_fetch_raises_fetch_error_on_http_error():
 
     with pytest.raises(FetchError):
         await adapter.fetch(SearchCriteria())
+    await adapter.close()
+
+
+# --- история ДТП из госданных + микросервис перевода (окт 2026) --------------
+
+# Фрагмент реального ответа /v1/readside/record/vehicle/{id}/open (fem
+# «История ДТП»): счётчики + полный список аварий с датами.
+RECORD_OPEN_RESPONSE = {
+    "openData": True,
+    "carNo": "123가4567",
+    "maker": "Hyundai",
+    "model": "팰리세이드",
+    "firstDate": "2026-02-27",
+    "myAccidentCnt": 1,
+    "otherAccidentCnt": 0,
+    "accidentCnt": 1,
+    "ownerChangeCnt": 2,
+    "robberCnt": 0,
+    "totalLossCnt": 0,
+    "floodTotalLossCnt": 0,
+    "floodPartLossCnt": 0,
+    "loan": 0,
+    "business": 0,
+    "government": 0,
+    "carNoChangeCnt": 0,
+    "accidents": [
+        {
+            "type": "2",
+            "date": "2026-08-19",
+            "insuranceBenefit": 0,
+            "partCost": 0,
+            "laborCost": 0,
+            "paintingCost": 0,
+        }
+    ],
+}
+
+
+def test_build_inspection_accident_open_facts():
+    """record/open (fem «История ДТП») → счётчики, список ДТП, регистрация."""
+    report = EncarApiAdapter._build_inspection(
+        {}, None, record_open=RECORD_OPEN_RESPONSE
+    )
+    summary = report["summary"]
+    assert (
+        "история ДТП: 1 страховых случаев (по этому авто: 1, по вине других: 0)"
+        in summary
+    )
+    assert "ДТП 2026-08-19" in summary
+    assert "смен владельцев: 2" in summary
+    assert "первая регистрация: 2026-02-27" in summary
+    assert "угонов" not in summary and "полная гибель" not in summary
+
+
+async def test_fetch_translates_korean_via_service():
+    """Корейские строки (поля + отчёт) уходят в микросервис перевода."""
+
+    class FakeTranslator:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        async def translate(
+            self, texts: list[str], source_lang: str = "auto", target_lang=None
+        ):
+            self.calls.append(list(texts))
+            return [f"RU:{t}" for t in texts]
+
+    fake = FakeTranslator()
+    detail = {**DETAIL_RESPONSE, "manage": {"vehicleNo": "123가4567"}}
+    adapter, requests = make_enrich_adapter(
+        detail,
+        CLEAN_RESPONSE,
+        inspection=INSPECTION_RESPONSE,
+        insp_summary={
+            "vehicleId": 361895918,
+            "inspName": "엠파크오토서비스(주)타워 박기현",
+            "outers": [],
+            "outerSummarys": [],
+        },
+        record=RECORD_RESPONSE,
+        record_open=RECORD_OPEN_RESPONSE,
+        diagnosis=DIAGNOSIS_RESPONSE,
+        translator=fake,
+    )
+    result = await adapter.fetch(SearchCriteria())
+    item = result.items[0]
+    assert item.model == "RU:Палисейд"  # глоссарий + фейк-перевод
+    assert fake.calls  # микросервис вызван (батчем)
+    report = item.inspection
+    assert report is not None
+    assert report["inspector"].startswith("RU:")
+    # record/open: госномер из detail.manage → запрос с vehicleNo
+    assert any("/open?vehicleNo=123" in str(r.url) for r in requests)
+    # факты ДТП в summary
+    assert "история ДТП: 1 страховых случаев" in report["summary"]
+    assert "ДТП 2026-08-19" in report["summary"]
+    await adapter.close()
+
+
+async def test_fetch_without_translator_keeps_korean():
+    """translator=None → корейские значения остаются (перевод некритичен)."""
+    detail = {**DETAIL_RESPONSE, "manage": {"vehicleNo": "123가4567"}}
+    adapter, _ = make_enrich_adapter(
+        detail,
+        CLEAN_RESPONSE,
+        record_open=RECORD_OPEN_RESPONSE,
+    )
+    result = await adapter.fetch(SearchCriteria())
+    item = result.items[0]
+    assert item.model == "팰리세이드"  # без переводчика — оригинал
     await adapter.close()

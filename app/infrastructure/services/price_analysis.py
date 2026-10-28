@@ -2,6 +2,9 @@
 
 Вердикты и квота — `domain/pricing/rules.py`, шаги разбора —
 `application/pricing/use_cases.py`, SQL — `repositories/price_analysis.py`.
+
+Квота окна зависит от тарифа: free — 1 разбор в неделю на все машины,
+pro — 30 в день, business — без лимита.
 """
 
 from __future__ import annotations
@@ -11,19 +14,18 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.catalog.dto import ListingSnapshot
+from app.application.catalog.dto import AnalyzePriceCommand, ListingSnapshot
 from app.application.pricing.use_cases import (
     AnalyzePrice,
     parse_verdict_json,
 )
-from app.application.catalog.dto import AnalyzePriceCommand
 from app.application.shared.ports import LLMPort
 from app.domain.pricing.rules import (
-    FREE_QUOTA_WINDOW_DAYS,
     QuotaExceeded,
     market_stats,
     quota_applies,
     quota_left as free_quota_left,
+    quota_window_days,
     verdict_from_stats,
 )
 from app.infrastructure.db.models import Listing
@@ -36,7 +38,7 @@ from app.infrastructure.db.uow import SessionUnitOfWork
 _stats = market_stats
 _verdict_from_stats = verdict_from_stats
 parse_llm_json = parse_verdict_json
-QUOTA_WINDOW_DAYS = FREE_QUOTA_WINDOW_DAYS
+QUOTA_WINDOW_DAYS = quota_window_days("free")
 
 __all__ = [
     "QUOTA_WINDOW_DAYS",
@@ -48,14 +50,14 @@ __all__ = [
 ]
 
 
-async def quota_left(session: AsyncSession, user_id: int, listing_id: int) -> int:
-    """Сколько бесплатных разборов этой машины осталось у юзера (окно 7 дней)."""
-    used = await SqlAlchemyPriceAnalysisRepository(session).count_recent(
+async def quota_left(session: AsyncSession, user_id: int, tier: str = "free") -> int:
+    """Сколько разборов осталось в окне тарифа (на все машины суммарно)."""
+    repo = SqlAlchemyPriceAnalysisRepository(session)
+    used = await repo.count_recent_user(
         user_id,
-        listing_id,
-        since=datetime.now(UTC) - timedelta(days=FREE_QUOTA_WINDOW_DAYS),
+        since=datetime.now(UTC) - timedelta(days=quota_window_days(tier)),
     )
-    return free_quota_left(used)
+    return free_quota_left(used, tier)
 
 
 async def run_analysis(
@@ -70,7 +72,7 @@ async def run_analysis(
     # Остаток считает фасад (модульная `quota_left` — точка подмены в тестах),
     # а решение «квота исчерпана» — доменное правило внутри сценария.
     left = (
-        await quota_left(session, user_id, listing.id)
+        await quota_left(session, user_id, tier)
         if quota_applies(tier)
         else None
     )

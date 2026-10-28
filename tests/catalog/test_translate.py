@@ -55,7 +55,7 @@ def test_glossary_latin_passthrough():
 
 def test_glossary_no_false_positive_inside_word():
     # 신형 → «новая модель», несловарный hangul остаётся для NLLB
-    assert apply_glossary("기아 신형 모델") == "Kia новая модель 모델"
+    assert apply_glossary("기아 신형 모델") == "Kia новая модель Model"  # 모델→Model: прод-ревизия 2026-10
 
 
 def test_glossary_empty_and_non_korean():

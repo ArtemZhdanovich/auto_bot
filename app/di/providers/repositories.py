@@ -5,7 +5,9 @@
 SQLAlchemy; тесты подменяют порт через контейнер без правок use case-ов.
 
 Партнёрский `SqlAlchemyPartnerRepository` закрывает три порта сразу
-(фасад/запросы/админка), админский audit — `SqlAlchemyAuditRepository`.
+(фасад/запросы/админка), рыночная аналитика партнёров —
+`SqlAlchemyPartnerMarketRepository`, админский audit —
+`SqlAlchemyAuditRepository`.
 """
 
 from __future__ import annotations
@@ -29,11 +31,15 @@ from app.application.dialog.ports import (
     EnabledSourcesPort,
 )
 from app.application.catalog.ports import FilterRepository
+from app.application.chat.ports import ChatRepository, MarketLike
+from app.application.market.ports import MarketLotRepository, MarketRepository
+from app.application.leads.deals import ContactRateGate
 from app.application.partners.ports import LeadRepository
 from app.application.catalog.ports import ListingReadRepository
 from app.application.admin.ports import MetricsPort
 from app.application.catalog.ports import NotifySettingsRepository
 from app.application.partners.ports import PartnerRepository
+from app.application.partners.market import PartnerMarketRepository
 from app.application.partners.ports import (
     PartnerAdminRepository,
     PartnerQueryRepository,
@@ -58,13 +64,28 @@ from app.infrastructure.db.repositories.analytics import (
 )
 from app.infrastructure.db.repositories.audit import SqlAlchemyAuditRepository
 from app.infrastructure.db.repositories.dialog import SqlAlchemyDialogRepository
+from app.infrastructure.db.repositories.chat import (
+    SqlAlchemyChatRepository,
+)
+from app.infrastructure.db.repositories.market_offers import (
+    SqlAlchemyMarketRepository,
+)
 from app.infrastructure.db.repositories.favorites import SqlAlchemyFavoriteRepository
 from app.infrastructure.db.repositories.filters import SqlAlchemyFilterRepository
 from app.infrastructure.db.repositories.funnels import SqlAlchemyFunnelRepository
-from app.infrastructure.db.repositories.leads import SqlAlchemyLeadRepository
+from app.infrastructure.db.repositories.leads import (
+    SqlAlchemyContactRateGate,
+    SqlAlchemyLeadRepository,
+)
 from app.infrastructure.db.repositories.listings import SqlAlchemyListingRepository
 from app.infrastructure.db.repositories.listings_read import (
     SqlAlchemyListingReadRepository,
+)
+from app.infrastructure.db.repositories.market import (
+    SqlAlchemyPartnerMarketRepository,
+)
+from app.infrastructure.db.repositories.market_lots import (
+    SqlAlchemyMarketLotRepository,
 )
 from app.infrastructure.db.repositories.metrics import SqlAlchemyMetricsRepository
 from app.infrastructure.db.repositories.notifications import (
@@ -85,8 +106,23 @@ from app.infrastructure.db.repositories.users_auth import (
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from app.infrastructure.services.partners import SqlAlchemyPartnerRepository
 
+
 class RepositoryProvider(Provider):
     """Порты → адаптеры в REQUEST-скоупе: живут на сессии запроса."""
+
+    @provide
+    def partner_market_repository(
+        self, session: AsyncSession
+    ) -> PartnerMarketRepository:
+        """`PartnerMarketRepository` → `SqlAlchemyPartnerMarketRepository`.
+
+        Args:
+            session: Сессия текущего запроса.
+
+        Returns:
+            Репозиторий рынка для партнёрского контура.
+        """
+        return SqlAlchemyPartnerMarketRepository(session)
 
     scope = Scope.REQUEST
 
@@ -146,6 +182,24 @@ class RepositoryProvider(Provider):
         return SqlAlchemyListingReadRepository(session)
 
     @provide
+    def optional_listing_read(
+        self, repo: ListingReadRepository
+    ) -> ListingReadRepository | None:
+        """Тот же репозиторий под union-ключом (опциональные параметры).
+
+        «Глубокий» разбор (Business) в `RunAnalysis` читает чек осмотра
+        через необязательный порт: продаём его и под union-ключом, чтобы
+        `provide_all` разрешал `ListingReadRepository | None`.
+
+        Args:
+            repo: Обязательный репозиторий чтения.
+
+        Returns:
+            Тот же репозиторий (`ListingReadRepository | None`).
+        """
+        return repo
+
+    @provide
     def price_analysis_repository(
         self, session: AsyncSession
     ) -> PriceAnalysisRepository:
@@ -158,6 +212,24 @@ class RepositoryProvider(Provider):
             Репозиторий AI-разборов цены.
         """
         return SqlAlchemyPriceAnalysisRepository(session)
+
+    @provide
+    def optional_price_analysis_repository(
+        self, repo: PriceAnalysisRepository
+    ) -> PriceAnalysisRepository | None:
+        """Тот же репозиторий под union-ключом (опциональный параметр).
+
+        «Качество объявления» (12 §2) в my-lots/create/update берёт медиану
+        рынка через `PriceAnalysisRepository | None` — продаём репозиторий и
+        под union-ключом, чтобы `provide_all` разрешал необязательный порт.
+
+        Args:
+            repo: Обязательный репозиторий разборов.
+
+        Returns:
+            Тот же репозиторий (`PriceAnalysisRepository | None`).
+        """
+        return repo
 
     # -- фильтры, профили, пользователи, лиды, платежи, партнёры ------------
 
@@ -222,6 +294,18 @@ class RepositoryProvider(Provider):
         return SqlAlchemyLeadRepository(session)
 
     @provide
+    def contact_rate_gate(self, session: AsyncSession) -> ContactRateGate:
+        """`ContactRateGate` → `SqlAlchemyContactRateGate`.
+
+        Args:
+            session: Сессия текущего запроса.
+
+        Returns:
+            Rate-гейт заявок «свяжитесь со мной» (sent_log kind='contact').
+        """
+        return SqlAlchemyContactRateGate(session)
+
+    @provide
     def payment_repository(self, session: AsyncSession) -> PaymentRepository:
         """`PaymentRepository` → `SqlAlchemyPaymentRepository`.
 
@@ -272,6 +356,74 @@ class RepositoryProvider(Provider):
             Партнёрский репозиторий (создание/правки/список).
         """
         return SqlAlchemyPartnerRepository(session)
+
+    @provide
+    def chat_repository(self, session: AsyncSession) -> ChatRepository:
+        """`ChatRepository` → `SqlAlchemyChatRepository`.
+
+        Args:
+            session: Сессия текущего запроса.
+
+        Returns:
+            Репозиторий тредов/сообщений/участников чатов.
+        """
+        return SqlAlchemyChatRepository(session)
+
+    @provide
+    def optional_chat_repository(
+        self, chats: ChatRepository
+    ) -> ChatRepository | None:
+        """Тот же репозиторий под union-ключом (опциональный параметр).
+
+        `RequestAgent`/`ClaimLead` принимают чаты как `ChatRepository | None`
+        — контур чатов не должен быть обязательным для сценариев лидов.
+
+        Args:
+            chats: Обязательный репозиторий чатов.
+
+        Returns:
+            Тот же репозиторий (`ChatRepository | None`).
+        """
+        return chats
+
+    @provide
+    def market_repository(self, session: AsyncSession) -> MarketRepository:
+        """`MarketRepository` → `SqlAlchemyMarketRepository` (витрина рынка).
+
+        Args:
+            session: Сессия текущего запроса.
+
+        Returns:
+            Репозиторий витрины внутреннего рынка.
+        """
+        return SqlAlchemyMarketRepository(session)
+
+    @provide
+    def market_like(self, market: MarketRepository) -> MarketLike:
+        """Тот же репозиторий под узким ключом (для CreateSellerThread).
+
+        Args:
+            market: Полный порт витрины.
+
+        Returns:
+            Репозиторий как `MarketLike` (подмножество методов).
+        """
+        return market  # type: ignore[return-value]
+
+    @provide
+    def market_lot_repository(self, session: AsyncSession) -> MarketLotRepository:
+        """`MarketLotRepository` → `SqlAlchemyMarketLotRepository`.
+
+        Owner-лоты рынка (user/partner) с placement-моделью и слотами
+        партнёров (редизайн часть 6, §1-§3).
+
+        Args:
+            session: Сессия текущего запроса.
+
+        Returns:
+            Репозиторий owner-лотов внутреннего рынка.
+        """
+        return SqlAlchemyMarketLotRepository(session)
 
     # -- аналитика, аудит, метрики, уведомления, админка, диалоги -----------
 

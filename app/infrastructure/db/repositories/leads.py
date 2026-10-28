@@ -8,18 +8,20 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.leads.deals import CONTACT_WINDOW_HOURS
 from app.application.partners.dto import (
     LeadPatch,
     LeadView,
 )
 from app.application.errors import Conflict
-from app.infrastructure.db.models import Lead, Listing, User
+from app.infrastructure.db.models import Lead, Listing, SentLog, User
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,57 @@ class SqlAlchemyLeadRepository:
         await self._session.commit()
         await self._session.refresh(lead)
         return _to_view(lead)
+
+
+class SqlAlchemyContactRateGate:
+    """Rate-гейт заявок «свяжитесь со мной» на `sent_log` (kind='contact').
+
+    PK sent_log = (user_id, listing_id, kind) держит одну строку на пару,
+    поэтому «окно 24 часа» — это `sent_at` этой строки: свежая — дубль,
+    старая или отсутствующая — заявка разрешена, upsert сдвигает окно.
+    """
+
+    kind = "contact"
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def recently_sent(self, user_id: int, listing_id: int) -> bool:
+        """Была ли заявка по этому объявлению за последние 24 часа."""
+        stmt = select(SentLog.sent_at).where(
+            SentLog.user_id == user_id,
+            SentLog.listing_id == listing_id,
+            SentLog.kind == self.kind,
+            SentLog.sent_at >= datetime.now(UTC) - timedelta(hours=CONTACT_WINDOW_HOURS),
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return row is not None
+
+    async def mark_sent(self, user_id: int, listing_id: int) -> None:
+        """Зафиксировать заявку: upsert `sent_at=now()` (окно стартует заново).
+
+        `ON CONFLICT DO UPDATE`, а не `DO NOTHING`: повторная заявка после
+        истечения окна должна сдвинуть `sent_at`, иначе гейт навсегда
+        «залипнет» на дате первого контакта.
+        """
+        await self._session.execute(
+            pg_insert(SentLog)
+            .values(
+                user_id=user_id,
+                listing_id=listing_id,
+                kind=self.kind,
+                sent_at=datetime.now(UTC),
+            )
+            .on_conflict_do_update(
+                index_elements=[
+                    SentLog.user_id,
+                    SentLog.listing_id,
+                    SentLog.kind,
+                ],
+                set_={"sent_at": datetime.now(UTC)},
+            )
+        )
+        await self._session.commit()
 
 
 def _to_view(row: Lead) -> LeadView:

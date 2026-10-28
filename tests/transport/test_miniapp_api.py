@@ -1,6 +1,6 @@
 """Тесты эндпоинтов Mini App (этап 5): CRUD фильтров и лента объявлений."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -126,11 +126,36 @@ async def test_instant_forbidden_on_free(client):
 
 
 @pytest.mark.asyncio
-async def test_instant_allowed_on_pro():
-    """Pro-пользователь может создать instant-фильтр."""
+async def test_instant_allowed_on_business():
+    """Business-пользователь может создать instant-фильтр (Pro — дайджест)."""
     from httpx import ASGITransport, AsyncClient
 
     
+    until = datetime.fromtimestamp(datetime.now(UTC).timestamp() + 30 * 86400, tz=UTC)
+    session = _SessionWithBegin()
+    session.add(_user(subscription_tier="business", subscription_until=until))
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=session)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test", headers=_headers()
+        ) as http:
+            resp = await http.post(
+                "/api/filters",
+                json={"criteria": {"make": "BMW"}, "notify_mode": "instant"},
+            )
+        assert resp.status_code == 201
+        assert resp.json()["notify_mode"] == "instant"
+    finally:
+        app.state.dishka_container = _prev
+        await _container.close()
+
+
+@pytest.mark.asyncio
+async def test_instant_forbidden_on_pro_daily_digest_instead():
+    """Экономика 2026-10: instant только Business; Pro получает 403 с апселлом."""
+    from httpx import ASGITransport, AsyncClient
+
     until = datetime.fromtimestamp(datetime.now(UTC).timestamp() + 30 * 86400, tz=UTC)
     session = _SessionWithBegin()
     session.add(_user(subscription_tier="pro", subscription_until=until))
@@ -144,8 +169,7 @@ async def test_instant_allowed_on_pro():
                 "/api/filters",
                 json={"criteria": {"make": "BMW"}, "notify_mode": "instant"},
             )
-        assert resp.status_code == 201
-        assert resp.json()["notify_mode"] == "instant"
+        assert resp.status_code == 403
     finally:
         app.state.dishka_container = _prev
         await _container.close()
@@ -448,11 +472,36 @@ def test_norm_url_variants():
 
 
 @pytest.mark.asyncio
-async def test_inspection_404_when_absent(client):
-    """Нет отчёта осмотра — 404 (фронт молча скрывает блок)."""
+async def test_inspection_404_when_absent():
+    """Нет отчёта осмотра — 404 (фронт молча скрывает блок).
+
+    Пользователь — pro (чеки платные: free получил бы 403); тестовая
+    сессия через install_test_container, как в тарифных тестах фильтров.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    until = datetime.now(UTC) + timedelta(days=30)
+    session = _SessionWithBegin()
+    session.add(_user(subscription_tier="pro", subscription_until=until))
+    _prev = app.state.dishka_container
+    _container = install_test_container(app, session=session)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test", headers=_headers()
+        ) as http:
+            resp = await http.get("/api/listings/42/inspection")
+        assert resp.status_code == 404
+    finally:
+        app.state.dishka_container = _prev
+        await _container.close()
+
+
+@pytest.mark.asyncio
+async def test_inspection_locked_for_free(client):
+    """Экономика 2026-10: чеки — платные данные, Free получает 403."""
     http, _session = client
     resp = await http.get("/api/listings/42/inspection")
-    assert resp.status_code == 404
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

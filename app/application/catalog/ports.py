@@ -51,6 +51,11 @@ class ListingReadRepository(Protocol):
     async def enrich(self, listing_id: int) -> ListingCard | None:
         """Догрузить спеки из detail источника и вернуть карточку."""
 
+    async def similar_candidates(
+        self, listing_id: int, *, limit: int = 24
+    ) -> list[ListingCard]:
+        """Кандидаты «похожих» (та же марка/модель, ±3 года, цена ±35%)."""
+
     async def price_history(self, listing_id: int) -> list[PricePoint]:
         """История цен объявления (хронологически)."""
 

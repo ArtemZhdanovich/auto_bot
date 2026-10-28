@@ -1,88 +1,40 @@
 # RUNBOOK — эксплуатационные сценарии
 
-Что делать, если... (дополняется по итогам инцидентов — см. INCIDENTS.md)
+Дополняется по итогам инцидентов (см. [INCIDENTS.md](../INCIDENTS.md)).
 
----
+## DLQ RabbitMQ растёт (`dlq_alert`)
 
-## 🔴 DLQ (`dead_letter`) растёт
+`docker exec auto_bot-rabbitmq-1 rabbitmqctl list_queues name messages
+consumers` → посмотреть трейс в логах воркера. Типовые причины:
+источник лежит (circuit breaker пропустит сам), job-timeout (encar с
+чеками долог — таймаут очереди 360с). Разобрать:
+`rabbitmqadmin purge_queue name=dead_letter`.
 
-**Симптомы.** Алерт `dlq_alert_threshold` (10+ сообщений), `/health/detailed` ок.
+## Источник не парсится
 
-**Диагностика.**
-1. `python -m app.infrastructure.messaging.replay --limit 100 --dry-run` —
-   посмотреть, какие job'ы падают.
-2. Логи воркеров: `dlq` после `x-delivery-limit` (5 доставок).
+`GET /api/admin/sources` (health, error_streak). Circuit-breaker
+пропускает источник сам;ParserDoctor (fire при 0 карточек) чинит
+селекторы. Ручной прогон: `POST /api/admin/sources/{name}/fetch`.
 
-**Действия.**
-- Транзиентная причина (сеть, БД): устранить → `python -m
-  app.infrastructure.messaging.replay --limit 100` (переотправит в `tasks`).
-- Яд не декодируется / job неизвестен: сообщения будут удалены CLI-ем
-  как poison (`dlq_poison_message_dropped`) — проверить лог, при
-  необходимости вытащить тело из Rabbit management вручную.
+## Centrifugo недоступен
 
-## 🔴 RAG недоступен / «circuit_breaker_open»
+Не инцидент ядра: чаты едут на поллинг-фоллбэке (5с), publish'и
+логируются warning. Проверить namespace-конфиг (`configs/centrifugo.json.tmpl`
+— namespaces user/partner/thread c subscribe_proxy_enabled+presence),
+`docker logs auto_bot-centrifugo-1` (unknown channel = нет namespace).
 
-**Симптомы.** Алерт `cb:rag` (5 ошибок RAG подряд → пауза 5 мин).
+## Флейк test_rag
 
-**Действия.** Диалог продолжает работать без контекста (fallback в LLM).
-1. Проверить `rag_service_url`/`RAG_API_TOKEN`, сам сервис RAG.
-2. Breaker полуоткрытого состояния не имеет: после cooldown трафик пойдёт
-   сам. Рестарт воркера/API сбрасывает breaker мгновенно (in-memory).
-3. Кэш ответов (`rag:answer:*`, TTL 1ч) продолжает отдавать старые ответы.
+`test_answer_question_without_rag_uses_llm_answer` ходит в живой
+RAG (localhost:8100) — изолированный прогон зелёный. Не блокер.
 
-## 🔴 Источник (encar/kcar) забанил или отдаёт 403
+## МинIO/photos
 
-**Симптомы.** `source_skipped_circuit_breaker` в логах fetch-воркера,
-`error_streak` в `source_health` растёт, алерт.
+503 photos_unavailable = S3 недоступен или креды. Bucket создаётся
+лениво; public-read policy идемпотентна. Зеркала фото — фоновая
+задача, её сбой не роняет fetch (warning mirror_task_failed).
 
-**Действия.**
-1. Проверить, не сменился ли API источника (ручной curl detail-url).
-2. Включить прокси DataImpulse (`PROXY_DATAIMPULSE_USER/PASS`) — источники
-   с `capabilities.use_proxy=true` пойдут через шлюз.
-3. CB источника открывается после `source_cb_error_streak` (5) ошибок —
-   на cooldown; воркер пропускает источник, не вали остальное.
+## Стейл-образы сервисов
 
-## 🔴 Redis лежит
-
-**Симптомы.** `/health/detailed` → `redis: false`; бот отвечает «Backend
-недоступен» на диалогах.
-
-**Действия.** Диалоги теряются (FSM/DialogState в Redis, TTL 24ч), но:
-- история восстановима из `dialog_sessions` («Продолжить прошлый диалог»);
-- дедуп/квоты fail-open — данные не портятся;
-- после рестарта Redis провернуть `digest` вручную не нужно: буферы
-  `digest:*` теряются, следующий скан `notify_new_listings` наполнит заново
-  (антидубль по sent_log в Postgres).
-
-## 🔴 Оплата прошла, подписка не активировалась
-
-**Симптомы.** Алерт «payment_id=..., user_id=... Нужна ручная активация».
-
-**Действия.**
-1. Бот уже ретраил активацию 3 раза (бэкофф 2/4 с) — значит backend был
-   недоступен устойчиво.
-2. Найти платёж в БД (`payments.provider_payment_id = <charge_id из алерта>`).
-3. Повторить активацию: повторный POST `/api/payments/success` идемпотентен
-   (unique `provider_payment_id` → 409 = уже активирован).
-4. Если платёж в `pending` и Stars списались — активировать вручную и
-   завести инцидент в INCIDENTS.md.
-
-## 🔴 Gateway (micro-профиль) недоступен
-
-**Действия.**Mini App и сайт идут через gateway; при его деградации —
-откат на профиль `mono` (`docker compose --profile mono up -d`), погасив
-gateway micro-профиля (конфликт портов 80/8000).
-
-## 🟡 Медленный LLM (диалоги по 60+ с)
-
-**Действия.** Это норма для reasoning-моделей: `DIALOG_TIMEOUT=120 c` в
-`BackendClient`. Если ответы пропадают на таймаутах — проверить провайдера,
-при необходимости сменить `LLM_PROVIDER` на запасной в `.env` и рестартовать
-API+бота. Повторный ход не задваивается: лок `dlg:turn-lock:{user}` (20 c).
-
-## 🟡 Ротация ключей/секретов
-
-- `APP_SECRET_KEY`/`INTERNAL_TOKEN`: задать новые в `.env`, рестарт всех
-  процессов. JWT, выданные старым ключом, инвалидируются (users перелогин).
-- PQ-ключи inspection reports: ротация пока не поддержана (ADR-007) —
-  компрометация = перевыпуск отчётов.
+Симптом: роут есть в коде, контейнер отдаёт 404 (`grep -c` в
+контейнере). Лечение: `docker compose --profile micro build <svc>`.

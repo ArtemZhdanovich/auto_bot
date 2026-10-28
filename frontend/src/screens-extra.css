@@ -1,0 +1,1024 @@
+/*
+ * screens-extra.css — стили редизайна экранов AI-поиск / Сигналы /
+ * Избранное / Анализы / Профиль / Калькулятор / Сравнение
+ * (01-ux-audit-ia.md §1.4–1.8, 02-design-system.md, 03-content-a11y.md).
+ *
+ * Файл импортируется ОДНОЙ строкой в screens/AiSearch.tsx (после index.css
+ * в main.tsx — эти правила позже и перекрывают значения по умолчанию).
+ * Только новые классы с префиксами и точечные переопределения на токены:
+ * hex-значения не используются, всё через var(--…), тёмная тема — та же.
+ */
+
+/* ---------- Общее ---------- */
+
+/* Текст только для скрин-ридеров (03 §5.5). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* База .btn (index.css): обычный inline-block без вертикального
+   центрирования — кнопка с иконкой (Login: <Send/> + текст) в одном
+   ряду с текстовой была выше, иконка прилипала к тексту без отступа.
+   Двойной класс — специфичность выше index.css (см. комментарий внизу
+   файла про порядок подключения). */
+.btn.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  text-align: center;
+}
+
+/* Пары кнопок в ряду: делим поровну, но позволяем перенести длинную
+   подпись («Создать уведомление» на 320px не вылезает за край шита) */
+.sig-editor__actions .btn,
+.sig-del-confirm__actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: normal;
+}
+
+/* Заголовок экрана внутри таба (Сигналы, Анализы): Title L (§3.2). */
+.screen-title {
+  margin: 0;
+  font-size: var(--font-xl);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+}
+
+/* Inline-сообщение об ошибке формы: danger-тинт (§2.3). */
+.form-error-inline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+
+/* ---------- 1.4 AI-поиск (A1–A4) ---------- */
+
+/* Шапка чата: заголовок + сброс ↺ (A3: деструктив убран из композера).
+   flex-wrap: подтверждение «Начать заново? Да/Отмена» на 320–360px
+   не вылезает за край, а переносится под заголовок. */
+.ai-chat__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.ai-chat__reset {
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.ai-chat__reset:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Подтверждение сброса диалога (A3): ghost-кнопки, деструктив не primary. */
+.ai-chat__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+
+/* Чипсы-примеры промптов в интро (A1). */
+.ai-chat__prompts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.ai-chat__prompts-label {
+  width: 100%;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.ai-chat__prompt {
+  min-height: 36px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.ai-chat__prompt:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+
+/* Карточка «Понял так: …» после ответа бота (A1, UIUX_TZ §2.5). */
+.ai-criteria {
+  align-self: flex-start;
+  max-width: 86%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+  box-shadow: var(--shadow-sm);
+}
+
+.ai-criteria__label {
+  display: block;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-1);
+}
+
+.ai-criteria__value {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Ошибка агента в чате: danger-тинт (03 §2.5). */
+.ai-msg--error .ai-msg__text {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+/* Кнопка-фолбэк внутри сообщения об ошибке (503 → «к сигналам»). */
+.ai-msg__action {
+  display: inline-block;
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  min-height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Панель «Поиск запущен» (A2): успех + источники + два действия. */
+.ai-launched {
+  align-self: stretch;
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: ai-launched-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes ai-launched-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ai-launched__text {
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+  color: var(--text);
+}
+
+.ai-launched__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.ai-launched__source {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.ai-launched__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ai-launched__actions .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Композер чата (index.css: sticky bottom:0) на мобиле лип к низу
+   вьюпорта — прямо под ФИКСИРОВАННЫЙ таб-бар и поле ввода было не
+   видно. Поднимаем на высоту таб-бара (+ safe-area); на десктопе
+   таб-бара нет — остаётся bottom:0 из index.css. */
+@media (max-width: 767px) {
+  .ai-chat__composer.ai-chat__composer {
+    bottom: calc(var(--tabbar-h, 56px) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-launched { animation: none; }
+}
+
+/* ---------- 1.5 Сигналы (S1–S6) ---------- */
+
+.sig-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+/* Счётчик «2/3» — лимит тарифа (S3); ∞ для Business. */
+.sig-count {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Карточка сигнала: имя, критерии, режим доставки (S1). */
+.sig-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  min-height: var(--touch-min);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.sig-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.sig-card:active {
+  transform: scale(0.985);
+}
+
+.sig-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.sig-card__name {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sig-card__desc {
+  margin-top: 2px;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-snug);
+}
+
+/* Режим доставки: instant — Business (accent), digest — нейтральный. */
+.sig-card__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.sig-card__mode--instant {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Иконка удаления: 44×44 тач-зона (§4), aria-label на кнопке. */
+.sig-card__del {
+  flex: none;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+
+.sig-card__del:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* Подтверждение удаления (S4): «Удалить?» → «Точно удалить / Отмена». */
+.sig-del-confirm {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-lg);
+  background: var(--danger-bg);
+}
+
+.sig-del-confirm__text {
+  font-size: var(--font-sm);
+  color: var(--danger);
+  line-height: var(--leading-normal);
+}
+
+.sig-del-confirm__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* Кнопка «+ Новый сигнал» (S1): создание по кнопке, не формой сверху. */
+.sig-add {
+  width: 100%;
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.sig-add:hover {
+  background: var(--accent-soft);
+}
+
+/* Апселл лимита Free (S3): warn-тинт — «лимиты» (§2.3). */
+.sig-upsell {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.sig-upsell__title {
+  font-size: var(--font-sm);
+  font-weight: 700;
+}
+
+.sig-upsell__text {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+
+.sig-upsell__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* Редактор сигнала: inline-панель на десктопе, bottom-sheet на мобиле. */
+.sig-editor {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-4);
+}
+
+.sig-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.sig-editor__hint {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+  margin: 0 0 var(--space-3);
+}
+
+/* Режим доставки в форме (S3): сегмент «подборка / сразу(Business)». */
+.sig-mode {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.sig-mode__opt {
+  flex: 1;
+  min-height: 44px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.sig-mode__opt[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.sig-mode__opt--locked {
+  opacity: 0.75;
+}
+
+.sig-mode__hint {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+/* Inline-валидация поля (§7.12): danger, слот не прыгает. */
+.sig-field-error {
+  display: block;
+  min-height: 16px;
+  margin-top: var(--space-1);
+  font-size: var(--font-xs);
+  color: var(--danger);
+  line-height: 1.4;
+}
+
+/* Пары полей в редакторе сигнала: у .filter-pair (index.css) свой
+   боковой отступ 16px под старую панель без паддингов — внутри
+   .sig-editor (padding 16px) он ДУБЛИРУЕТСЯ, пары полей оказываются
+   уже и смещены относительно одиночных полей. Гасим. */
+.sig-editor .filter-pair {
+  padding: 0;
+}
+
+/* Список карточек сигналов (было: .filter-list + inline-стиль
+   display:grid/gap в Filters.tsx — инлайн-хак в разметке). */
+.sig-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.sig-editor__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.sig-editor__actions .btn {
+  flex: 1;
+}
+
+/* Мобильный редактор — bottom-sheet (§7.10): прилипает к низу. */
+@media (max-width: 767px) {
+  .sig-editor {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: var(--z-sheet);
+    max-height: 80dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--border-strong);
+    border-bottom: none;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+    animation: sig-sheet-in var(--dur-slow) var(--ease-out);
+  }
+
+  @keyframes sig-sheet-in {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+}
+
+@media (max-width: 767px) and (prefers-reduced-motion: reduce) {
+  .sig-editor { animation: none; }
+}
+
+/* Скелетон карточки сигнала (геометрия как у .sig-card). */
+.sig-skeleton {
+  height: 88px;
+  border-radius: var(--radius-lg);
+}
+
+/* ---------- 1.6 Избранное ---------- */
+
+/* Бейдж «цена снизилась» — семантика deal (§2.3), старая цена зачёркнута. */
+.fav-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+  margin-top: var(--space-2);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fav-badge--deal {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+
+.fav-badge--gone {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.fav-price-was {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+/* ---------- 1.7 Анализы (An1–An3) ---------- */
+
+/* Вердикт-бейджи — строго на семантические токены (§2.3), обе темы.
+   Двойной класс = удвоенная специфичность: этот файл подключается раньше
+   index.css (main.tsx импортирует App → AiSearch → screens-extra.css до
+   import "./index.css"), поэтому равная специфичность проиграла бы
+   hex-значениям из index.css независимо от порядка. */
+.verdict-badge--deal.verdict-badge--deal {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+
+.verdict-badge--fair.verdict-badge--fair {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.verdict-badge--overpriced.verdict-badge--overpriced {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+:root[data-theme="dark"] .verdict-badge--deal.verdict-badge--deal {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+
+:root[data-theme="dark"] .verdict-badge--fair.verdict-badge--fair {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+:root[data-theme="dark"] .verdict-badge--overpriced.verdict-badge--overpriced {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* Квота исчерпана → апселл (An*: ghost с замочком, не primary — P2). */
+.an-upsell {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+
+.an-upsell .btn {
+  margin-top: var(--space-3);
+}
+
+/* Демо-вердикт для гостя (L3): замоканный пример с блюром. */
+.an-demo {
+  position: relative;
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  filter: blur(2.5px);
+  user-select: none;
+  pointer-events: none;
+}
+
+.an-demo__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-md);
+  font-weight: 700;
+}
+
+.an-demo__meta {
+  margin-top: var(--space-2);
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+
+/* ---------- 1.8 Профиль (Pr1–Pr5) ---------- */
+
+/* Карточка тарифа в сравнении: токены + подсветка «текущего»
+   (двойной класс — специфичность выше index.css, см. комментарий выше). */
+.tier-card--current.tier-card--current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Галочки фич тарифа — семантика deal вместо сырого #2ea44f (§9.1);
+   специфичность выше index.css (двойной класс + element) */
+.tier-card.tier-card .tier-card__feature > span {
+  color: var(--deal);
+}
+
+/* «Выход» — danger-ghost внизу с подтверждением (R3): не primary. */
+.pr-logout {
+  width: 100%;
+  min-height: var(--touch-min);
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--destructive);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Превью сигналов в Профиле: класс использовался в Profile.tsx, но не
+   был описан — колонка строк info-row с общим вертикальным ритмом. */
+.sig-preview {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Кнопка-подвал панели («Все сигналы»): раньше отступ был inline-стилем
+   marginTop:8 — теперь классом, единый ритм с .sub-actions. */
+.sig-preview__all {
+  display: flex;
+  margin-top: var(--space-3);
+}
+
+.pr-logout:hover {
+  background: var(--danger-bg);
+}
+
+.pr-logout__confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: var(--font-sm);
+}
+
+/* ---------- Калькулятор / сравнение: токены и пустые состояния ---------- */
+
+/* Экран Calc/Compare (корень .calc): на десктопе без ограничения ширины
+   форма растягивалась на все ~1150px контента. Читаемая колонка — как у
+   остальных экранов (.screen), 760px по центру. На мобиле без эффекта
+   (max-width > ширина экрана). */
+.calc.calc {
+  max-width: var(--reading-max, 760px);
+  margin: 0 auto;
+}
+
+/* Итоговые суммы — табличные цифры (§3.1): колонки не «пляшут». */
+.calc-total__value,
+.calc-row b,
+.calc-total__sub,
+.compare-item__head b,
+.compare-item__sub {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hero-цифра «под ключ»: длинные суммы без пробелов не выпирают
+   из градиентной плашки на узких экранах */
+.calc-total__value.calc-total__value {
+  font-size: var(--font-display);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+/* Строка результата сравнения: длинное имя не выталкивает цену
+   (min-width:0 у левой части), цена не рвётся посреди числа */
+.compare-item__head > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.compare-item__head b {
+  flex: none;
+  text-align: right;
+}
+
+/* Ошибка валидации/запроса: роль alert, danger-тинт (§7.12).
+   Боковые отступы — как у .calc-form (margin 0 12): раньше плашка
+   прилипала к краям экрана, форма — с гаттерами. */
+.calc-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+
+/* Пустое состояние результата: подсказка до первого расчёта
+   (гаттеры — синхронно с .calc-error). */
+.calc-empty {
+  margin: 0 var(--space-3);
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+  text-align: center;
+}
+
+/* Пустые состояния уровня экрана (Избранное/Сигналы: гость, ошибка,
+   пусто) — по центру доступной области, а не прижаты к верху */
+.state.state--page {
+  min-height: 60vh;
+  justify-content: center;
+}
+
+/* Пустые состояния внутри панелей (Анализы: просмотры/разборы/похожие) —
+   умеренная высота, чтобы панель не выглядела пустой щелью */
+.state.state--panel {
+  min-height: 220px;
+  justify-content: center;
+}
+
+/* Длинные имена машин/сигналов: переносятся по любому символу
+   (модели вида «SM6-like 2.5 AWD» не распирают строку) */
+.sig-card__name,
+.filter-item__name,
+.similar-item__title,
+.analysis-card__title,
+.ai-criteria__value {
+  overflow-wrap: anywhere;
+}
+
+/* === История (меню v3, 2026-10-25): сегменты + шапка секции просмотров === */
+.hist-seg {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-sunken, var(--bg-secondary));
+  border-radius: var(--radius-full);
+  padding: 4px;
+  width: fit-content;
+  margin-bottom: var(--space-4);
+}
+.hist-seg__btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 var(--font-sm, 14px)/1 var(--font-sans, sans-serif);
+  padding: 8px 18px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  min-height: 36px;
+  transition: background var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
+}
+.hist-seg__btn--active {
+  background: var(--surface, var(--bg));
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+.hist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.hist-head h3 {
+  margin: 0;
+}
+.hist-head .btn {
+  padding: 6px 12px;
+  font-size: var(--font-xs, 12px);
+  min-height: 36px;
+}
+
+/* Плашка возврата к живой карточке (keep-alive листинга):
+   z — по шкале (--z-sticky; было сырое 30 вне z-шкалы) */
+.listing-return-pill {
+  position: sticky;
+  top: var(--space-2);
+  z-index: var(--z-sticky, 10);
+  display: block;
+  width: fit-content;
+  margin: 0 auto var(--space-3);
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 var(--font-sm, 14px)/1 var(--font-sans, sans-serif);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+/* === Лендинг-вход (выбор приложения) === */
+.landing {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6, 32px);
+  padding: var(--space-5, 24px);
+  background:
+    radial-gradient(120% 80% at 50% 0%, var(--accent-soft, rgba(46, 138, 224, .12)) 0%, transparent 60%),
+    var(--bg);
+  max-width: var(--content-max, 1200px);
+  margin: 0 auto;
+}
+.landing__hero {
+  text-align: center;
+}
+.landing__logo {
+  font-size: 44px;
+  line-height: 1;
+}
+.landing__title {
+  margin: var(--space-2, 8px) 0 0;
+  /* семейство — именно --font-sans: --font-display это РАЗМЕР (28px),
+     и прежняя строка была невалидной и отбрасывалась целиком */
+  font: 700 var(--font-2xl, 32px)/1.15 var(--font-sans, sans-serif);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.landing__sub {
+  margin: var(--space-2, 8px) auto 0;
+  max-width: 42ch;
+  color: var(--text-secondary);
+  font: 400 var(--font-md, 16px)/1.5 var(--font-sans, sans-serif);
+}
+.landing__cards {
+  display: grid;
+  gap: var(--space-3, 12px);
+  width: min(480px, 100%);
+}
+.landing__card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4, 16px);
+  padding: var(--space-4, 16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 16px);
+  background: var(--surface, var(--bg));
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: var(--text);
+  cursor: pointer;
+  min-height: 88px;
+  text-align: left;
+  transition: transform var(--dur-fast, 120ms) ease, box-shadow var(--dur-base, 200ms) ease,
+    border-color var(--dur-fast, 120ms) ease;
+}
+.landing__card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent, var(--link));
+}
+/* Фокус: подъём + бордер + ГЛОБАЛЬНЫЙ 2px outline (не гасим его —
+   клавиатурная навигация по карточкам входа должна быть заметной) */
+.landing__card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent, var(--link));
+}
+.landing__card--primary {
+  border-color: var(--accent, var(--link));
+}
+.landing__card-icon {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md, 10px);
+  background: var(--accent-soft, rgba(46, 138, 224, .12));
+  color: var(--accent, var(--link));
+}
+.landing__card-body {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+.landing__card-title {
+  font: 600 var(--font-md, 16px)/1.3 var(--font-sans, sans-serif);
+}
+.landing__card-text {
+  font: 400 var(--font-sm, 14px)/1.45 var(--font-sans, sans-serif);
+  color: var(--text-secondary);
+}
+/* NAV-V2: карточка последнего входа — первой, с меткой и лёгким акцентом */
+.landing__card--last {
+  border-color: var(--accent, var(--link));
+  box-shadow: 0 0 0 1px var(--accent-soft, rgba(46, 138, 224, .25)), var(--shadow-sm);
+}
+.landing__card-last {
+  display: block;
+  margin-top: 2px;
+  font: 500 var(--font-xs, 12px)/1.4 var(--font-sans, sans-serif);
+  color: var(--accent, var(--link));
+}
+.landing__card-arrow {
+  flex: none;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.landing__hint {
+  font: 400 var(--font-xs, 12px)/1.5 var(--font-sans, sans-serif);
+  color: var(--text-tertiary, var(--text-secondary));
+  text-align: center;
+}
+
+/* ---------- Mobile UX (Фиттс): мелкие кнопки >=44px на мобиле ---------- */
+@media (max-width: 767px) {
+  /* Чипсы-промпты AI и кнопки-фолбэки ошибок были 36px */
+  .ai-chat__prompt,
+  .ai-msg__action {
+    min-height: var(--touch-min);
+  }
+  /* Сегменты «Истории» и компактные кнопки её шапки */
+  .hist-seg__btn {
+    min-height: var(--touch-min);
+  }
+  .hist-head .btn {
+    min-height: var(--touch-min);
+  }
+}

@@ -733,10 +733,17 @@ async def test_pdp_enrich_failure_does_not_500(
 
 
 @pytest.mark.asyncio
-async def test_inspection_found(client: AsyncClient, session: AsyncSession):
+async def test_inspection_found(
+    client: AsyncClient, session: AsyncSession, user, auth_headers_user
+):
+    # Чеки — платные данные (экономика 2026-10): смотрит pro-пользователь.
+    user.subscription_tier = "pro"
+    user.subscription_until = datetime.now(UTC) + timedelta(days=30)
+    await session.flush()
     l = await _make_listing(session, source_id="insp-1")
     report = await _make_inspection(session, l.id, grade="excellent")
-    r = await client.get(f"/api/listings/{l.id}/inspection")
+    r = await client.get(f"/api/listings/{l.id}/inspection",
+                         headers=auth_headers_user)
     assert r.status_code == 200
     # InspectionReportOut — публичная схема PDP: id/listing_id наружу не отдаются
     assert r.json()["inspector"] == report.inspector
@@ -744,19 +751,41 @@ async def test_inspection_found(client: AsyncClient, session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_inspection_not_found(client: AsyncClient, session: AsyncSession):
+async def test_inspection_not_found(
+    client: AsyncClient, session: AsyncSession, user, auth_headers_user
+):
+    user.subscription_tier = "pro"
+    user.subscription_until = datetime.now(UTC) + timedelta(days=30)
+    await session.flush()
     l = await _make_listing(session, source_id="insp-none")
-    r = await client.get(f"/api/listings/{l.id}/inspection")
+    r = await client.get(f"/api/listings/{l.id}/inspection",
+                         headers=auth_headers_user)
     assert r.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_inspection_inactive_listing_404(
-    client: AsyncClient, session: AsyncSession,
+async def test_inspection_locked_for_free(
+    client: AsyncClient, session: AsyncSession, user, auth_headers_user
 ):
+    """Free не видит чеки — 403 с приглашением на Pro."""
+    l = await _make_listing(session, source_id="insp-free")
+    await _make_inspection(session, l.id)
+    r = await client.get(f"/api/listings/{l.id}/inspection",
+                         headers=auth_headers_user)
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_inspection_inactive_listing_404(
+    client: AsyncClient, session: AsyncSession, user, auth_headers_user
+):
+    user.subscription_tier = "pro"
+    user.subscription_until = datetime.now(UTC) + timedelta(days=30)
+    await session.flush()
     l = await _make_listing(session, source_id="insp-inact", is_active=False)
     await _make_inspection(session, l.id)
-    r = await client.get(f"/api/listings/{l.id}/inspection")
+    r = await client.get(f"/api/listings/{l.id}/inspection",
+                         headers=auth_headers_user)
     assert r.status_code == 404
 
 

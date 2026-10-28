@@ -1,0 +1,1508 @@
+/* ============================================================
+   Чаты (05-chats-marketplace.md §7) — отдельный файл, чтобы не
+   конфликтовать с параллельными правками screens-extra.css.
+   Токены и тёмная тема — из index.css (--bg/--surface/--accent…),
+   поэтому data-theme="dark" подхватывается автоматически.
+   ============================================================ */
+
+/* ---------- Двухколоночный десктоп ≥900px (09 §3) ----------
+   Сайдбар списка (340px) + комната в одной grid-сетке: выбор треда не
+   уводит со списка, активная строка подсвечена, unread в сайдбаре
+   обновляется событиями стора. Мобайл — прежний стек (overlay). */
+.chats-page--split {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: stretch;
+  height: calc(100dvh - var(--space-5));
+  padding-right: var(--space-3);
+  box-sizing: border-box;
+}
+.chats-page--split .chats-page__list {
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding-bottom: var(--space-3);
+}
+.chats-page__pane {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.chats-page__pane .chat-room {
+  flex: 1;
+}
+/* Заглушка правой колонки: /chats без :id на десктопе (09 §3) */
+.chats-placeholder {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: center;
+  color: var(--text-secondary);
+}
+.chats-placeholder__emoji {
+  font-size: 40px;
+  line-height: 1;
+}
+.chats-placeholder__title {
+  font: 600 var(--font-md)/var(--leading-snug) var(--font-sans);
+  color: var(--text);
+}
+.chats-placeholder__text {
+  max-width: 32ch;
+  font: 400 var(--font-sm)/1.5 var(--font-sans);
+}
+
+/* ---------- Онлайн-точки (09 §1: presence юзеров) ---------- */
+/* Шапка 1:1 (seller/deal): точка + статус рядом с заголовком */
+.chat-room__online {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 var(--font-xs)/1.2 var(--font-sans);
+  color: var(--text-tertiary);
+}
+.chat-room__online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--text-tertiary); /* серая — не в сети */
+  flex: none;
+}
+.chat-room__online--on {
+  color: var(--text-secondary);
+}
+.chat-room__online--on .chat-room__online-dot {
+  background: #2ea36b; /* зелёная — presence личного канала жив */
+}
+/* тёмная тема — светлее (как .profile-msg--ok в index.css) */
+:root[data-theme="dark"] .chat-room__online--on .chat-room__online-dot,
+:root[data-theme="dark"] .chat-member__dot {
+  background: #5fd39a;
+}
+/* Точка в чипе участника group (09 §1) */
+.chat-member__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: #2ea36b;
+  flex: none;
+}
+/* Пометка «лот снят» (событие lot_expired, 09 §1) в строке предмета */
+.chat-room__lot-expired {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--danger-bg, var(--bg-secondary));
+  color: var(--danger);
+  font: 500 var(--font-xs)/1.3 var(--font-sans);
+}
+
+/* ---------- Экран «Чаты» (список) ---------- */
+.chats-page {
+  min-height: 60vh;
+}
+.chats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3) var(--space-2);
+}
+.chats-head h3 {
+  margin: 0;
+  font: 700 var(--font-lg)/var(--leading-tight) var(--font-sans);
+}
+.chats-head__support {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 var(--font-sm)/1 var(--font-sans);
+  padding: 10px 14px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.chats-head__support:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.chats-error {
+  margin: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: 400 var(--font-sm)/1.5 var(--font-sans);
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+.chats-error__retry {
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  padding: 10px 16px;
+  cursor: pointer;
+}
+.chats-empty {
+  margin: var(--space-5) var(--space-3);
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  color: var(--text-secondary);
+}
+.chats-empty__emoji {
+  font-size: 40px;
+  line-height: 1;
+}
+.chats-empty__title {
+  font: 600 var(--font-md)/var(--leading-snug) var(--font-sans);
+  color: var(--text);
+}
+.chats-empty__text {
+  max-width: 34ch;
+  font: 400 var(--font-sm)/1.5 var(--font-sans);
+}
+.chats-empty__btn {
+  margin-top: var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  padding: 12px 18px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* Гость: конверт виден, экран — заглушка «Войдите» */
+.chats-guest {
+  margin: var(--space-6) var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: center;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+}
+.chats-guest__emoji {
+  font-size: 40px;
+  line-height: 1;
+}
+.chats-guest h3 {
+  margin: 0;
+  font: 700 var(--font-lg)/var(--leading-tight) var(--font-sans);
+}
+.chats-guest p {
+  margin: 0;
+  max-width: 36ch;
+  color: var(--text-secondary);
+  font: 400 var(--font-sm)/1.5 var(--font-sans);
+}
+.chats-guest__login {
+  margin-top: var(--space-2);
+  display: inline-block;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  padding: 12px 32px;
+  min-height: 44px;
+  text-decoration: none;
+}
+
+/* Overlay /chats/:id: ChatRoom занимает область экрана, лента скроллится
+   внутри (bottom не даём наехать на мобильный таб-бар) */
+.chats-page__overlay {
+  height: calc(100dvh - 84px);
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 768px) {
+  .chats-page__overlay {
+    height: calc(100dvh - var(--space-5));
+  }
+}
+
+/* ---------- Список тредов ---------- */
+.chat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-4);
+  display: grid;
+  gap: var(--space-1);
+}
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-height: 64px;
+}
+.chat-item:hover {
+  background: var(--bg-secondary);
+}
+.chat-item--active {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+}
+.chat-item__thumb {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background: var(--surface-sunken);
+}
+.chat-item__thumb--empty {
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+}
+.chat-item__body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.chat-item__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.chat-item__title {
+  font: 600 var(--font-sm)/1.3 var(--font-sans);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-item__type {
+  flex: none;
+  font: 500 var(--font-xs)/1 var(--font-sans);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.chat-item__type--support {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.chat-item__type--deal {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+.chat-item__type--group {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+.chat-item__snippet {
+  font: 400 var(--font-sm)/1.4 var(--font-sans);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-item__side {
+  flex: none;
+  display: grid;
+  justify-items: end;
+  gap: var(--space-1);
+}
+.chat-item__time {
+  font: 400 var(--font-xs)/1 var(--font-sans);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.chat-item__unread {
+  min-width: 22px;
+  padding: 3px 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-xs)/1 var(--font-sans);
+  text-align: center;
+}
+
+/* ---------- Меню v2 (07 §2): сегмент «Диалоги | Переговорные» ---------- */
+/* Тот же паттерн, что .hist-seg в Analyses: «пилюля»-трек + активная кнопка. */
+.chats-seg {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-sunken, var(--bg-secondary));
+  border-radius: var(--radius-full);
+  padding: 4px;
+  width: fit-content;
+  margin: 0 var(--space-3) var(--space-3);
+}
+.chats-seg__btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 var(--font-sm)/1 var(--font-sans);
+  padding: 8px 18px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  min-height: 36px;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.chats-seg__btn--active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Панель переговорных: создать + присоединиться ---------- */
+.chats-groups {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 var(--space-3) var(--space-3);
+}
+.chats-groups__create {
+  justify-self: start;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--accent);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.chats-groups__create:hover {
+  background: var(--accent-soft);
+}
+/* Мини-форма создания: title + опц. лот из истории просмотров. */
+.chats-create {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.chats-create__input,
+.chats-create__select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: 400 var(--font-sm)/1.4 var(--font-sans);
+}
+.chats-create__input:focus,
+.chats-create__select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.chats-create__error {
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  color: var(--danger);
+}
+.chats-create__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.chats-create__submit {
+  flex: 1 1 auto;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+}
+.chats-create__submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.chats-create__cancel {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+}
+/* Присоединение по коду: input 6 символов + кнопка в одну строку. */
+/* mobile ux: поле с лейблом сверху + кнопка вровень с инпутом */
+.chats-join {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.chats-join .chats-field {
+  flex: 1;
+}
+.chats-join__input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: 600 var(--font-md)/1.2 var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.chats-join__input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.chats-join__btn {
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+}
+.chats-join__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---------- Скелетоны списка (07 §2): 3 строки-заглушки ---------- */
+.chats-skel {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+.chats-skel__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.chats-skel__ava {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+}
+.chats-skel__lines {
+  flex: 1;
+  display: grid;
+  gap: var(--space-2);
+}
+.chats-skel__line {
+  height: 12px;
+  border-radius: var(--radius-full);
+}
+.chats-skel__ava,
+.chats-skel__line {
+  background: var(--bg-secondary);
+  animation: chats-skel-pulse 1.4s var(--ease-inout) infinite;
+}
+@keyframes chats-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chats-skel__ava,
+  .chats-skel__line {
+    animation: none;
+  }
+}
+
+/* ---------- Экран чата ---------- */
+.chat-room {
+  position: relative; /* якорь для оверлея инвайт-кода (07 §2) */
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+.chat-room__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.chat-room__back {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-room__titles {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.chat-room__type {
+  justify-self: start;
+  font: 500 var(--font-xs)/1 var(--font-sans);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.chat-room__type--support {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.chat-room__type--deal {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+.chat-room__type--group {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+/* Переговорная (07 §2 + 08 §2): чипы участников с ролями под title.
+   Owner помечен короной; owner шапки кикает member тапом по чипу. */
+.chat-room__members {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  color: var(--text-secondary);
+  overflow: hidden;
+}
+.chat-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font: 400 var(--font-xs)/1.3 var(--font-sans);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-member--kickable {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  cursor: pointer;
+  color: var(--text);
+}
+.chat-member--kickable:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+.chat-member--kickable:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.chat-member__crown {
+  font-size: 11px;
+  line-height: 1;
+}
+.chat-room__members-count {
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+/* Mute-колокольчик group (08 §6): состояние своих уведомлений, клик = тоггл. */
+.chat-room__bell {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-room__bell--muted {
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  border-color: var(--border);
+}
+.chat-room__bell:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* Меню «⋯» комнаты (08 §7): mute/жалоба/покинуть/архивировать. */
+.chat-menu {
+  position: relative;
+  flex: none;
+}
+.chat-menu__btn {
+  width: 36px;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 700 16px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.chat-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-sticky, 10);
+  min-width: 230px;
+  box-sizing: border-box;
+  display: grid;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.chat-menu__dropdown button {
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: 400 var(--font-sm)/1.3 var(--font-sans);
+  text-align: left;
+  padding: 10px 12px;
+  min-height: 40px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-menu__dropdown button:hover {
+  background: var(--bg-secondary);
+}
+.chat-menu__dropdown button:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+  background: transparent;
+}
+.chat-menu__hint {
+  padding: 4px 12px 8px;
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  color: var(--text-tertiary);
+}
+/* «Пригласить» в group-шапке: код + копирование (07 §2). */
+.chat-room__invite-btn {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 var(--font-xs)/1.2 var(--font-sans);
+  padding: 8px 12px;
+  min-height: 36px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-room__invite-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* «📄 Выжимка» (12-ai-trust §3): кнопка в шапке комнаты (партнёрский
+   кабинет) — тот же контур, что invite/mute. */
+.chat-room__summary-btn {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 var(--font-xs)/1.2 var(--font-sans);
+  padding: 8px 12px;
+  min-height: 36px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-room__summary-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* Раскрывающийся блок выжимки диалога (12 §3): под шапкой, над лентой. */
+.chat-summary {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.chat-summary__loading {
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  color: var(--text-secondary);
+}
+.chat-summary__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.chat-summary__title {
+  font: 600 var(--font-xs)/1.2 var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--text-secondary);
+}
+.chat-summary__as-of {
+  font: 400 var(--font-xs)/1.2 var(--font-sans);
+  color: var(--text-tertiary);
+}
+.chat-summary__text {
+  margin: 0;
+  font: 400 var(--font-sm)/var(--leading-normal) var(--font-sans);
+  color: var(--text);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.chat-room__title {
+  margin: 0;
+  font: 600 var(--font-md)/var(--leading-snug) var(--font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-room__subject {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: start;
+  max-width: 100%;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--link);
+  font: 400 var(--font-xs)/1.3 var(--font-sans);
+  cursor: pointer;
+  text-align: left;
+}
+.chat-room__subject img {
+  width: 28px;
+  height: 20px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.chat-room__human {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 var(--font-xs)/1.2 var(--font-sans);
+  padding: 8px 12px;
+  min-height: 36px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-room__feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--bg);
+}
+.chat-room__older,
+.chat-room__loading {
+  align-self: center;
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  color: var(--text-tertiary);
+  padding: var(--space-1) var(--space-3);
+}
+.chat-room__older {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--link);
+  cursor: pointer;
+  min-height: 32px;
+}
+/* Inline-ошибка загрузки истории с «Повторить» (07 §2 — не только тост). */
+.chat-room__load-error {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  max-width: 100%;
+}
+.chat-room__retry {
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--danger);
+  color: var(--surface);
+  font: 600 var(--font-xs)/1 var(--font-sans);
+  padding: 8px 14px;
+  min-height: 32px;
+  cursor: pointer;
+}
+/* Скелетон истории (07 §2): пузыри-заглушки вместо строки «Загружаем…». */
+.chat-feed-skel {
+  display: grid;
+  gap: var(--space-2);
+}
+.chat-feed-skel__row {
+  width: 55%;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  animation: chats-skel-pulse 1.4s var(--ease-inout) infinite;
+}
+.chat-feed-skel__row--own {
+  justify-self: end;
+  width: 45%;
+}
+/* Дата-разделитель ленты: «Сегодня» / «25 окт» (07 §2). */
+.chat-date {
+  align-self: center;
+  margin: var(--space-2) 0 var(--space-1);
+}
+.chat-date span {
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font: 500 var(--font-xs)/1 var(--font-sans);
+}
+.chat-room__loading--error {
+  color: var(--danger);
+}
+
+/* ---------- Сообщения ---------- */
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 86%;
+}
+.chat-msg--own {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.chat-msg--other {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+/* bot — центр-строки: без пузыря, по центру ленты */
+.chat-msg--centered {
+  align-self: center;
+  align-items: center;
+  max-width: 92%;
+}
+.chat-msg__sender {
+  font: 500 var(--font-xs)/1 var(--font-sans);
+  color: var(--text-tertiary);
+  padding: 0 var(--space-2) 2px;
+}
+.chat-msg__bubble {
+  padding: 8px 12px 6px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font: 400 var(--font-sm)/1.45 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+.chat-msg--own .chat-msg__bubble {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-text);
+  border-bottom-right-radius: var(--radius-sm);
+}
+.chat-msg--other .chat-msg__bubble {
+  border-bottom-left-radius: var(--radius-sm);
+}
+.chat-msg--centered .chat-msg__bubble {
+  background: var(--bg-secondary);
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+/* system — плоская центр-строка между сообщениями */
+.chat-msg--system {
+  align-self: center;
+  align-items: center;
+  flex-direction: row;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+.chat-msg__sysline {
+  font: 400 var(--font-xs)/1.4 var(--font-sans);
+  color: var(--text-tertiary);
+  text-align: center;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-full);
+  padding: 4px 12px;
+}
+.chat-msg__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: var(--font-xs);
+}
+.chat-msg__time {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.chat-msg--own .chat-msg__time {
+  color: color-mix(in srgb, var(--accent-text) 70%, var(--accent));
+}
+.chat-msg__ticks {
+  letter-spacing: -0.25em; /* ✓✓ без зазора */
+  color: var(--text-tertiary);
+}
+.chat-msg--own .chat-msg__ticks {
+  color: var(--accent-text);
+}
+.chat-msg__ticks[data-read="read"] {
+  color: var(--accent-text);
+  opacity: 1;
+}
+
+/* typing: «…» рядом с пузырём-строкой */
+.chat-typing {
+  align-self: flex-start;
+  font: 400 var(--font-xs)/1 var(--font-sans);
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-full);
+  padding: 6px 12px;
+}
+.chat-typing__dots {
+  display: inline-block;
+  animation: chat-typing 1.2s ease-in-out infinite;
+}
+@keyframes chat-typing {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-typing__dots {
+    animation: none;
+  }
+}
+
+/* ---------- Markdown внутри пузырей ---------- */
+.chat-md {
+  font: inherit;
+  /* длинные слова/URL не распирают пузырь (07 §2) */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.chat-md p {
+  margin: 0 0 4px;
+}
+.chat-md p:last-child {
+  margin-bottom: 0;
+}
+.chat-md a {
+  color: var(--link);
+  overflow-wrap: anywhere;
+}
+.chat-msg--own .chat-md a {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+.chat-md code {
+  font: 400 0.92em var(--font-mono);
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.chat-msg--own .chat-md code {
+  background: color-mix(in srgb, var(--accent-text) 18%, var(--accent));
+}
+.chat-md pre {
+  margin: 4px 0;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.chat-md pre code {
+  background: none;
+  padding: 0;
+}
+.chat-md blockquote {
+  margin: 4px 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.chat-msg--own .chat-md blockquote {
+  border-left-color: color-mix(in srgb, var(--accent-text) 40%, var(--accent));
+  color: color-mix(in srgb, var(--accent-text) 85%, var(--accent));
+}
+.chat-md ul,
+.chat-md ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.chat-md li {
+  margin: 2px 0;
+}
+
+/* ---------- Превью ссылок ---------- */
+.chat-link-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 2px 0 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+.chat-msg--own .chat-link-card {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.chat-link-card__img {
+  flex: none;
+  width: 96px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--surface-sunken);
+}
+.chat-link-card__img--empty {
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+}
+.chat-link-card__body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.chat-link-card__title {
+  font: 600 var(--font-sm)/1.3 var(--font-sans);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-link-card__price {
+  font: 600 var(--font-sm)/1.3 var(--font-sans);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.chat-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--link);
+  font: 500 var(--font-xs)/1 var(--font-sans);
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Композер ---------- */
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.chat-composer__input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font: 400 var(--font-sm)/1.4 var(--font-sans);
+  padding: 10px 12px;
+  max-height: 78px; /* авто-рост до 3 строк */
+  overflow-y: auto;
+}
+.chat-composer__input:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+.chat-composer__input:disabled {
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+}
+.chat-composer__send {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 18px;
+  cursor: pointer;
+}
+.chat-composer__send:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+/* Композер не под таббаром на мобиле: safe-area + запас до низа оверлея. */
+.chat-composer {
+  padding-bottom: max(var(--space-2), env(safe-area-inset-bottom, 0px));
+}
+/* Закрытая переговорная (08 §2): композера нет — плашка «Архив». */
+.chat-composer--archived {
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 52px;
+  font: 500 var(--font-sm)/1.3 var(--font-sans);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+/* ---------- Инвайт-код переговорной (07 §2) ---------- */
+/* Полупрозрачная подложка поверх комнаты (не блокирует ленту — aria-modal=false). */
+.chat-invite {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-sticky, 10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+.chat-invite__card {
+  position: relative;
+  width: min(360px, 100%);
+  box-sizing: border-box;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+.chat-invite__close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.chat-invite__title {
+  font: 600 var(--font-md)/var(--leading-snug) var(--font-sans);
+  color: var(--text);
+}
+/* Код крупно: моноширинно, с трекингом — читается и переписывается руками. */
+.chat-invite__code {
+  font: 700 30px/1 var(--font-mono);
+  letter-spacing: 0.28em;
+  color: var(--accent);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.chat-invite__hint {
+  font: 400 var(--font-xs)/1.5 var(--font-sans);
+  color: var(--text-secondary);
+}
+.chat-invite__copy {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+}
+.chat-invite__copy:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------- Жалоба на комнату (08 §4): reason-чипы + комментарий ---------- */
+.chat-report__chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.chat-report__chip {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 var(--font-xs)/1 var(--font-sans);
+  padding: 9px 14px;
+  min-height: 36px;
+  cursor: pointer;
+}
+.chat-report__chip--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.chat-report__comment {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: 400 var(--font-sm)/1.4 var(--font-sans);
+  padding: 10px 12px;
+}
+.chat-report__comment:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.chat-report__hint {
+  font: 400 var(--font-sm)/1.5 var(--font-sans);
+  color: var(--text-secondary);
+}
+
+/* ---------- Подтверждение действия (08 §7): покинуть/архив/кик ---------- */
+.chat-confirm__actions {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+.chat-confirm__ok {
+  flex: 1 1 auto;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--danger);
+  color: var(--surface);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+}
+.chat-confirm__ok:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.chat-confirm__cancel {
+  flex: 1 1 auto;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+}
+
+/* ---------- Секция «Архив» в списке (08 §7) ---------- */
+.chat-archive {
+  margin: var(--space-3) 0 0;
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+.chat-archive__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  cursor: pointer;
+  min-height: 40px;
+}
+.chat-archive__head:hover {
+  background: var(--bg-secondary);
+}
+.chat-archive__count {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font: 500 var(--font-xs)/1 var(--font-sans);
+}
+.chat-archive__chevron {
+  color: var(--text-tertiary);
+}
+.chat-list--archived .chat-item {
+  opacity: 0.72;
+  min-height: 52px;
+}
+.chat-item__type--archived {
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+}
+/* muted-тред (08 §6): колокольчик перечёркнут вместо счётчика. */
+.chat-item__muted {
+  font-size: var(--font-sm);
+  line-height: 1;
+  color: var(--text-tertiary);
+}
+
+/* ---------- Заглушка создания без истории просмотров (08 §1) ---------- */
+.chats-create--empty {
+  justify-items: start;
+}
+.chats-create--empty .chats-create__actions {
+  width: 100%;
+}
+.chats-create__empty-title {
+  font: 600 var(--font-sm)/1.4 var(--font-sans);
+  color: var(--text);
+}
+.chats-create__empty-text {
+  font: 400 var(--font-xs)/1.5 var(--font-sans);
+  color: var(--text-secondary);
+}
+.chats-create__feed-btn {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-sm)/1 var(--font-sans);
+  text-decoration: none;
+}
+
+}
+
+/* ---------- Mobile UX (<768px): Фиттс — тач-зона >=44px у мелких
+   контролов чатов; десктоп не меняется ---------- */
+@media (max-width: 767px) {
+  .chats-head__support,
+  .chats-seg__btn,
+  .chat-room__invite-btn,
+  .chat-room__summary-btn,
+  .chat-room__human,
+  .chat-room__older,
+  .chat-room__retry,
+  .chat-archive__head,
+  .chat-report__chip,
+  .chat-link-chip {
+    min-height: var(--touch-min);
+  }
+  .chat-room__back {
+    width: var(--touch-min);
+    height: var(--touch-min);
+  }
+  /* Колокольчик mute и меню «⋯» — главные контролы шапки комнаты */
+  .chat-room__bell,
+  .chat-menu__btn {
+    width: var(--touch-min);
+    height: var(--touch-min);
+  }
+  .chat-invite__close {
+    width: var(--touch-min);
+    height: var(--touch-min);
+  }
+  /* Предмет чата (мини-карточка лота в шапке): была ~24px высотой */
+  .chat-room__subject {
+    min-height: var(--touch-min);
+    align-items: center;
+  }
+}
+
+/* Лейблы НАД полями форм переговорных (не placeholder-only): обёртка
+   label + подпись сверху, aria-label на контроле сохраняется */
+.chats-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font: 500 var(--font-xs)/1.3 var(--font-sans);
+  color: var(--text-secondary);
+}

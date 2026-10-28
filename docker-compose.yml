@@ -38,7 +38,38 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
 
+  # ---------- Centrifugo (чаты/внутренний рынок, редизайн часть 5) ----------
+  # Websocket-сервер v6: браузерные JWT (HS256) + серверная публикация.
+  # Конфиг configs/centrifugo.json — иерархический формат v6; секреты в нём —
+  # placeholders, реальные значения приходят env-переменными (v6 перекрывают
+  # файл): соответствуют CENTRIFUGO_SECRET/CENTRIFUGO_HTTP_API_KEY из .env.
+  # Subscribe-proxy ходит в backend (алиас gateway в профиле micro) со
+  # статическим X-Internal-Token из configs/centrifugo.json — это же значение
+  # бэкенд принимает как centrifugo_http_api_key.
+  centrifugo:
+    image: centrifugo/centrifugo:v6
+    # Конфиг с подстановкой env при старте (JSON не умеет env): секреты
+    # из .env, endpoint subscribe-proxy — на gateway.
+    command:
+      - sh
+      - -c
+      - sed 's|__SECRET__|'"$${CENTRIFUGO_SECRET}"'|;s|__API_KEY__|'"$${CENTRIFUGO_HTTP_API_KEY}"'|;s|__INTERNAL__|'"$${INTERNAL_TOKEN}"'|;s|__PROXY__|http://gateway:8000|' /centrifugo/config.tmpl > /tmp/config.json && exec centrifugo -c /tmp/config.json
+    env_file: .env
+    volumes:
+      - ./configs/centrifugo.json.tmpl:/centrifugo/config.tmpl:ro
+    ports:
+      - "8008:8000"
+    healthcheck:
+      # Centrifugo OSS 6.10 не отдаёт GET /health; wget busybox не умеет
+      # POST/headers. Тест: любой ответ HTTP (даже 404) = сервер жив.
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://localhost:8000/api 2>/dev/null; [ $? -ne 4 ]"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: ["realtime"]
+
   rabbitmq:
+    profiles: ["workers", "mono", "micro"]
     image: rabbitmq:3-management
     ports:
       - "5672:5672"
@@ -55,7 +86,7 @@ services:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     env_file: .env
-    profiles: ["mono"]
+    profiles: ["core", "mono"]
     environment:
       # .env может держать localhost (запуск по процессам) — в compose хост другой
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
@@ -65,10 +96,12 @@ services:
       RAG_SERVICE_URL: http://rag_api:8100
       # glm отвечает ~60-90 сек: дефолтные 5 сек бот не дожидается
       RAG_TIMEOUT_SEC: "120"
+      # Публикация в каналы чатов (редизайн часть 5); .env может держать localhost
+      CENTRIFUGO_URL: http://centrifugo:8000
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy, required: false }
     ports:
       - "8000:8000"
     healthcheck:
@@ -79,7 +112,7 @@ services:
     build: .
     command: python -m app.transport.bot
     env_file: .env
-    profiles: ["mono", "micro"]
+    profiles: ["core", "mono", "micro"]
     environment:
       # Внутри compose бот ходит в backend по имени сервиса
       # (в профиле micro это alias gateway'а)
@@ -96,13 +129,13 @@ services:
     depends_on:
       backend: { condition: service_healthy, required: false }   # профиль mono
       gateway: { condition: service_healthy, required: false }   # профиль micro (alias backend)
-      rabbitmq: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy, required: false }
 
   worker_fetch:
     build: .
     command: python -m app.infrastructure.workers.fetch
     env_file: .env
-    profiles: ["mono", "micro"]
+    profiles: ["workers", "mono", "micro"]
     environment:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
@@ -116,13 +149,13 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy, required: false }
 
   worker_send:
     build: .
     command: python -m app.infrastructure.workers.send
     env_file: .env
-    profiles: ["mono", "micro"]
+    profiles: ["workers", "mono", "micro"]
     environment:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
@@ -136,13 +169,13 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy, required: false }
 
   miniapp:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    profiles: ["mono", "micro"]
+    profiles: ["core", "mono", "micro"]
     ports:
       - "8080:80"
       - "8443:443"          # HTTPS (self-signed) — для web_app-кнопки и браузера
@@ -179,10 +212,11 @@ services:
       SVC_PARTNERS_URL: http://partners:8104
       SVC_DIALOG_URL: http://dialog:8105
       SVC_ADMIN_URL: http://admin:8106
+      SVC_CHAT_URL: http://chat:8107
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy, required: false }
     ports:
       # Один и тот же хост-порт, что и у mono-backend: профили взаимно
       # исключающи (общий алиас backend), попытка поднять оба = громкая
@@ -272,7 +306,7 @@ services:
     build: .
     command: uvicorn services.dialog.main:app --host 0.0.0.0 --port 8105
     env_file: .env
-    profiles: ["micro"]
+    profiles: ["ai", "micro"]
     environment:
       DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
       REDIS_URL: redis://redis:6379/0
@@ -280,7 +314,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }   # финализация ставит fetch-задачи
+      rabbitmq: { condition: service_healthy, required: false }   # финализация ставит fetch-задачи
     ports:
       - "8105:8105"
     healthcheck:
@@ -299,16 +333,39 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }   # ручной fetch ставит задачу
+      rabbitmq: { condition: service_healthy, required: false }   # ручной fetch ставит задачу
     ports:
       - "8106:8106"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8106/health"]
       interval: 30s
 
+  chat:
+    build: .
+    command: uvicorn services.chat.main:app --host 0.0.0.0 --port 8107
+    env_file: .env
+    profiles: ["realtime", "micro"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:${DB_PASSWORD:-app}@postgres:5432/autoselect
+      REDIS_URL: redis://redis:6379/0
+      # Публикация в каналы чатов — по имени сервиса centrifugo (внутри
+      # сети compose centrifugo слушает :8000, 8008 — только публикация)
+      CENTRIFUGO_URL: http://centrifugo:8000
+      # RAG-бот поддержки — по имени сервиса (localhost в .env — для локали)
+      RAG_SERVICE_URL: http://rag_api:8100
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8107:8107"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8107/health"]
+      interval: 30s
+
 
   # ---------- RAG-микросервис (ядро из rag_service) ----------
   qdrant:
+    profiles: ["ai", "micro"]
     image: qdrant/qdrant:latest
     # Постоянный скрининг объяв растит коллекции — лимит не даёт qdrant'у
     # выесть память у postgres/backend на общем узле.
@@ -331,6 +388,7 @@ services:
     # рабочий образ bitnamilegacy (uid 1001); заменяется через MINIO_IMAGE в .env.
     # Если named-volume minio_data создан другим образом (root), сделать разово:
     #   docker run --rm -v auto_bot_minio_data:/data alpine chown -R 1001:1001 /data
+    profiles: ["storage", "mono", "micro"]
     image: ${MINIO_IMAGE:-bitnamilegacy/minio:latest}
     command: server /data --console-address ":9001"
     healthcheck:
@@ -351,6 +409,7 @@ services:
 
   # One-shot: БД rag в общем postgres + миграции alembic
   rag_migrate:
+    profiles: ["ai", "micro"]
     image: postgres:16
     environment:
       PGPASSWORD: ${DB_PASSWORD:-app}
@@ -363,6 +422,7 @@ services:
     restart: "no"
 
   rag_migrate_alembic:
+    profiles: ["ai", "micro"]
     build: ./services/rag
     command: ["alembic", "upgrade", "head"]
     environment:
@@ -372,6 +432,7 @@ services:
     restart: "no"
 
   rag_worker:
+    profiles: ["ai", "micro"]
     build: ./services/rag
     command: ["rag-worker"]
     environment: &rag_env
@@ -406,9 +467,9 @@ services:
       - hf_cache_worker:/srv/.hf
     depends_on:
       postgres: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy, required: false }
       qdrant: { condition: service_started }
-      minio: { condition: service_started }
+      minio: { condition: service_started, required: false }
       rag_migrate_alembic: { condition: service_completed_successfully }
     restart: unless-stopped
     healthcheck:
@@ -420,6 +481,7 @@ services:
       start_period: 300s
 
   rag_api:
+    profiles: ["ai", "micro"]
     build: ./services/rag
     command: ["rag-api"]
     environment:
@@ -438,7 +500,7 @@ services:
     ports:
       - "8100:8100"
     depends_on:
-      rabbitmq: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy, required: false }
       rag_worker: { condition: service_healthy }
     restart: unless-stopped
 
@@ -452,6 +514,7 @@ services:
   # тройная защита: чанкинг + gc в коде, RSS-сторож (самовыход → рестарт),
   # жёсткий mem_limit (иначе OOM-killer может убить соседние контейнеры).
   translate:
+    profiles: ["workers", "mono", "micro"]
     build: ./services/translate
     command: ["translate-api"]
     environment:

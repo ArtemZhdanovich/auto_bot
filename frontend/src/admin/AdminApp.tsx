@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { Activity, Car, Users } from "lucide-react";
+import { Activity, Car, Headphones, Users } from "lucide-react";
 
 import {
   AdminApiError,
@@ -16,7 +16,7 @@ import {
   setAdminToken,
   type AdminPartner,
 } from "./api";
-import { AdminLeads, Partners, Sources } from "./AdminScreens";
+import { AdminLeads, Partners, Sources, Support } from "./AdminScreens";
 import { ChatWidget } from "./ChatWidget";
 import { ErrorState } from "../ui/States";
 
@@ -91,6 +91,7 @@ const SIDE_ITEMS = [
   { to: "/admin/sources", icon: Activity, text: "Источники" },
   { to: "/admin/partners", icon: Users, text: "Партнёры" },
   { to: "/admin/leads", icon: Car, text: "Лиды" },
+  { to: "/admin/support", icon: Headphones, text: "Поддержка" },
 ];
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -188,6 +189,7 @@ export function AdminApp() {
           }
         />
         <Route path="/admin/leads" element={<AdminLeads onUnauthorized={onUnauthorized} />} />
+        <Route path="/admin/support" element={<Support onUnauthorized={onUnauthorized} />} />
         <Route path="*" element={<Navigate to="/admin/sources" replace />} />
       </Routes>
     </AdminLayout>

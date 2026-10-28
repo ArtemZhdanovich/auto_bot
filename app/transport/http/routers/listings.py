@@ -13,8 +13,10 @@ from app.transport.http.deps.dishka import DishkaRoute
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
+from pydantic import BaseModel
 
 from app.application.catalog.dto import (
     InspectionUpdate,
@@ -31,6 +33,7 @@ from app.application.listings.use_cases import normalize_url
 from app.transport.http.deps.auth import CurrentUserDep
 from app.transport.http.deps.internal import RedisDep
 from app.transport.http.deps.use_cases import (
+    BuildHistoryReportDep,
     GetInspectionDep,
     GetListingByUrlDep,
     GetListingDep,
@@ -236,12 +239,21 @@ async def get_listing(
 
 @router.get("/{listing_id}/inspection", response_model=InspectionReportOut)
 async def get_inspection(
+    user: CurrentUserDep,
     use_case: GetInspectionDep,
     listing_id: int = Path(ge=1),
 ) -> InspectionReportOut:
-    """Отчёт осмотра для PDP; 404, если осмотра нет или объявление неактивно."""
+    """Отчёт осмотра для PDP.
+
+    Чеки — платные данные: Free получает 403 (приглашение к Pro),
+    админ видит всегда. 404 — осмотра нет или объявление неактивно.
+    """
     try:
-        view = await use_case.execute(listing_id)
+        view = await use_case.execute(
+            listing_id,
+            user_id=user.telegram_id,
+            is_admin=getattr(user, "role", None) == "admin",
+        )
     except AppError as exc:
         raise _to_http(exc) from exc
     return InspectionReportOut.model_validate(view)
@@ -285,3 +297,42 @@ async def upsert_inspection(
         listing_id, user.telegram_id, view.grade,
     )
     return InspectionReportOut.model_validate(view)
+
+
+# ---------------------------------------------------------------------------
+# AI-отчёт истории (12 §1): факты ДТП/владельцев + LLM-вывод
+# ---------------------------------------------------------------------------
+
+
+class HistoryReportOut(BaseModel):
+    """Отчёт истории лота: факты + абзац-вывод LLM (12 §1)."""
+
+    listing_id: int
+    facts: dict[str, Any]
+    llm_summary: str | None = None
+    generated_at: str
+
+
+@router.get("/{listing_id}/history-report", response_model=HistoryReportOut)
+async def get_history_report(
+    user: CurrentUserDep,
+    use_case: BuildHistoryReportDep,
+    listing_id: int = Path(ge=1),
+) -> HistoryReportOut:
+    """Отчёт истории лота (VIN/лот → русский отчёт, 12 §1).
+
+    Гость — 403 (как AI-анализ). Факты: ДТП из чека осмотра (счётчик +
+    последнее ДТП из record/open), владельцы, пробег подтверждён, чек-лист;
+    сверху — LLM-абзац «стоит ли смотреть». Данных нет — 404
+    no_history_data. Готовый отчёт кэшируется в Redis на 24 часа.
+    """
+    try:
+        view = await use_case.execute(user.telegram_id, listing_id)
+    except AppError as exc:
+        raise _to_http(exc) from exc
+    return HistoryReportOut(
+        listing_id=view.listing_id,
+        facts=view.facts,
+        llm_summary=view.llm_summary,
+        generated_at=view.generated_at,
+    )

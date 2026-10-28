@@ -13,12 +13,18 @@
 from app.transport.http.deps.dishka import DishkaRoute
 
 import logging
+from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
 
 from app.application.errors import AppError
 from app.transport.http.deps.auth import CurrentUserDep
-from app.transport.http.deps.use_cases import CompleteOnboardingDep, GetProfileDep
+from app.transport.http.deps.use_cases import (
+    CompleteOnboardingDep,
+    GetProfileDep,
+    ListMyAnalysesDep,
+)
 from app.transport.http.schemas.user import UserOut
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,26 @@ def _http_error(exc: AppError) -> HTTPException:
         _STATUS_BY_CODE.get(exc.code, status.HTTP_400_BAD_REQUEST),
         exc.public_message,
     )
+
+
+class MyAnalysisOut(BaseModel):
+    """Строка истории «Мои анализы»: разбор + карточка машины."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    listing_id: int
+    verdict: str
+    fair_min: float | None = None
+    fair_max: float | None = None
+    summary: str | None = None
+    created_at: datetime
+    make: str | None = None
+    model: str | None = None
+    year: int | None = None
+    price: float | None = None
+    currency: str | None = None
+    image: str | None = None  # первое фото — превью в списке
 
 
 @router.get("/me", response_model=UserOut)
@@ -81,3 +107,31 @@ async def me_onboarded(
     except AppError as exc:
         raise _http_error(exc) from exc
     return UserOut.model_validate(result.profile)
+
+
+@router.get("/me/analyses", response_model=list[MyAnalysisOut])
+async def my_analyses(
+    user: CurrentUserDep,
+    use_case: ListMyAnalysesDep,
+    limit: int = Query(50, ge=1, le=100),
+) -> list[MyAnalysisOut]:
+    """История AI-разборов пользователя (вкладка «Мои анализы»).
+
+    Владелец берётся из токена; чужие разборы сюда не попадают.
+
+    Args:
+        user: Текущий пользователь (dishka: `CurrentUserDep`).
+        use_case: Сценарий чтения истории.
+        limit: Сколько последних разборов отдать (1..100).
+
+    Returns:
+        Разборы, новые сверху.
+
+    Raises:
+        HTTPException: Прикладная ошибка сценария (маппинг `_http_error`).
+    """
+    try:
+        items = await use_case.execute(user.telegram_id, limit=limit)
+    except AppError as exc:
+        raise _http_error(exc) from exc
+    return [MyAnalysisOut.model_validate(item) for item in items]

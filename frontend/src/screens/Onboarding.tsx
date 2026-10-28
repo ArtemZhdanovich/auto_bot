@@ -1,98 +1,74 @@
-/** Онбординг 3 шага (UI/UX ТЗ §2.8): приветствие → роль → страны. */
+/**
+ * Онбординг в один экран (01-ux-audit-ia.md §3.6, O1): приветствие +
+ * опциональный чипс роли + единственный primary «Показать машины».
+ * Шаги «роль» и «страны» убраны: роль больше не блокирует кнопку
+ * (раньше disabled={!role}), регионы покрыты «Регионом доставки»
+ * в Профиле. Завершение = действие: POST /me/onboarded (App.tsx) → лента.
+ */
 
 import { useState } from "react";
 
 import { tgUser } from "../api/auth";
-
-export const COUNTRIES = ["Корея", "Китай", "Европа", "США", "Япония"] as const;
+import { Tooltip } from "../components/Tooltip";
 
 const ROLES = [
-  { key: "buyer", title: "Покупатель", sub: "Ищу авто для себя" },
-  { key: "dealer", title: "Перекуп", sub: "Ищу авто под перепродажу" },
-  { key: "salon", title: "Салон-брокер", sub: "Работаю с клиентами" },
+  { key: "buyer", title: "Покупатель" },
+  { key: "dealer", title: "Перекуп" },
+  { key: "salon", title: "Салон-брокер" },
 ] as const;
 
-export function OnboardingScreen({ onDone }: { onDone: (data: { role: string; countries: string[] }) => void }) {
+/** Контракт завершения сохранён (App.tsx: finishOnboarding). */
+export function OnboardingScreen({
+  onDone,
+}: {
+  onDone: (data: { role: string; countries: string[] }) => void;
+}) {
   const tg = tgUser();
   const name = tg?.first_name ?? "друг";
-  const [step, setStep] = useState(0);
+  /** Роль — опциональный чипс: клик по выбранному снимает выбор */
   const [role, setRole] = useState<string | null>(null);
-  const [countries, setCountries] = useState<string[]>([]);
-
-  const toggleCountry = (c: string) =>
-    setCountries((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
 
   return (
-    <div className="onboarding">
-      <div className="onboarding__dots">
-        {[0, 1, 2].map((i) => (
-          <span key={i} className={i === step ? "onboarding__dot onboarding__dot--active" : "onboarding__dot"} />
-        ))}
+    <div className="onboarding screen-enter">
+      <div>
+        <h2 style={{ margin: "0 0 8px" }}>🚗 Привет, {name}!</h2>
+        <p style={{ color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>
+          Авто из Кореи и Китая: чеки осмотра, AI-разбор цены, доставка «под ключ».
+          Сохраняйте, считайте доставку, ловите сигналы.
+        </p>
       </div>
 
-      {step === 0 && (
-        <>
-          <div>
-            <h2 style={{ margin: "0 0 8px" }}>Привет, {name}!</h2>
-            <p style={{ color: "var(--text-secondary)", lineHeight: 1.5 }}>
-              Подбираем автомобили из Кореи, Китая, Европы, США и Японии.
-              Создадите уведомление — напишем, когда появится подходящий вариант.
-            </p>
-          </div>
-          <div style={{ color: "var(--text-secondary)", fontSize: 14 }}>
-            🔎 Поиск · ❤️ Избранное · 🔔 Уведомления — всё в одном месте
-          </div>
-          <button className="btn btn--primary btn--block" onClick={() => setStep(1)}>
-            Начать
-          </button>
-        </>
-      )}
+      <div>
+        <div className="onboarding__roles-label">
+          Кто вы?{" "}
+          <Tooltip text="Роль помогает точнее подбирать машины и расчёты. Можно пропустить и выбрать позже в профиле.">
+            <span className="onboarding__hint" tabIndex={0}>
+              (необязательно ⓘ)
+            </span>
+          </Tooltip>
+        </div>
+        <div className="onboarding__chips" role="group" aria-label="Роль">
+          {ROLES.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              aria-pressed={role === r.key}
+              className={role === r.key ? "chip chip--active" : "chip"}
+              onClick={() => setRole(role === r.key ? null : r.key)}
+            >
+              {r.title}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {step === 1 && (
-        <>
-          <h2 style={{ margin: 0 }}>Кто вы?</h2>
-          <div className="onboarding__roles">
-            {ROLES.map((r) => (
-              <button
-                key={r.key}
-                className={role === r.key ? "onboarding__role onboarding__role--active" : "onboarding__role"}
-                onClick={() => setRole(r.key)}
-              >
-                {r.title}
-                <span className="onboarding__role-sub">{r.sub}</span>
-              </button>
-            ))}
-          </div>
-          <button className="btn btn--primary btn--block" disabled={!role} onClick={() => setStep(2)}>
-            Далее
-          </button>
-        </>
-      )}
-
-      {step === 2 && (
-        <>
-          <h2 style={{ margin: 0 }}>Какие страны интересуют?</h2>
-          <div className="onboarding__countries">
-            {COUNTRIES.map((c) => (
-              <button
-                key={c}
-                className={countries.includes(c) ? "chip chip--active" : "chip"}
-                style={{ padding: "12px" }}
-                onClick={() => toggleCountry(c)}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-          <button
-            className="btn btn--primary btn--block"
-            onClick={() => onDone({ role: role ?? "buyer", countries })}
-          >
-            Готово
-          </button>
-        </>
-      )}
+      {/* Единственный primary: завершение = действие, ведущее в ленту */}
+      <button
+        className="btn btn--primary btn--block"
+        onClick={() => onDone({ role: role ?? "buyer", countries: [] })}
+      >
+        Показать машины
+      </button>
     </div>
   );
 }
-

@@ -130,6 +130,7 @@ class PartnerAdminRepository(Protocol):
         daily_quota: int,
         balance: Decimal,
         cpl_rate: Decimal | None,
+        owner_telegram_id: int | None = None,
     ) -> IssuedKey: ...
 
     async def rotate_key(self, partner_id: int) -> IssuedKey: ...

@@ -18,6 +18,7 @@ import logging
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import quote
 
 from app.infrastructure.sources.base import BaseApiAdapter, FetchError
 from app.infrastructure.sources.common.normalize import (
@@ -27,9 +28,9 @@ from app.infrastructure.sources.common.normalize import (
     normalize_make,
     normalize_transmission,
 )
-from app.infrastructure.sources.korean import dehangul, ru_color, ru_make, ru_model
 from app.domain.search.criteria import SearchCriteria
 from app.domain.listings.unified import FetchResult, UnifiedListing
+from app.domain.translation.glossary import apply_glossary
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,11 @@ DEFAULT_INSPECTION_SUMMARY_API = (
 # Страховая история: количество ДТП (своя/чужая вина), утопления, угоны,
 # смена владельцев/номеров, залог/лизинг (анонимно 200).
 DEFAULT_RECORD_API = "https://api.encar.com/v1/readside/record/vehicle/{source_id}/summary"
+# История ДТП из ГОСданных (fem «История ДТП»): нужен госномер из карточки
+# (manage.vehicleNo) — счётчики аварий + ПОЛНЫЙ список ДТП с датами.
+DEFAULT_ACCIDENT_OPEN_API = (
+    "https://api.encar.com/v1/readside/record/vehicle/{source_id}/open"
+)
 # 엔ка진단 — вердикт диагностики: зоны кузова NORMAL/дефект + комментарии
 # (CHECKER_COMMENT «무사고» и пр.). Анонимно 200, без диагностики — 404.
 DEFAULT_DIAGNOSIS_API = "https://api.encar.com/v1/readside/diagnosis/vehicle/{source_id}"
@@ -510,6 +516,81 @@ _MDSL_FRAME_ZONE: dict[str, str] = {
     "pillarPanelRearRight": "pillar_c_r",
 }
 
+# Координаты меток на официальных диаграммах Encar (вид сверху, 254x282):
+# diagram "outer" → www.encar.com/images/pop/check/img_inspection01.gif,
+# diagram "frame" → .../img_inspection02_new.gif. Значения сняты с JS
+# классической страницы чека (fnStats: pos:'left:Xpx;top:Ypx'); frame-метки
+# на общей канве сдвинуты на x-340 (вторая машина правее первой).
+_ZONE_POS: dict[str, tuple[str, int, int]] = {
+    # 외판 (диаграмма 01)
+    "hood": ("outer", 120, 47),
+    "fender_fl": ("outer", 33, 66),
+    "fender_fr": ("outer", 202, 66),
+    "door_fl": ("outer", 33, 115),
+    "door_fr": ("outer", 202, 115),
+    "door_rl": ("outer", 33, 165),
+    "door_rr": ("outer", 202, 165),
+    "rocker_l": ("outer", 4, 140),
+    "rocker_r": ("outer", 233, 140),
+    "fender_rl": ("outer", 37, 211),
+    "fender_rr": ("outer", 199, 211),
+    "trunk": ("outer", 120, 235),
+    "roof": ("outer", 120, 170),
+    # 주요골격 (диаграмма 02, локальные координаты)
+    "frame_front": ("frame", 174, 33),
+    "frame_inside_l": ("frame", 140, 56),
+    "frame_inside_r": ("frame", 205, 56),
+    "wheelhouse_fl": ("frame", 140, 77),
+    "wheelhouse_fr": ("frame", 205, 77),
+    "pillar_a_l": ("frame", 115, 112),
+    "pillar_a_r": ("frame", 233, 112),
+    "pillar_b_l": ("frame", 110, 142),
+    "pillar_b_r": ("frame", 235, 142),
+    "pillar_c_l": ("frame", 118, 178),
+    "pillar_c_r": ("frame", 229, 178),
+    "frame_floor": ("frame", 174, 145),
+    "wheelhouse_rl": ("frame", 138, 211),
+    "wheelhouse_rr": ("frame", 210, 211),
+    "frame_rear": ("frame", 174, 217),
+}
+
+# Корейский текст (хангыль) — для выборки строк под перевод.
+_HANGUL_RE = re.compile(r"[\uAC00-\uD7A3]")
+
+
+def _collect_hangul(obj: Any, out: dict[str, str]) -> None:
+    """Собрать все строки с хангылем из dict/list/str (рекурсивно)."""
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _collect_hangul(v, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_hangul(v, out)
+    elif isinstance(obj, str) and _HANGUL_RE.search(obj):
+        out.setdefault(obj, obj)
+
+
+def _replace_hangul(obj: Any, fixed: dict[str, str]) -> None:
+    """Заменить строки с хангылем на перевод (in-place, рекурсивно)."""
+    if isinstance(obj, dict):
+        for key, v in obj.items():
+            if isinstance(v, str) and v in fixed:
+                obj[key] = fixed[v]
+            else:
+                _replace_hangul(v, fixed)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, str) and v in fixed:
+                obj[i] = fixed[v]
+            else:
+                _replace_hangul(v, fixed)
+
+
+def _mark_pos(zone: str) -> list[int] | None:
+    """Координата метки [x, y] на диаграмме Encar (`None` — зона без метки)."""
+    pos = _ZONE_POS.get(zone)
+    return [pos[1], pos[2]] if pos else None
+
 # Панель dataGroup: code/name/value (+ value_old у «старых») и lank.
 _MDSL_PANEL_RE = re.compile(
     r"code:\s*'(\d+)',\s*name:\s*'(\w+)',\s*value:\s*'([^']*)'"
@@ -597,6 +678,9 @@ class EncarApiAdapter(BaseApiAdapter):
         )
         self._mdsl_api = self.config.get(
             "mdsl_record_api_template", DEFAULT_MDSL_RECORD_API
+        )
+        self._accident_open_api = self.config.get(
+            "accident_open_api_template", DEFAULT_ACCIDENT_OPEN_API
         )
         self._enrich_details = bool(self.config.get("enrich_details", True))
 
@@ -959,6 +1043,20 @@ class EncarApiAdapter(BaseApiAdapter):
                 record = await self._fetch_optional(
                     self._record_api.format(source_id=vid)
                 )
+                # История ДТП из госданных (fem «История ДТП»): нужен госномер
+                # (detail.vehicleNo — top-level; manage.vehicleNo — legacy).
+                manage = (
+                    detail.get("manage") if isinstance(detail.get("manage"), dict) else {}
+                )
+                vehicle_no = str(
+                    detail.get("vehicleNo") or manage.get("vehicleNo") or ""
+                ).strip()
+                record_open: dict[str, Any] | None = None
+                if vehicle_no:
+                    record_open = await self._fetch_optional(
+                        self._accident_open_api.format(source_id=vid)
+                        + f"?vehicleNo={quote(vehicle_no)}"
+                    )
                 diagnosis = await self._fetch_optional(
                     self._diagnosis_api.format(source_id=vid)
                 )
@@ -971,11 +1069,56 @@ class EncarApiAdapter(BaseApiAdapter):
                     inspection=inspection,
                     insp_summary=insp_summary,
                     record=record,
+                    record_open=record_open,
                     diagnosis=diagnosis,
                     legacy_marks=legacy,
                 )
+                # Корейские строки → русский через микросервис перевода
+                # (глоссарий применяется внутри; ошибки не роняют enrichment).
+                fields = {
+                    f: getattr(item, f)
+                    for f in ("make", "model", "generation", "color")
+                    if getattr(item, f)
+                }
+                await self._translate_korean(fields, item.inspection)
+                for f, v in fields.items():
+                    setattr(item, f, v)
 
         await asyncio.gather(*(enrich_one(item) for item in items))
+
+    async def _translate_korean(self, *objs: Any) -> None:
+        """Перевести корейские строки в структурах (in-place).
+
+        Известные токены (бренды/модели/термины) канонизирует глоссарий,
+        остальное уходит в NLLB-микросервис. `translator is None` или любая
+        ошибка → строки остаются как есть (перевод некритичен, как тайтлы).
+
+        Args:
+            *objs: dict/list структуры (поля объявления, отчёт осмотра).
+        """
+        translator = getattr(self, "translator", None)
+        if translator is None:
+            return
+        strings: dict[str, str] = {}
+        for obj in objs:
+            _collect_hangul(obj, strings)
+        if not strings:
+            return
+        originals = list(strings)
+        prepared = [apply_glossary(s)[:500] for s in originals]
+        try:
+            translated = await translator.translate(
+                prepared, source_lang="ko", target_lang="ru"
+            )
+        except Exception as exc:  # noqa: BLE001 — перевод не должен ронять fetch
+            logger.warning("encar_translate_failed n=%d: %s", len(prepared), exc)
+            return
+        fixed = {
+            orig: (translated[i] or orig) if i < len(translated or []) else orig
+            for i, orig in enumerate(originals)
+        }
+        for obj in objs:
+            _replace_hangul(obj, fixed)
 
     def _apply_detail(
         self,
@@ -985,6 +1128,7 @@ class EncarApiAdapter(BaseApiAdapter):
         inspection: dict[str, Any] | None = None,
         insp_summary: dict[str, Any] | None = None,
         record: dict[str, Any] | None = None,
+        record_open: dict[str, Any] | None = None,
         diagnosis: dict[str, Any] | None = None,
         legacy_marks: list[dict[str, Any]] | None = None,
     ) -> None:
@@ -997,6 +1141,7 @@ class EncarApiAdapter(BaseApiAdapter):
             inspection: JSON чека осмотра (`None` — нет/ошибка).
             insp_summary: JSON summary чека (`None` — нет/ошибка).
             record: JSON страховой истории (`None` — нет/ошибка).
+            record_open: JSON истории ДТП из госданных (`None` — нет/ошибка).
             diagnosis: JSON 엔ка진단 (`None` — нет/ошибка).
         """
         vin_raw = detail.get("vin")
@@ -1080,7 +1225,7 @@ class EncarApiAdapter(BaseApiAdapter):
         item.inspection = self._build_inspection(
             detail, cleaned,
             inspection=inspection, insp_summary=insp_summary,
-            record=record, diagnosis=diagnosis,
+            record=record, record_open=record_open, diagnosis=diagnosis,
             photos=check_photos,
             legacy_marks=legacy_marks,
         )
@@ -1123,6 +1268,7 @@ class EncarApiAdapter(BaseApiAdapter):
         inspection: dict[str, Any] | None = None,
         insp_summary: dict[str, Any] | None = None,
         record: dict[str, Any] | None = None,
+        record_open: dict[str, Any] | None = None,
         diagnosis: dict[str, Any] | None = None,
         photos: list[str] | None = None,
         legacy_marks: list[dict[str, Any]] | None = None,
@@ -1135,8 +1281,10 @@ class EncarApiAdapter(BaseApiAdapter):
           флаги ДТП/ремонта (master), чек-лист агрегатов (inners → items),
           зоны кузова (outers → marks);
         - insp_summary (`.../summary`): центр и инспектор → inspector;
-        - record (`.../record/vehicle/{id}/summary`): страховая история
-          (ДТП, гибель, угоны, владельцы, залог) → facts;
+        - record_open (`.../record/vehicle/{id}/open?vehicleNo=…`): история
+          ДТП из госданных — счётчики + полный список аварий с датами → facts;
+        - record (`.../record/vehicle/{id}/summary`): fallback страховой
+          истории (когда `record_open` недоступен) → facts;
         - diagnosis (`.../diagnosis/vehicle/{id}`): 엔카진단 — зоны
           NORMAL/дефект → marks, вердикт CHECKER_COMMENT → facts.
 
@@ -1149,6 +1297,7 @@ class EncarApiAdapter(BaseApiAdapter):
             inspection: JSON чека осмотра.
             insp_summary: JSON summary чека.
             record: JSON страховой истории.
+            record_open: JSON истории ДТП из госданных.
             diagnosis: JSON 엔ка진단.
             photos: URL-ы фото чека (днище/салон) — в отчёт, не в галерею.
 
@@ -1270,7 +1419,7 @@ class EncarApiAdapter(BaseApiAdapter):
                     {
                         "zone": zone,
                         "type": _mark_type_from_kr(st_title),
-                        "note": dehangul(str(st_title))[:300],
+                        "note": str(st_title)[:300],
                     }
                 )
 
@@ -1315,14 +1464,14 @@ class EncarApiAdapter(BaseApiAdapter):
                     continue
                 entry: dict[str, Any] = {"key": key, "status": cell["status"]}
                 if cell["notes"]:
-                    entry["note"] = dehangul("; ".join(cell["notes"]))[:300]
+                    entry["note"] = "; ".join(cell["notes"])[:300]
                 items.append(entry)
 
             insp_name = insp_summary.get("inspName") if isinstance(
                 insp_summary, dict
             ) else None
             if isinstance(insp_name, str) and insp_name.strip():
-                inspector = dehangul(insp_name.strip())[:120]
+                inspector = insp_name.strip()[:120]
 
         # --- классический чек (mdsl_regcar.do): ранки панелей ----------------
         # Карта повреждений «двух машинок» живёт только там (окт 2026).
@@ -1331,14 +1480,60 @@ class EncarApiAdapter(BaseApiAdapter):
             seen = {m["zone"] for m in marks}
             for legacy in legacy_marks:
                 if legacy["zone"] not in seen:
-                    if legacy.get("note"):
-                        legacy = {**legacy, "note": dehangul(legacy["note"])}
                     marks.append(legacy)
                     seen.add(legacy["zone"])
 
-        # --- страховая история (보험이력) ------------------------------------
-        if record is not None:
+        # --- история ДТП из госданных (fem «История ДТП») --------------------
+        if record_open is not None:
+            def _open_cnt(key: str) -> int:
+                value = record_open.get(key)
+                return value if isinstance(value, int) else 0
 
+            my = _open_cnt("myAccidentCnt")
+            other = _open_cnt("otherAccidentCnt")
+            total = _open_cnt("accidentCnt") or my + other
+            if total:
+                facts.append(
+                    f"история ДТП: {total} страховых случаев "
+                    f"(по этому авто: {my}, по вине других: {other})"
+                )
+            else:
+                facts.append("история ДТП: страховых случаев нет")
+            for acc in record_open.get("accidents") or []:
+                if not isinstance(acc, dict):
+                    continue
+                acc_date = str(acc.get("date") or "")[:10]
+                benefit = acc.get("insuranceBenefit")
+                extra = (
+                    f" — выплата {benefit:,} 원".replace(",", " ")
+                    if isinstance(benefit, int) and benefit > 0
+                    else ""
+                )
+                facts.append(f"ДТП {acc_date}{extra}")
+            if _open_cnt("totalLossCnt"):
+                facts.append(f"полная гибель: {_open_cnt('totalLossCnt')}")
+            if _open_cnt("floodTotalLossCnt") or _open_cnt("floodPartLossCnt"):
+                facts.append(
+                    "наводнение: "
+                    f"полная гибель {_open_cnt('floodTotalLossCnt')}, "
+                    f"частичная {_open_cnt('floodPartLossCnt')}"
+                )
+            if _open_cnt("robberCnt"):
+                facts.append(f"угонов: {_open_cnt('robberCnt')}")
+            if _open_cnt("ownerChangeCnt"):
+                facts.append(f"смен владельцев: {_open_cnt('ownerChangeCnt')}")
+            if _open_cnt("carNoChangeCnt"):
+                facts.append(f"смен госномера: {_open_cnt('carNoChangeCnt')}")
+            if record_open.get("loan"):
+                facts.append("залог/кредит в истории")
+            if record_open.get("business"):
+                facts.append("коммерческое использование в истории")
+            if record_open.get("government"):
+                facts.append("использование госорганами в истории")
+            first_date = str(record_open.get("firstDate") or "")
+            if first_date:
+                facts.append(f"первая регистрация: {first_date}")
+        elif record is not None:
             def _cnt(key: str) -> int:
                 value = record.get(key)
                 return value if isinstance(value, int) else 0
@@ -1398,20 +1593,16 @@ class EncarApiAdapter(BaseApiAdapter):
                     {
                         "zone": zone,
                         "type": _mark_type_from_kr(d_result),
-                        "note": (dehangul(d_result)[:300] or None),
+                        "note": (d_result[:300] or None),
                     }
                 )
             if comments:
                 if any("무사고" in c for c in comments):
                     facts.append("вердикт Encar: без ДТП")
                 else:
-                    facts.append(
-                        f"вердикт Encar: {dehangul(' / '.join(comments))[:120]}"
-                    )
+                    facts.append(f"вердикт Encar: {' / '.join(comments)[:120]}")
             d_date = str(diagnosis.get("diagnosisDate") or "")[:10]
-            d_center = dehangul(
-                str(diagnosis.get("reservationCenterName") or "").strip()
-            )
+            d_center = str(diagnosis.get("reservationCenterName") or "").strip()
             d_extra = " ".join(x for x in (d_date, d_center) if x)
             facts[0] = "Диагностика Encar: пройдена" + (
                 f" — {d_extra}" if d_extra else ""
@@ -1420,6 +1611,10 @@ class EncarApiAdapter(BaseApiAdapter):
         summary = " · ".join(facts)
         if len(summary) > 1000:  # лимит InspectionReportIn/Out
             summary = summary[:997] + "…"
+
+        # Координаты меток на диаграммах Encar (для маркеров на фронте).
+        for mark in marks:
+            mark["pos"] = _mark_pos(mark["zone"])
 
         return {
             "source": "encar",
@@ -1485,14 +1680,11 @@ class EncarApiAdapter(BaseApiAdapter):
             source_id=str(source_id),
             url=self._detail_template.format(source_id=source_id),
             title=title,
-            make=ru_make(
-                normalize_make(raw.get("Manufacturer"))
-                or raw.get("Manufacturer")
-            ),
-            model=ru_model(raw.get("Model")),
-            generation=dehangul(
-                raw.get("Badge") or raw.get("BadgeDetail") or ""
-            ) or None,
+            make=normalize_make(raw.get("Manufacturer"))
+            or raw.get("Manufacturer")
+            or None,
+            model=raw.get("Model"),
+            generation=raw.get("Badge") or raw.get("BadgeDetail") or None,
             year=year,
             price=price,
             currency="KRW",
@@ -1501,7 +1693,7 @@ class EncarApiAdapter(BaseApiAdapter):
             body_type=normalize_body(raw.get("BodyType")) or raw.get("BodyType") or None,
             fuel=normalize_fuel(raw.get("FuelType")),
             transmission=normalize_transmission(raw.get("Transmission")),
-            color=normalize_color(raw.get("Color")) or ru_color(raw.get("Color")),
+            color=normalize_color(raw.get("Color")) or raw.get("Color") or None,
             location=raw.get("OfficeCityState") or raw.get("OfficeCity") or None,
             seller_type="dealer",
             images=photos,

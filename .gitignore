@@ -55,3 +55,15 @@ REVIEW.md
 .miniapp_tunnel.err
 .miniapp_tunnel.pid
 .miniapp_tunnel_loop.log
+
+# Временные логи/артефакты дев-сессий (чистка 2026-10-28)
+_*.log
+_*.txt
+_*.json
+_res*.log
+shots/
+.miniapp_tunnel.*
+.zwork/
+.fem_*
+_fa_*
+_mdsl_*

@@ -2,120 +2,69 @@
 
 ## Слои (Clean Architecture)
 
-```
-app/
-├── domain/            # сущности и чистая логика (не импортирует app/*)
-│   ├── listings/ search/ favorites/ dialog/ partners/ limits/ pricing/
-│   ├── analytics/ audit/ calc/ health/ notifications/ scheduling/
-│   ├── sources/ subscription/ translation/ shared/
-├── application/       # сценарии (use cases) + контракты сервисов
-├── infrastructure/    # адаптеры: db, cache, security, services, sources,
-│   │                  # storage (S3), translation, workers, messaging, ai
-├── transport/         # входные точки: http (FastAPI), bot (aiogram),
-│   │                  # messaging (FastStream-обработчики)
-└── di/                # dishka: container.py + providers/*
-```
+- **`app/domain/`** — чистые правила: тарифы (`subscription/policies`),
+  квоты анализов (`pricing/rules`), говернанс чатов, инжест
+  (content_hash/dedup), маскировка контактов (`shared/contacts`).
+- **`app/application/`** — сценарии (use cases) над портами: анализ
+  цены, чаты (SendMessage/JoinByCode/SummonOperator/…), рынок
+  (CreateMarketLot/SubmitLot/модерация/quality), история
+  (BuildHistoryReport), описания (GenerateDescription), партнёры,
+  биллинг. Порт → реализация через Dishka (`app/di`).
+- **`app/infrastructure/`** — SQLAlchemy async (репозитории),
+  RabbitMQ (legacy_worker: очереди fetch/send, cron-джобы), Redis,
+  Centrifugo (publisher/presence), MinIO/S3 (photos/raw), LLM-клиент,
+  адаптеры источников (encar/kcar + прокси-пул + NLLB-перевод).
+- **`app/transport/`** — FastAPI-роутеры (thin), Telegram-бот (aiogram),
+  HTTP/JWT-аутентификация (access/refresh, гости).
+- **`services/`** — доменные сервисы профиля micro (gateway-маршруты
+  по префиксам: /api/chats,/api/market → chat; /api/partner/* в chat
+  и partners по правилам; /api/admin/* → admin и т.д.). Один и тот же
+  код `app/` крутится в mono (`app/main_api`) и micro.
 
-Правило зависимостей: `domain` ничего не импортирует из `app`; `application`
-зависит только от `domain`; `infrastructure` реализует порты `application`;
-`transport` и `di` собирают всё вместе. Проверяется тестом
-`tests/architecture/test_layers.py`.
+## Realtime: Centrifugo (один личный канал)
 
-## Прикладной слой: 6 микросервисов
+- Клиент подписывается **только** на личный канал `user:{tg_id}`
+  (Mini App) / `partner:{id}` (кабинет); ws-token выдаёт
+  `GET /api/chats/ws-token` (HS256, 12ч).
+- Все события (message/read/typing/listing_status/lot_expired) бэк
+  публикует в личные каналы участников
+  (`ParticipantEventPublisher.publish_to_participants`); publish
+  fire-and-forget (упал Centrifugo — лог warning, HTTP не падает).
+- Subscribe-proxy `/api/chats/subscribe-proxy` (X-Internal-Token от
+  Centrifugo) разрешает личный канал только своему sub, thread:{id} —
+  только участникам. Namespaces `user|partner|thread` с
+  `subscribe_proxy_enabled` + `presence` (онлайн-статусы через
+  server-side presence API).
+- Фронт: единый стор `lib/chatStore.ts` (треды/unread/typing TTL/
+  авто-read) + транспорт с поллинг-фоллбэком (5с: список + after_id
+  открытого треда).
 
-Сценарии сгруппированы по доменам; **контракты** каждого сервиса — явные:
+## Данные и хранилища
 
-- `<service>/ports.py` — интерфейсы-порты (`typing.Protocol`), которые
-  реализует инфраструктура;
-- `<service>/dto.py` — DTO и команды сценариев.
+- **PostgreSQL** — источник истины (30 миграций): users, listings
+  (внешние + owner-лоты рынка со статусами lifecycle: draft/moderation/
+  accepted/rejected/archived/expired + placement-даты + pending_patch),
+  чаты (threads/messages/participants с ролями/mute, events, reports),
+  партнёры (accounts/keys/tx, placement_slots), платежи, лиды.
+- **MinIO** — `market-photos` (public-read: photos/ загрузки юзеров,
+  `mirror/{source}/{source_id}/{NNN}.jpg` — зеркала фото внешних
+  лотов с гарантией порядка) и `raw-payloads` (сырые ответы).
+- **Redis** — кэши (facets, translate, history-report, chat-summary),
+  rate-limits (сообщения 20/мин, typing 1/2с, описания 5/день),
+  дайджест-буферы, invite-коды чатов, антидубли уведомлений.
+- **Qdrant** — RAG-база знаний (отдельный сервис services/rag).
 
-Кросс-сервисные порты (нужны 2+ сервисам) — в `application/shared/ports.py`
-(`CachePort`, `LLMPort`, `ClockPort`, `UnitOfWork`).
+## Degradation
 
-| Сервис | Контракты | Сценарные модули (`app/application/…`) | Роутеры (transport/http/routers) |
-|---|---|---|---|
-| **identity** | identity/ports, identity/dto | auth, users, profile | auth, users, me |
-| **catalog** | catalog/ports, catalog/dto | listings (+ingest), filters, favorites, notifications (+settings), analysis, pricing, search, translation | listings, filters, favorites, notifications, analysis |
-| **billing** | billing/ports, billing/dto | payments, subscription | payments, subscription |
-| **partners** | partners/ports, partners/dto | partners (use_cases, queries), leads | partners, leads |
-| **dialog** | dialog/ports, dialog/dto | dialog, ai_search, quota | dialog, ai_search |
-| **admin** | admin/ports, admin/dto | admin (use_cases, assistant), metrics, parser_doctor, analytics, audit, alerts | admin, metrics |
+Ядро (HTTP) не требует периферии: Centrifugo → поллинг; MinIO →
+503 photos_unavailable / raw NULL; translate → оригинал; RAG → LLM;
+RabbitMQ → depends_on required:false (воркеры стартуют отдельно).
+Ступени compose — docs/OPERATIONS.md.
 
-Сквозные утилиты: `calc` (калькулятор расходов — бот + HTTP), `errors.py`
-(иерархия `AppError`), `shared/` (общие порты).
+## Frontend
 
-Коллизии имён разрешены разделением портов: auth-овский `UserRepository`
-(find/create/update) и users-овский `UserUpsertRepository` (только upsert);
-CRM-`LeadView` в partners/dto и партнёрский `PartnerLeadView` в queries.
-
-## DI (dishka)
-
-- `app/di/container.py` собирает провайдеры: `settings`, `database`, `redis`,
-  `broker`, `security`, `adapters`, `repositories`, `use_cases`.
-- **HTTP** — `dishka-fastapi`, REQUEST-скоуп; `FastAPI.Depends` не используется:
-  зависимости приходят в сигнатурах эндпоинтов из dishka-контекста
-  (`app/transport/http/deps/`), protected-роуты — через `InternalDishkaRoute`
-  (X-Internal-Token проверяется до резолва сценариев).
-- **Bot** — dishka-aiogram; **messaging** — dishka-faststream.
-
-## Транспорт и очередь
-
-- `transport/http/routers/*` — REST; OpenAPI на `/docs`.
-- `transport/bot` — aiogram 3: handlers, button_flow, client; long polling.
-- `transport/messaging` — контракты команд (строгие Pydantic-модели,
-  `extra="forbid"`, обязательный `idempotency_key`) и обработчики
-  (handlers/enrich).
-- `infrastructure/messaging` — publisher (постановка), outbox-релей,
-  идемпотентность доставки, топология, legacy-воркер.
-- `infrastructure/workers` — fetch/send: legacy-контур `TaskWorker`/`CronSpec`
-  (aio-pika: retry, DLQ, cron внутри воркера) + новый FastStream-контур.
-  Оба профиля сосуществуют; новые задачи — только с `idempotency_key`.
-
-## Микросервисы (профиль `micro`)
-
-Один код `app/` разворачивается либо монолитом (`app.main_api`, профиль
-mono), либо шестью доменными сервисами (`services/<name>/main.py`) за
-gateway'ем:
-
-| Сервис | Порт | Домены |
-|---|---|---|
-| `gateway` | 8000→8000 (алиас `backend` в сети) | маршрутизация `/api/*` |
-| `identity` | 8101 | auth, users, me |
-| `catalog` | 8102 | listings, favorites, filters, notifications |
-| `billing` | 8103 | payments, subscription |
-| `partners` | 8104 | partners (CPL), leads |
-| `dialog` | 8105 | dialog, ai_search |
-| `admin` | 8106 | admin, аналитика, метрики |
-| `rag` | 8100 | RAG-ядро (services/rag) |
-| `translate` | 8200 | NLLB-перевод (services/translate) |
-
-Ключевые решения:
-
-- **Ноль правок у потребителей.** Gateway слушает :8000 внутри сети и имеет
-  алиас `backend` — бот (`APP_BASE_URL=http://backend:8000`) и nginx Mini App
-  не меняются.
-- **Аутентификация на границе домена.** Gateway только маршрутизирует;
-  `X-Internal-Token`, `Authorization`, `X-API-Key` проходят сквозь и
-  проверяются доменными сервисами.
-- **Специфичные маршруты раньше общих**: `/api/users/{id}/subscription` →
-  billing (до `/api/users` → identity), `/api/admin/partners` → partners
-  (до `/api/admin` → admin). Таблица покрыта юнит-тестами
-  (`tests/transport/test_gateway_routing.py`).
-- **Отказ домена ≠ отказ платформы**: недоступный сервис → 502 с именем
-  сервиса; `GET /health/detailed` агрегирует пинги всех шести.
-- **`GET /metrics`** (вне `/api/*`) пробрасывается в admin-домен — мониторинг
-  одинаков в обоих профилях.
-
-## Данные
-
-- **PostgreSQL 16** (`app/infrastructure/db`): users, user_filters, sources,
-  source_health, listings (+price history, translations, tracking), favorites,
-  sent_log, analytics_events, leads (+partner-поля, qualification),
-  partner_accounts, partner_api_keys, partner_transactions, payments,
-  admin_actions, web_auth. Миграции Alembic `0001–0014`
-  (`app/infrastructure/db/migrations`).
-- **Redis 7**: FSM бота, DialogState (TTL 24 ч), дедуп, rate limits
-  (Token Bucket на Lua), кэши LLM/RAG/перевода, идемпотентность очередей.
-- **RabbitMQ 3**: очереди `fetch`/`send` + DLQ; RAG: query/ingest/delete.
-- **Qdrant** — векторная база RAG; **MinIO (S3)** — сырые ответы источников
-  (retention 180 дней, presigned GET 10 мин).
+- Mini App (React 18 + telegram-ui): keep-alive таб-экранов и
+  листинга, единый чат-стор, темы (light/dark/system), лендинг-вход
+  `/` для браузера (мини-апп/кабинет партнёра).
+- Партнёрский кабинет `/partner` (API-key, свой css), админка `/admin`
+  (internal-token): поддержка, модерация, лиды, источники.

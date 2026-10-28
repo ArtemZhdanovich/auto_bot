@@ -12,6 +12,7 @@ import { haptic } from "../api/auth";
 import { type Region, getRegion, setRegion } from "../lib/fx";
 import { BackButton } from "../ui/BackButton";
 import { SkeletonCard } from "../ui/Skeleton";
+import { apiErrorText } from "./apiErrorText";
 
 interface CalcComponent {
   label: string;
@@ -27,7 +28,7 @@ function CompareBtn({ price, cc, hp, year }: { price: string; cc: string; hp: st
   return (
     <button
       type="button"
-      className="chip chip--ghost calc-compare-btn"
+      className="chip calc-compare-btn"
       disabled={!ready}
       onClick={() => {
         haptic("light");
@@ -88,7 +89,8 @@ export function CalcScreen() {
       const hpNum = parseInt(h, 10);
       const yearNum = parseInt(y, 10);
       if (!priceNum || priceNum <= 0 || !yearNum || yearNum < 1980 || yearNum > new Date().getFullYear() + 1) {
-        setError("Проверьте цену и год (1980 – след. год)");
+        // Текст валидации — 03-content-a11y.md §2.10
+        setError("Проверьте цену и год: цена — больше 0, год — от 1980 до следующего.");
         return;
       }
       setLoading(true);
@@ -108,7 +110,8 @@ export function CalcScreen() {
         setResult(out);
         haptic("medium");
       } catch (e) {
-        setError((e as Error).message);
+        // Ошибки API — по маппингу 03 §3.2 (сырой detail не показываем)
+        setError(apiErrorText(e));
       } finally {
         setLoading(false);
       }
@@ -116,19 +119,24 @@ export function CalcScreen() {
     [],
   );
 
-  // Префилл из deep-link (кнопка «Рассчитать доставку» в карточке)
+  // Префилл из deep-link (кнопка «Доставка и растаможка» в PDP). Экран живёт
+  // в keep-alive и не размонтируется между заходами: применяем параметры при
+  // каждом их изменении в адресе, а не только при первом монтировании —
+  // иначе второй лот из карточки считался бы со старой ценой.
   useEffect(() => {
-    if (params.get("price")) {
-      void calc(
-        params.get("price") ?? "",
-        params.get("cc") ?? "2000",
-        params.get("hp") ?? "",
-        params.get("year") ?? "",
-        regionFromParams(params),
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const priceParam = params.get("price");
+    if (!priceParam) return;
+    const ccParam = params.get("cc") ?? "2000";
+    const hpParam = params.get("hp") ?? "";
+    const yearParam = params.get("year") ?? String(new Date().getFullYear() - 3);
+    setPrice(priceParam);
+    setCc(ccParam);
+    setHp(hpParam);
+    setYear(yearParam);
+    const r = regionFromParams(params);
+    setRegionState(r);
+    void calc(priceParam, ccParam, hpParam, yearParam, r);
+  }, [params, calc]);
 
   const pickRegion = (r: Region) => {
     haptic("light");
@@ -236,14 +244,22 @@ export function CalcScreen() {
       </div>
 
       {error && (
-        <div className="state">
-          <div className="state__title">{error}</div>
+        <div className="calc-error" role="alert">
+          {error}
         </div>
       )}
 
       {loading && !result && (
-        <div style={{ padding: 12 }}>
+        <div className="calc-result">
           <SkeletonCard />
+        </div>
+      )}
+
+      {/* Пустое состояние: подсказка до первого расчёта */}
+      {!error && !loading && !result && (
+        <div className="calc-empty">
+          Заполните цену и год — покажем итог «под ключ»: авто, море, брокер,
+          пошлина и утильсбор.
         </div>
       )}
 

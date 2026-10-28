@@ -1,4 +1,18 @@
-/** Профиль (ТЗ п. 9.2.7): пользователь, тариф, оплата подписки Stars (этап 6). */
+/**
+ * Профиль (01-ux-audit-ia.md §1.8, R1–R5; тексты — 03 §2.9):
+ *  - R1: порядок панелей — Подписка/Тарифы сразу после шапки, настройки
+ *    оформления (тема/регион) ниже, «Профиль» между ними;
+ *  - R2: иерархия кнопок покупки сохранена (free → Pro/Business,
+ *    business — максимум), primary один;
+ *  - R3: «Выйти» — danger-ghost внизу с подтверждением, не primary-плита
+ *    среди покупок;
+ *  - статус «бессрочная (партнёрская)» для business без даты (policies);
+ *  - сравнение тарифов — на токены (styles in screens-extra.css).
+ *
+ * «Мои объявления» (NAV-V2) переехали в таб «Авто» (screens/MyLotsPanel).
+ * «Сменить поверхность» (NAV-V2 §1): выход на лендинг-вход с выбором
+ * приложения (пользователи/партнёры) — лендинг всегда открывается на «/».
+ */
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -11,6 +25,9 @@ import {
   REGION_LABEL,
   type Region,
 } from "../lib/fx";
+import { getTheme, setTheme, type Theme } from "../lib/theme";
+import { openInvoice } from "../lib/invoice";
+import { resetSurface } from "./Landing";
 import type { StarsInvoice, Subscription, User } from "../api/types";
 
 const TIER_LABEL: Record<string, string> = {
@@ -19,26 +36,48 @@ const TIER_LABEL: Record<string, string> = {
   business: "Business",
 };
 
-type InvoiceStatus = "paid" | "failed" | "cancelled" | "pending";
+/** Иерархия тарифов: free < pro < business (app/domain/subscription/policies).
+ *  Предлагаем к покупке только тарифы СТРОГО выше текущего. */
+const TIER_RANK: Record<string, number> = { free: 0, pro: 1, business: 2 };
 
-/** Внутри Telegram ли открыт мини-апп (оплата Stars работает только там). */
-export function inTelegram(): boolean {
-  return Boolean(
-    (window as unknown as { Telegram?: { WebApp?: { initDataUnsafe?: unknown } } })
-      .Telegram?.WebApp?.initDataUnsafe,
-  );
+/** Каденс дайджеста из /api/subscription — человеко-читаемо. */
+const DIGEST_LABEL: Record<string, string> = {
+  weekly: "дайджест раз в неделю",
+  daily: "дайджест ежедневно",
+  instant: "мгновенные уведомления",
+};
+
+/** Окно лимита анализов: 1 день / неделя / N дней. */
+function windowLabel(days: number): string {
+  if (days === 1) return "день";
+  if (days === 7) return "нед";
+  return `${days} дн`;
 }
 
-/** tg.openInvoice с колбеком статуса (ТЗ п. 9.6). */
-function openInvoice(url: string, onStatus: (s: InvoiceStatus) => void): boolean {
-  const webApp = (window as unknown as { Telegram?: { WebApp?: { openInvoice?: (u: string, cb: (s: string) => void) => void } } }).Telegram?.WebApp;
-  if (webApp?.openInvoice) {
-    webApp.openInvoice(url, (status) => onStatus(status as InvoiceStatus));
-    return true;
-  }
-  window.open(url, "_blank"); // вне Telegram — просто открываем ссылку
-  return false;
-}
+/** Сравнение тарифов (новая экономика): строка фичи → значение по тарифам. */
+const TIER_FEATURES: { label: string; value: Record<string, string | boolean> }[] = [
+  {
+    label: "AI-анализы цены",
+    value: { free: "1/нед", pro: "30/день", business: "безлимит" },
+  },
+  {
+    label: "Дайджест",
+    value: { free: "раз в неделю", pro: "ежедневно", business: "instant" },
+  },
+  { label: "Чеки осмотра", value: { free: false, pro: true, business: true } },
+  {
+    label: "Мгновенные уведомления при публикации",
+    value: { free: false, pro: false, business: true },
+  },
+  { label: "Агент на сделку", value: { free: false, pro: false, business: true } },
+];
+
+/** Переключатель темы: три сегмента (lib/theme). */
+const THEME_OPTIONS: { key: Theme; label: string }[] = [
+  { key: "system", label: "Системная" },
+  { key: "light", label: "Светлая" },
+  { key: "dark", label: "Тёмная" },
+];
 
 export function ProfileScreen() {
   const [user, setUser] = useState<User | null>(null);
@@ -47,6 +86,13 @@ export function ProfileScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [region, setRegionState] = useState<Region>(() => getRegion());
+  const [theme, setThemeState] = useState<Theme>(() => getTheme());
+  /** R3: подтверждение выхода — случайный тап не разлогинивает. */
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
+  /** Меню v3: превью сигналов (сигналы ушли из таб-бара в Профиль). */
+  const [signals, setSignals] = useState<
+    { id: number; name?: string | null; criteria: Record<string, unknown>; notify_mode: string }[] | null
+  >(null);
 
   const load = useCallback(() => {
     api<User>("/me")
@@ -55,6 +101,10 @@ export function ProfileScreen() {
     api<Subscription>("/subscription")
       .then(setSub)
       .catch(() => undefined); // вне Telegram статуса нет — read-only
+    // GET /api/filters отвечает массивом (list[FilterOut], см. Filters.tsx)
+    api<NonNullable<typeof signals>>("/filters")
+      .then((r) => setSignals(Array.isArray(r) ? r : []))
+      .catch(() => setSignals([]));
   }, []);
 
   useEffect(() => {
@@ -93,10 +143,10 @@ export function ProfileScreen() {
         load();
       } else if (status === "failed") {
         setMessage(
-          "❌ Оплата не прошла. Проверьте баланс ★ Stars (Settings → Stars) и попробуйте ещё раз.",
+          "❌ Оплата не прошла. Проверьте баланс ★ Stars (Настройки → Stars) и попробуйте ещё раз.",
         );
       } else if (status === "cancelled") {
-        setMessage("Оплата отменена — инвойс можно открыть снова в любой момент.");
+        setMessage("Оплата отменена — счёт можно открыть снова в любой момент.");
       } else {
         setMessage("⏳ Платёж в обработке — подписка активируется в течение пары минут.");
       }
@@ -130,9 +180,40 @@ export function ProfileScreen() {
     );
   }
 
+  const tier = sub?.tier ?? user.subscription_tier;
+  const rank = TIER_RANK[tier] ?? 0;
   const until = sub?.subscription_until
     ? new Date(sub.subscription_until).toLocaleDateString("ru")
     : null;
+  // business без даты окончания — бессрочный партнёрский тариф (policies.py)
+  const tierStatus =
+    tier === "business"
+      ? until
+        ? `активна до ${until}`
+        : "бессрочная (партнёрская)"
+      : until
+        ? `активна до ${until}`
+        : tier === "free"
+          ? "бесплатный тариф"
+          : "активна";
+
+  // Подпись лимитов — из /api/subscription (digest, inspection, agent, analyses_limit)
+  const limits: string[] = [];
+  if (sub) {
+    limits.push(
+      sub.analyses_limit == null
+        ? "безлимит анализов"
+        : `${sub.analyses_limit} анализов/${windowLabel(sub.analyses_window_days)}`,
+    );
+    limits.push(DIGEST_LABEL[sub.digest] ?? "дайджест");
+    if (sub.inspection) limits.push("чеки осмотра");
+    if (sub.instant) limits.push("instant при публикации");
+    if (sub.agent) limits.push("агент на сделку");
+    limits.push(`${sub.max_filters ?? "∞"} уведомлений`);
+  }
+
+  // Цены кнопок — из /api/subscription (prices), с фолбэками как раньше
+  const price = (key: string, fallback: number) => sub?.prices?.[key] ?? fallback;
 
   const guest = isGuest();
 
@@ -151,6 +232,173 @@ export function ProfileScreen() {
           </Link>
         </section>
       )}
+
+      {/* R1: монетизация сразу после шапки — подписка и тарифы */}
+      <section className="panel profile-card">
+        <h3>Подписка</h3>
+        <div className="sub-tier">
+          <div className="sub-tier__name">{TIER_LABEL[tier]}</div>
+          <div className="sub-tier__until">{tierStatus}</div>
+        </div>
+        {sub && <div className="sub-limits">{limits.join(" · ")}</div>}
+        <div className="sub-actions">
+          {/* Кнопки по иерархии: free → Pro и Business; pro → Business;
+              business — уже максимум, покупок нет */}
+          {rank < TIER_RANK.pro && (
+            <>
+              <button className="btn btn--primary" disabled={buying === "pro_month"} onClick={() => buy("pro", "month")}>
+                {buying === "pro_month" ? "Оформляем…" : `⭐ Pro — ${price("pro_month", 500)}★/мес`}
+              </button>
+              <button className="btn" disabled={buying === "pro_year"} onClick={() => buy("pro", "year")}>
+                {buying === "pro_year" ? "Оформляем…" : `⭐ Pro — ${price("pro_year", 4800)}★/год (−20%)`}
+              </button>
+            </>
+          )}
+          {rank < TIER_RANK.business && (
+            <button className="btn" disabled={buying === "business_month"} onClick={() => buy("business", "month")}>
+              {buying === "business_month" ? "Оформляем…" : `⭐ Business — ${price("business_month", 2500)}★/мес`}
+            </button>
+          )}
+          {rank >= TIER_RANK.business && (
+            <div className="sub-limits">
+              Это максимальный тариф — все возможности уже открыты
+            </div>
+          )}
+        </div>
+        {message && (
+          <div className={
+            message.startsWith("✅") || message.startsWith("⏳")
+              ? "profile-msg profile-msg--ok"
+              : "profile-msg profile-msg--err"
+          }>
+            {message}
+          </div>
+        )}
+      </section>
+
+      {/* Сравнение тарифов: три колонки с фичами (новая экономика) */}
+      <section className="panel profile-card">
+        <h3>Тарифы</h3>
+        <div className="tier-grid">
+          {(["free", "pro", "business"] as const).map((t) => (
+            <div
+              key={t}
+              className={t === tier ? "tier-card tier-card--current" : "tier-card"}
+            >
+              <div className="tier-card__name">
+                {TIER_LABEL[t]}
+                {t === tier && <span className="badge badge--claimed">текущий</span>}
+              </div>
+              <div className="tier-card__price">
+                {t === "free"
+                  ? "бесплатно"
+                  : t === "pro"
+                    ? `${price("pro_month", 500)} ★/мес`
+                    : `${price("business_month", 2500)} ★/мес`}
+              </div>
+              {TIER_FEATURES.map((f) => {
+                const v = f.value[t];
+                return typeof v === "string" ? (
+                  <div className="tier-card__feature" key={f.label}>
+                    <span aria-hidden>✓</span>
+                    {f.label}: <b>{v}</b>
+                  </div>
+                ) : v ? (
+                  <div className="tier-card__feature" key={f.label}>
+                    <span aria-hidden>✓</span>
+                    {f.label}
+                  </div>
+                ) : (
+                  <div className="tier-card__feature tier-card__feature--off" key={f.label}>
+                    <span aria-hidden>—</span>
+                    {f.label}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel profile-card">
+        <h3>Мои сигналы</h3>
+        <p className="profile-card__text">
+          Подписки на новые машины: подходящие объявления приходят в чат-бот.
+        </p>
+        {signals === null ? (
+          <div className="state"><span className="skeleton" style={{ width: 160, height: 16 }} /></div>
+        ) : signals.length === 0 ? (
+          <p className="info-row info-row--muted">Сигналов пока нет — создайте первый в разделе «Сигналы».</p>
+        ) : (
+          <div className="sig-preview">
+            {signals.slice(0, 3).map((s) => (
+              <div className="info-row" key={s.id}>
+                <span className="info-row__label">
+                  {s.notify_mode === "instant" ? "⚡" : "🔔"} {s.name || `Сигнал #${s.id}`}
+                </span>
+                <span className="info-row__value info-row__muted">
+                  {s.notify_mode === "instant"
+                    ? "сразу при публикации"
+                    : "дайджест по тарифу"}
+                </span>
+              </div>
+            ))}
+            {signals.length > 3 && (
+              <div className="info-row info-row--muted">…и ещё {signals.length - 3}</div>
+            )}
+          </div>
+        )}
+        <Link to="/filters" className="btn btn--block sig-preview__all">
+          Все сигналы ({signals?.length ?? 0})
+        </Link>
+      </section>
+
+      {/* «Мои объявления» (NAV-V2) — в табе «Авто» (screens/MyLotsPanel) */}
+
+      <section className="panel profile-card">
+        <h3>Профиль</h3>
+        <div className="info-row">
+          <span className="info-row__label">Имя</span>
+          <span className="info-row__value">
+            {user.first_name} {user.last_name ?? ""}
+            {user.username ? <span className="info-row__muted"> · @{user.username}</span> : null}
+          </span>
+          <span className="badge badge--claimed">{TIER_LABEL[user.subscription_tier]}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-row__label">Роль</span>
+          <span className="info-row__value">{user.role}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-row__label">С нами с</span>
+          <span className="info-row__value">{new Date(user.created_at).toLocaleDateString("ru")}</span>
+        </div>
+      </section>
+
+      {/* R1: настройки оформления — ниже монетизации */}
+      <section className="panel profile-card">
+        <h3>Тема оформления</h3>
+        <div className="theme-row">
+          {THEME_OPTIONS.map((o) => (
+            <button
+              key={o.key}
+              className={theme === o.key ? "chip chip--active" : "chip"}
+              aria-pressed={theme === o.key}
+              onClick={() => {
+                haptic("light");
+                setTheme(o.key); // применяет и оповещает MiniApp (AppRoot)
+                setThemeState(o.key);
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <div className="region-hint">
+          Системная повторяет тему Telegram (вне Telegram — настройки устройства).
+          Светлая и тёмная применяются всегда, независимо от системы.
+        </div>
+      </section>
 
       <section className="panel profile-card">
         <h3>Регион доставки</h3>
@@ -176,68 +424,43 @@ export function ProfileScreen() {
         </div>
       </section>
 
-      <section className="panel profile-card">
-        <h3>Профиль</h3>
-        <div className="info-row">
-          <span className="info-row__label">Имя</span>
-          <span className="info-row__value">
-            {user.first_name} {user.last_name ?? ""}
-            {user.username ? <span className="info-row__muted"> · @{user.username}</span> : null}
-          </span>
-          <span className="badge badge--claimed">{TIER_LABEL[user.subscription_tier]}</span>
+      {/* R3: выход — текстовая danger-ghost внизу, с подтверждением */}
+      {logoutConfirm ? (
+        <div className="pr-logout__confirm" role="alertdialog" aria-label="Подтверждение выхода">
+          <span>Точно выйти? Сессия сбросится.</span>
+          <button
+            type="button"
+            className="btn btn--danger"
+            onClick={() => {
+              logout();
+              // keep-alive экраны («История» и др.) перечитывают данные:
+              // просмотры предыдущего пользователя не должны показываться дальше
+              window.dispatchEvent(new CustomEvent("autobot:auth"));
+            }}
+          >
+            Выйти
+          </button>
+          <button type="button" className="btn" onClick={() => setLogoutConfirm(false)}>
+            Остаться
+          </button>
         </div>
-        <div className="info-row">
-          <span className="info-row__label">Роль</span>
-          <span className="info-row__value">{user.role}</span>
-        </div>
-        <div className="info-row">
-          <span className="info-row__label">С нами с</span>
-          <span className="info-row__value">{new Date(user.created_at).toLocaleDateString("ru")}</span>
-        </div>
-      </section>
+      ) : (
+        <button type="button" className="pr-logout" onClick={() => setLogoutConfirm(true)}>
+          Выйти (сбросить сессию)
+        </button>
+      )}
 
-      <section className="panel profile-card">
-        <h3>Подписка</h3>
-        <div className="sub-tier">
-          <div className="sub-tier__name">{TIER_LABEL[sub?.tier ?? user.subscription_tier]}</div>
-          <div className="sub-tier__until">{until ? `активна до ${until}` : "бесплатный тариф"}</div>
-        </div>
-        {sub && (
-          <div className="sub-limits">
-            {sub.max_filters ?? "∞"} уведомлений · {sub.ai_daily_limit ?? "∞"} AI-поисков/день
-            · instant: {sub.instant ? "да" : "нет"}
-          </div>
-        )}
-        <div className="sub-actions">
-          {sub?.tier !== "pro" && (
-            <button className="btn btn--primary" disabled={buying === "pro_month"} onClick={() => buy("pro", "month")}>
-              {buying === "pro_month" ? "Оформляем…" : "⭐ Pro — 500★/мес"}
-            </button>
-          )}
-          {sub?.tier !== "pro" && (
-            <button className="btn" disabled={buying === "pro_year"} onClick={() => buy("pro", "year")}>
-              {buying === "pro_year" ? "Оформляем…" : "⭐ Pro — 4800★/год (−20%)"}
-            </button>
-          )}
-          {sub?.tier !== "business" && (
-            <button className="btn" disabled={buying === "business_month"} onClick={() => buy("business", "month")}>
-              {buying === "business_month" ? "Оформляем…" : "⭐ Business — 2500★/мес"}
-            </button>
-          )}
-        </div>
-        {message && (
-          <div className={
-            message.startsWith("✅") || message.startsWith("⏳")
-              ? "profile-msg profile-msg--ok"
-              : "profile-msg profile-msg--err"
-          }>
-            {message}
-          </div>
-        )}
-      </section>
-
-      <button className="btn btn--danger btn--block" onClick={logout}>
-        Выйти (сбросить сессию)
+      {/* NAV-V2 §1: быстрый выход на лендинг-вход (выбор поверхности).
+          Лендинг открывается на «/» при полной загрузке — ведём туда. */}
+      <button
+        type="button"
+        className="btn btn--block"
+        onClick={() => {
+          resetSurface();
+          window.location.assign("/");
+        }}
+      >
+        Сменить поверхность (пользователи / партнёры)
       </button>
 
       {tg && (

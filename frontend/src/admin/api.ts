@@ -103,3 +103,93 @@ export interface AdminLead {
   qualification: Record<string, unknown> | null;
   created_at: string;
 }
+
+// --- Чаты поддержки (операторский контур, 05-chats-marketplace.md §2/§6) ---
+
+/** Сообщение чата (MessageOut бэка — общий контракт с ядром чатов). */
+export interface AdminChatMessage {
+  id: number;
+  sender_type: "user" | "operator" | "partner" | "bot" | "system";
+  sender_id: number | null;
+  body: string;
+  created_at: string;
+}
+
+/** Тред в списке оператора (GET /api/admin/chats). */
+export interface AdminSupportThread {
+  id: string;
+  type: string;
+  status: "active" | "closed";
+  bot_paused: boolean;
+  user_id: number;
+  user_name: string | null;
+  /** Последнее сообщение юзера (время + сниппет без markdown). */
+  last_user_message_at: string | null;
+  last_user_message_snippet: string | null;
+}
+
+/** GET /api/admin/chats — список тредов (по умолчанию support). */
+export function fetchAdminChats(
+  opts: { type?: "support" | "seller" | "deal"; paused?: boolean; limit?: number } = {},
+): Promise<AdminSupportThread[]> {
+  const p = new URLSearchParams();
+  if (opts.type) p.set("type", opts.type);
+  if (opts.paused != null) p.set("paused", String(opts.paused));
+  p.set("limit", String(opts.limit ?? 50));
+  return aapi<AdminSupportThread[]>(`/chats?${p.toString()}`);
+}
+
+/** GET /api/admin/chats/unread — сколько тредов ждут ответа оператора. */
+export async function fetchAdminUnreadChats(
+  opts: { type?: "support" | "seller" | "deal" } = {},
+): Promise<number> {
+  const p = new URLSearchParams();
+  if (opts.type) p.set("type", opts.type);
+  const r = await aapi<{ threads: number }>(`/chats/unread?${p.toString()}`);
+  return Number(r.threads) || 0;
+}
+
+/**
+ * GET /api/admin/chats/{id}/messages?before_id=|after_id=&limit=50 —
+ * плоский list[MessageOut] → {items, has_more} (как ядро чатов).
+ */
+export async function fetchAdminMessages(
+  threadId: string,
+  opts: { beforeId?: number; afterId?: number; limit?: number } = {},
+): Promise<{ items: AdminChatMessage[]; has_more: boolean }> {
+  const limit = opts.limit ?? 50;
+  const p = new URLSearchParams();
+  if (opts.beforeId != null) p.set("before_id", String(opts.beforeId));
+  if (opts.afterId != null) p.set("after_id", String(opts.afterId));
+  p.set("limit", String(limit));
+  const raw = await aapi<unknown>(`/chats/${threadId}/messages?${p.toString()}`);
+  const items = Array.isArray(raw) ? (raw as AdminChatMessage[]) : [];
+  return { items, has_more: items.length >= limit };
+}
+
+/** POST /api/admin/chats/{id}/messages {body} — ответ оператора (markdown). */
+export function sendAdminMessage(
+  threadId: string,
+  body: string,
+): Promise<AdminChatMessage> {
+  return aapi<AdminChatMessage>(`/chats/${threadId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+// --- Выжимка диалога (12-ai-trust.md §3) ---
+
+/** Ответ POST /api/admin/chats/{id}/summary — LLM-выжимка диалога
+ *  (≤600 знаков: что хочет клиент, лоты, сомнения, следующий шаг). */
+export interface AdminChatSummary {
+  summary: string;
+  /** Выжимка покрывает сообщения до этого id включительно. */
+  as_of_message_id: number;
+}
+
+/** POST /api/admin/chats/{id}/summary — выжимка последних ≤50 сообщений
+ *  (кэш бэка 1ч по last_message_id — повторный клик дёшев). */
+export function fetchAdminChatSummary(threadId: string): Promise<AdminChatSummary> {
+  return aapi<AdminChatSummary>(`/chats/${threadId}/summary`, { method: "POST" });
+}

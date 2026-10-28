@@ -296,13 +296,37 @@ class SqlAlchemyListingsWriter:
         if cb_sources:
             stmt = stmt.where(Listing.source.not_in(list(cb_sources)))
         result = await self._session.execute(
-            stmt.values(is_active=False, disappeared_at=func.now()).returning(Listing.id)
+            stmt.values(is_active=False, disappeared_at=func.now()).returning(
+                Listing.id
+            )
         )
         ids = list(result.scalars().all())
         await self._session.commit()
         if ids:
             logger.info("mark_stale_done: gone=%s", len(ids))
         return ids
+
+    async def gone_external_rows(self, listing_ids: list[int]) -> list[Any]:
+        """Данные исчезнувших ВНЕШНИХ лотов для очистки S3 (11 §4).
+
+        Внешние = owner_type IS NULL (encar/kcar): owner-лоты рынка —
+        пользовательский контент, не трогаем.
+        """
+        if not listing_ids:
+            return []
+        result = await self._session.execute(
+            select(
+                Listing.id,
+                Listing.source,
+                Listing.source_id,
+                Listing.raw_key,
+            ).where(
+                Listing.id.in_(listing_ids),
+                Listing.owner_type.is_(None),
+                Listing.disappeared_at.is_not(None),
+            )
+        )
+        return list(result.all())
 
     async def _apply_raw_keys(self, raw_keys: Mapping[int, str]) -> None:
         """UPDATE listings.raw_key пачкой (без commit — транзакция вызывающего)."""

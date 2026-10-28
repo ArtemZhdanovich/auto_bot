@@ -20,6 +20,18 @@ ROUTE_RULES: tuple[RouteRule, ...] = (
     RouteRule("/api/users", "identity"),
     RouteRule("/api/auth", "identity"),
     RouteRule("/api/me", "identity"),
+    # Чаты/рынок (редизайн части 5-6): партнёрские зеркала — специфичные
+    # правила ОБЯЗАНЫ стоять до /api/partner → partners. Seller-чат живёт
+    # формой /api/chats/seller/{listing_id} — накрывается правилом /api/chats.
+    # /api/partner/market (06 §2) — пакеты размещений и лоты партнёра:
+    # живут в chat-сервисе вместе с market.partner_router.
+    RouteRule("/api/partner/offers", "chat"),
+    RouteRule("/api/partner/chats", "chat"),
+    RouteRule("/api/partner/market", "chat"),
+    # Чеки осмотра и история лотов рынка — домен chat (07 §3)
+    RouteRule("/api/partner/listings", "chat"),
+    RouteRule("/api/chats", "chat"),
+    RouteRule("/api/market", "chat"),
     RouteRule("/api/listings", "catalog"),
     RouteRule("/api/favorites", "catalog"),
     RouteRule("/api/filters", "catalog"),

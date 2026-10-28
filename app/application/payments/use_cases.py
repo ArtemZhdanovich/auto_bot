@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.application.billing.dto import (
@@ -84,6 +84,11 @@ class GetSubscriptionStatus:
             ai_daily_limit=cfg.ai_daily_limit,
             instant=cfg.instant,
             prices=price_list(),
+            digest=cfg.digest,
+            inspection=cfg.inspection,
+            agent=cfg.agent,
+            analyses_limit=cfg.analyses_limit,
+            analyses_window_days=cfg.analyses_window_days,
         )
 
 
@@ -135,7 +140,15 @@ class CreatePendingPayment:
 
 
 class ConfirmPayment:
-    """`successful_payment`: платёж → paid, подписка активирована."""
+    """`successful_payment`: платёж → paid, эффект по kind.
+
+    - kind='subscription' (по умолчанию): активация/продление подписки;
+    - kind='placement' (миграция 0027): продление размещения лота рынка —
+      `placement_paid_until = max(now, coalesce(paid, free)) + 7d*weeks`
+      и публикация лота (needs_payment-лоты оживают первой оплатой).
+    Идемпотентность ретрая вебхука — по `status == 'paid'` (одинакова для
+    обоих видов: повтор не продлевает второй раз).
+    """
 
     def __init__(
         self,
@@ -155,12 +168,89 @@ class ConfirmPayment:
         """Подтвердить платёж (идемпотентно по статусу `paid`).
 
         Raises:
-            NotFound: Платежа/пользователя нет или платёж чужой.
-            Conflict: В платеже нет тарифа/срока.
+            NotFound: Платежа/пользователя/лота нет или платёж чужой.
+            Conflict: В платеже нет тарифа/срока/предмета.
         """
         record = await self._payments.get_payment(payment_id)
         if record is None or record.user_id != user_id:
             raise NotFound("Payment not found")
+        if record.kind == "placement":
+            return await self._confirm_placement(record, provider_payment_id)
+        return await self._confirm_subscription(record, provider_payment_id)
+
+    async def _confirm_placement(
+        self, record: Any, provider_payment_id: str
+    ) -> PaymentConfirmation:
+        """Продлить размещение лота рынка (kind='placement', §2)."""
+        deadlines = await self._payments.get_placement_deadlines(record.listing_id)
+        if deadlines is None:
+            raise NotFound("Lot not found")
+        free_until, paid_until = deadlines
+
+        if record.status == "paid":  # ретрай successful_payment от Telegram
+            return PaymentConfirmation(
+                activated=True,
+                tier=None,
+                subscription_until=None,
+                kind="placement",
+                listing_id=record.listing_id,
+                placement_paid_until=paid_until,
+            )
+        if record.period_days is None or record.listing_id is None:
+            raise Conflict("Payment is incomplete")
+
+        now = datetime.now(UTC)
+        base = now
+        for value in (free_until, paid_until):
+            if value is not None:
+                base = max(base, _as_utc(value))
+        new_until = base + timedelta(days=record.period_days)
+
+        if not await self._payments.mark_paid(
+            record.id,
+            provider_payment_id=provider_payment_id,
+            paid_at=now,
+        ):
+            # Параллельный вебхук уже отметил платёж и применил эффект.
+            deadlines_now = await self._payments.get_placement_deadlines(
+                record.listing_id
+            )
+            return PaymentConfirmation(
+                activated=True,
+                tier=None,
+                subscription_until=None,
+                kind="placement",
+                listing_id=record.listing_id,
+                placement_paid_until=(
+                    deadlines_now[1] if deadlines_now else new_until
+                ),
+            )
+        if not await self._payments.save_placement_paid_until(
+            record.listing_id, user_id=record.user_id, until=new_until
+        ):
+            raise NotFound("Lot not found")
+        await self._payments.commit()
+
+        logger.info(
+            "placement_extended: user=%s listing=%s until=%s",
+            record.user_id,
+            record.listing_id,
+            new_until,
+        )
+        return PaymentConfirmation(
+            activated=True,
+            tier=None,
+            subscription_until=None,
+            kind="placement",
+            listing_id=record.listing_id,
+            placement_paid_until=new_until,
+        )
+
+    async def _confirm_subscription(
+        self, record: Any, provider_payment_id: str
+    ) -> PaymentConfirmation:
+        """Активация подписки (исходный контур, без изменений)."""
+        user_id = record.user_id
         state = await self._payments.get_subscription(user_id)
         if state is None:
             raise NotFound("User not found")
@@ -181,11 +271,18 @@ class ConfirmPayment:
         new_until = activate_subscription(
             subject, record.tier, record.period_days
         )
-        await self._payments.mark_paid(
-            payment_id,
+        if not await self._payments.mark_paid(
+            record.id,
             provider_payment_id=provider_payment_id,
             paid_at=datetime.now(UTC),
-        )
+        ):
+            # Параллельный вебхук уже активировал подписку этим платежом.
+            await self._payments.rollback()
+            return PaymentConfirmation(
+                activated=True,
+                tier=record.tier,
+                subscription_until=new_until,
+            )
         await self._payments.save_subscription(
             user_id, tier=record.tier, until=new_until
         )

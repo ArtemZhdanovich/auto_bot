@@ -38,6 +38,25 @@ class PriceAnalysisRecord:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class AnalysisHistoryItem:
+    """Строка истории «Мои анализы»: разбор + карточка машины."""
+
+    id: int
+    listing_id: int
+    verdict: str
+    fair_min: float | None
+    fair_max: float | None
+    summary: str | None
+    created_at: datetime
+    make: str | None = None
+    model: str | None = None
+    year: int | None = None
+    price: float | None = None
+    currency: str | None = None
+    image: str | None = None
+
+
 class PriceAnalysisRepository(Protocol):
     """Хранилище разборов цены и рыночного контекста объявления."""
 
@@ -45,6 +64,16 @@ class PriceAnalysisRepository(Protocol):
         self, user_id: int, listing_id: int, *, since: datetime
     ) -> int:
         """Сколько разборов этой машины юзер запросил с `since`."""
+
+    async def count_recent_user(
+        self, user_id: int, *, since: datetime
+    ) -> int:
+        """Сколько разборов ЛЮБЫХ машин юзер запросил с `since` (квота окна)."""
+
+    async def list_for_user(
+        self, user_id: int, *, limit: int = 50
+    ) -> list[AnalysisHistoryItem]:
+        """История разборов пользователя («Мои анализы»)."""
 
     async def context(self, listing: ListingQuery) -> MarketContext:
         """Сопоставимые цены и история цены объявления."""

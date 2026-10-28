@@ -300,6 +300,11 @@ class KCarApiAdapter(BaseApiAdapter):
             if listing is not None:
                 items.append(listing)
 
+        # Корейские строки (make/model/generation/color/title) → русский
+        # через NLLB-микросервис одним батчем на выдачу; ошибки не роняют
+        # fetch (остаётся оригинал, как у encar).
+        await self._translate_items(items)
+
         total = _to_int_safe(data.get("totalCnt")) or len(items)
         effective_total = min(total, MAX_TOTAL_ITEMS)
         truncated = effective_total > len(items)
@@ -319,6 +324,56 @@ class KCarApiAdapter(BaseApiAdapter):
                 "truncated": truncated,
             },
         )
+
+    async def _translate_items(self, items: list[UnifiedListing]) -> None:
+        """Перевести корейские поля объявлений (make/model/generation/color).
+
+        Один батч на выдачу: строки собираются со всех items, перевод
+        приходит словарём оригинал→перевод и подставляется in-place.
+        `translator is None` (перевод выключен) или сбой микросервиса —
+        поля остаются оригинальными, fetch не падает.
+        """
+        if not items or getattr(self, "translator", None) is None:
+            return
+        fields = ("make", "model", "generation", "color", "title")
+        strings: dict[str, str] = {}
+        for item in items:
+            for f in fields:
+                value = getattr(item, f, None)
+                if value:
+                    strings.setdefault(value, value)
+        if not strings:
+            return
+        from app.domain.translation.glossary import apply_glossary
+
+        originals = list(strings)
+        prepared = [apply_glossary(s)[:500] for s in originals]
+        # Микросервис ограничивает батч 64 текстами: выдача kcar — до 100
+        # машин × поля = ~180 строк; одним запросом ловили 422 и оставались
+        # с хангылем. Режем на чанки по 48, склеиваем результаты.
+        CHUNK = 48
+        fixed: dict[str, str] = {}
+        for start in range(0, len(prepared), CHUNK):
+            chunk = prepared[start : start + CHUNK]
+            chunk_originals = originals[start : start + CHUNK]
+            try:
+                translated = await self.translator.translate(
+                    chunk, source_lang="ko", target_lang="ru"
+                )
+            except Exception as exc:  # noqa: BLE001 — перевод не роняет fetch
+                logger.warning(
+                    "kcar_translate_failed chunk=%d..%d: %s",
+                    start, start + len(chunk), exc,
+                )
+                continue
+            for i, orig in enumerate(chunk_originals):
+                value = translated[i] if i < len(translated or []) else None
+                fixed[orig] = value or orig
+        for item in items:
+            for f in fields:
+                value = getattr(item, f, None)
+                if value and value in fixed:
+                    setattr(item, f, fixed[value])
 
     async def healthcheck(self) -> bool:
         """Проверяет, что API отвечает валидным `data.rows`.

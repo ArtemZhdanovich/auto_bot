@@ -41,6 +41,7 @@ async def create_partner(
     daily_quota: int,
     balance: Decimal,
     cpl_rate: Decimal | None,
+    owner_telegram_id: int | None = None,
 ) -> tuple[PartnerAccount, str]:
     if plan not in PLAN_CATALOG:
         raise ValueError(f"Unknown plan: {plan}")
@@ -51,6 +52,7 @@ async def create_partner(
         daily_quota=daily_quota,
         balance=balance,
         cpl_rate=cpl_rate,
+        owner_telegram_id=owner_telegram_id,
     )
     account = await session.get(PartnerAccount, issued.partner_id)
     return account, issued.raw_key

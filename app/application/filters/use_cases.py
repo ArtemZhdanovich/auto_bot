@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 FILTERS_LIST_MAX = 200
 _INSTANT_FORBIDDEN = (
-    "Instant notifications are a Pro feature — upgrade via /subscribe"
+    "instant_business_only: уведомление сразу при публикации — тариф Business; "
+    "на Pro подборка приходит дайджестом раз в день (/subscribe)"
 )
 
 

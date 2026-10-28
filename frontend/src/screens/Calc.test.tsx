@@ -1,6 +1,6 @@
 /** Тесты кнопки «назад» на не-табовых экранах (калькулятор, сравнение). */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CalcScreen } from "./Calc";
@@ -98,5 +98,40 @@ describe("Calc: юрисдикция расчёта по валюте (BYN → �
     await screen.findByText(/Итого «под ключ» \(РБ\)/);
     const body = JSON.parse((apiMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body.region).toBe("by");
+  });
+
+  it("keep-alive: повторный заход с новым ?price= пересчитывает (префилл не застревает)", async () => {
+    apiMock.mockResolvedValue(byResult);
+    // Калькулятор в keep-alive: второй переход из PDP с другой ценой
+    // должен обновить поля и пересчитать, а не показать старый результат.
+    function Harness() {
+      const navigate = useNavigate();
+      return (
+        <>
+          <button onClick={() => navigate("/calc?price=22000&year=2021&cur=BYN")}>
+            из PDP
+          </button>
+          <CalcScreen />
+        </>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={["/calc"]} initialIndex={0}>
+        <Harness />
+      </MemoryRouter>,
+    );
+    // форма уже смонтирована, автозапуска без ?price= нет
+    expect(screen.getByRole("button", { name: "Рассчитать" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "из PDP" }));
+    await waitFor(() => {
+      // последний вызов расчёта (mock-вызовы накапливаются между тестами файла)
+      const calls = apiMock.mock.calls.filter(([p]) => p === "/calc/delivery");
+      const call = calls[calls.length - 1];
+      expect(call).toBeTruthy();
+      const body = JSON.parse((call![1] as RequestInit).body as string);
+      expect(body.price_usd).toBe(22000);
+      expect(body.year).toBe(2021);
+      expect(body.region).toBe("by");
+    });
   });
 });

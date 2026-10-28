@@ -26,6 +26,31 @@ _CACHE_MAX = 50_000
 # источник роста KV-кэша/RSS у NLLB на CPU (фидбек «утечки памяти»).
 _CHUNK = int(os.getenv("TRANSLATE_CHUNK", "16"))
 
+# Утечка токена целевого языка в начало ответа («ru Allko New Tusan») и
+# слова-повторы после no_repeat_ngram_size.
+_LANG_TOKEN_PREFIX = re.compile(r"^(ru|rus|rus_Cyrl|eng_Latn|ko|kor_Hang)\s*[:：]?\s+")
+
+
+def _clean_translation(text: str) -> str:
+    """Почистить ответ модели: токен языка в начале, пробелы, повторы слов.
+
+    Галлюцинации («allko new tusan allko new tusan…») остаются редкими
+    после no_repeat_ngram_size, но подстраховка дешёвая.
+    """
+    cleaned = _LANG_TOKEN_PREFIX.sub("", text.strip())
+    # Склеенный токен языка без пробела («K5ko 3rd», «W167ko») — срез
+    # суффикса перед границей слова/концом строки.
+    cleaned = re.sub(r"(?<=[A-Za-z0-9])(?:ko|ru|rus)(?=$|[\s,.()])", "", cleaned).strip()
+    # «слово слово слово» → одно: NLLB иногда дублирует хвост при обрыве.
+    parts = cleaned.split()
+    if len(parts) >= 4:
+        dedup: list[str] = []
+        for word in parts:
+            if not (dedup and dedup[-1] == word and len(dedup) > 1):
+                dedup.append(word)
+        cleaned = " ".join(dedup)
+    return cleaned[:500]
+
 
 def detect_lang(text: str) -> str:
     """NLLB-код языка по письменности (для source_lang='auto')."""
@@ -115,11 +140,18 @@ class NLLBTranslator:
                         [t for _, t in chunk],
                         src_lang=lang,
                         tgt_lang=target_lang,
-                        max_new_tokens=128,
+                        max_new_tokens=96,
+                        # Смешанный латиница+хангыль вход гоняет NLLB в
+                        # бесконечный повтор n-грамм («allko new Tusan » × N)
+                        # и утечку токена языка («ru …») — режем повторы.
+                        no_repeat_ngram_size=4,
+                        repetition_penalty=1.15,
                     )
                     for (i, stripped), out in zip(chunk, outputs):
-                        translated = (out.get("translation_text") or "").strip() or None
-                        results[i] = translated
+                        translated = _clean_translation(
+                            out.get("translation_text") or ""
+                        )
+                        results[i] = translated or None
                         if translated:
                             with self._lock:
                                 if len(self._cache) >= _CACHE_MAX:

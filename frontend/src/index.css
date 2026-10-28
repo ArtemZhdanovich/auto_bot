@@ -9,10 +9,11 @@
 
 body {
   margin: 0;
-  /* Тема Telegram прокидывается через var(--tg-theme-*) — ТЗ п. 9.1 */
-  background: var(--tg-theme-bg-color, #fff);
-  color: var(--tg-theme-text-color, #000);
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Токены --bg/--text учитывают и тему Telegram (var(--tg-theme-*), ТЗ п. 9.1),
+     и явный выбор пользователя (data-theme на <html>, lib/theme.ts) */
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
 }
 
 /* Отступ снизу под фиксированный Tabbar */
@@ -22,48 +23,166 @@ main {
 }
 
 /* ============================================================
-   Дизайн-токены (UI/UX ТЗ §1.2)
+   Дизайн-токены — финальный блок редизайна (02-design-system.md §9).
+   Светлая тема — «ткань» клиента Telegram (bg/акцент парой), наша
+   семантика (--deal/--warn/--danger) фиксирована в обеих темах.
+   Все старые имена переменных сохранены (§9.1) — компонентные классы
+   ниже по файлу работают без изменений.
    ============================================================ */
 :root {
+  color-scheme: light;
+
+  /* ---------- Палитра: фон и поверхности ---------- */
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg-secondary: var(--tg-theme-secondary-bg-color, #f2f3f5);
+  --surface: #ffffff;            /* карточки, панели, Sheet (уровни L1-L3) */
+  --surface-sunken: #e9ebee;     /* треки прогресса, drag-handle, плейсхолдеры фото */
+
+  /* ---------- Палитра: текст ---------- */
+  --text: var(--tg-theme-text-color, #17191e);
+  /* НЕ var(--tg-theme-hint-color): телеграмовский hint даёт ~2.3:1 и валит AA */
+  --text-secondary: #5b6472;     /* 5.98:1 на bg, 5.39:1 на bg-secondary */
+  --text-tertiary: #8a93a0;      /* ~3:1 — только декор/дизейбл */
+  /* Алиас для кода, писавшегося до редизайна (admin/ChatWidget.tsx):
+     --text-primary не существовал и молча превращался в inherit */
+  --text-primary: var(--text);
+
+  /* ---------- Акцент клиента Telegram (primary-интерактив) ---------- */
+  --accent: var(--tg-theme-button-color, #1d6feb);
+  --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  /* Тинты подстраиваются под любой входящий акцент; для WebView без
+     color-mix (Chrome <111) — статичный фолбэк строкой выше (§8.1) */
+  --accent-soft: rgba(29, 111, 235, 0.1);
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  --accent-ring: rgba(29, 111, 235, 0.3);
+  --accent-ring: color-mix(in srgb, var(--accent) 30%, transparent);
+
+  /* ---------- Семантика (фиксирована, НЕ от Telegram) ---------- */
+  --deal: #0e7a46;               /* выгода / дешевле рынка / чистый чек */
+  --deal-bg: #e3f5ec;
+  --deal-solid: #12805c;         /* заливка бейджа «−N%», текст #fff (4.92:1) */
+  --warn: #8f5b00;               /* «в рынке», лимиты, locked */
+  --warn-bg: #fbefd6;
+  --danger: #c62a2f;             /* «дорого», ошибки */
+  --danger-bg: #fbe9e8;
+  --destructive: var(--tg-theme-destructive-text-color, #c62a2f);
+  --link: var(--tg-theme-link-color, #1d6feb);
+
+  /* ---------- Границы ---------- */
+  --border: var(--tg-theme-section-separator-color, #e3e6eb);
+  --border-strong: #c6ccd4;
+
+  /* ---------- Тени (имена прежние, значения мягче) ---------- */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --shadow-md: 0 2px 4px rgba(16, 24, 40, 0.05), 0 6px 16px rgba(16, 24, 40, 0.10);
+  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.16);
+
+  /* ---------- Типографика ---------- */
+  --font-sans: -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI",
+    Roboto, "Noto Sans", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  --font-xs: 12px;   /* caption / overline / бейджи */
+  --font-sm: 14px;   /* body / кнопки / поля */
+  --font-md: 16px;   /* title S — модель на карточке */
+  --font-lg: 18px;   /* title M — ЦЕНА на карточке */
+  --font-xl: 22px;   /* title L — заголовок экрана, цена PDP */
+  --font-display: 28px; /* hero-цифры («под ключ») */
+  --font-2xl: 32px;  /* display */
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.5;
+  --tracking-tight: -0.01em; /* крупные цены */
+  --tracking-caps: 0.06em;   /* overline CAPS (SourceBadge) */
+
+  /* ---------- Сетка (база 4pt) ---------- */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 48px;              /* вертикали экранов */
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-sm: 6px;   /* монограммы, tooltip */
+  --radius-md: 10px;  /* кнопки, поля */
+  --radius-lg: 16px;  /* карточки, панели */
+  --radius-xl: 20px;  /* BottomSheet, hero */
   --radius-full: 999px;
 
-  --font-xs: 12px;
-  --font-sm: 14px;
-  --font-md: 16px;
-  --font-lg: 18px;
-  --font-xl: 22px;
-  --font-2xl: 32px;
+  /* ---------- Motion (§6.1) ---------- */
+  --dur-fast: 120ms; /* нажатие, чип, tooltip */
+  --dur-base: 200ms; /* hover, скелетоны, экраны */
+  --dur-slow: 300ms; /* sheet, смена раскладки */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);  /* вход */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);       /* выход */
+  --ease-inout: cubic-bezier(0.4, 0, 0.2, 1);  /* перемещение */
 
-  --bg: var(--tg-theme-bg-color, #ffffff);
-  --bg-secondary: var(--tg-theme-secondary-bg-color, #f4f4f5);
-  --text: var(--tg-theme-text-color, #000000);
-  --text-secondary: var(--tg-theme-hint-color, #707579);
-  --accent: var(--tg-theme-button-color, #1e73b8); /* фолбэк ≥ 5:1 с белым текстом; в Telegram приходит парный цвет */
-  --accent-text: var(--tg-theme-button-text-color, #ffffff);
-  --destructive: var(--tg-theme-destructive-text-color, #e53935);
-  --link: var(--tg-theme-link-color, #1e73b8);
+  /* ---------- Слои (§5.3): тост всегда выше модалки ---------- */
+  --z-sticky: 10;    /* sticky-шапка ленты */
+  --z-cta: 100;      /* CTA-бар карточки */
+  --z-tooltip: 800;
+  --z-sheet: 900;
+  --z-lightbox: 1000;
+  --z-modal: 1050;
+  --z-toast: 1100;
 
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
-  --shadow-md: 0 2px 4px rgba(16, 24, 40, 0.06), 0 6px 16px rgba(16, 24, 40, 0.12);
-  --shadow-lg: 0 10px 30px rgba(16, 24, 40, 0.18);
-
-  /* Границы карточек/панелей — видимы и в светлой, и в тёмной теме
-     (section-separator-color Telegram адаптируется под тему) */
-  --border: var(--tg-theme-section-separator-color, rgba(16, 24, 40, 0.1));
-  --border-strong: var(--tg-theme-hint-color, #a8b0b9);
-
+  /* ---------- Layout ---------- */
   --content-max: 1200px;
+  --reading-max: 760px; /* PDP/Profile/Filters — вместо магических 760px */
   --tabbar-h: 56px;
+  --touch-min: 44px;    /* минимальная тач-зона (§4) */
+}
+
+/* ============================================================
+   Тёмная тема: сцена «закрытого автосалона» (02-design-system §2.2).
+   data-theme="dark" на <html> ставит lib/theme.ts; тёмная НЕ наследует
+   фолбэки светлой: акцент светлее (#5ca9f0) + тёмный текст на нём.
+   ============================================================ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f1115;
+  --bg-secondary: #171a20;
+  --surface: #1d2129;
+  --surface-sunken: #12151a;
+
+  --text: #f0f2f5;
+  --text-secondary: #9aa4b2;  /* 6.4–7.5:1 во всех комбинациях */
+  --text-tertiary: #667080;
+  --text-primary: var(--text);
+
+  /* Фолбэк акцента светлый + тёмный текст на нём (пара Telegram сохраняется) */
+  --accent: var(--tg-theme-button-color, #5ca9f0);
+  --accent-text: var(--tg-theme-button-text-color, #0f1115);
+  --accent-soft: rgba(92, 169, 240, 0.14);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --accent-ring: rgba(92, 169, 240, 0.3);
+  --accent-ring: color-mix(in srgb, var(--accent) 30%, transparent);
+
+  /* Семантика светлее: плашки на графите */
+  --deal: #53d08c;
+  --deal-bg: #12271c;
+  --deal-solid: #53d08c;       /* текст на заливке — #111318 (9.53:1) */
+  --warn: #f2c14e;
+  --warn-bg: #2a2210;
+  --danger: #ff8a8d;
+  --danger-bg: #2e191c;
+  --destructive: var(--tg-theme-destructive-text-color, #ff8a8d);
+  --link: var(--tg-theme-link-color, #5ca9f0);
+
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: #3d4550;
+
+  /* На тёмном тени читаются слабо — глубже и с обязательным бордером */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40), 0 1px 3px rgba(0, 0, 0, 0.50);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 20px rgba(0, 0, 0, 0.50);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.60);
+}
+
+/* Табличные цифры для всех денежных значений и счётчиков (§3.1) */
+.price-tag,
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ============================================================
@@ -190,46 +309,59 @@ main {
 }
 
 /* ============================================================
-   Skeleton (ТЗ §1.5 — skeleton вместо Spinner)
+   Skeleton (ТЗ §1.5 — skeleton вместо Spinner; 02-design-system §6.2.4)
    ============================================================ */
 .skeleton {
   position: relative;
   overflow: hidden;
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
-}
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.35),
-    transparent
-  );
-  animation: skeleton-shimmer 1.4s infinite;
+  /* Мягкая пульсация opacity вместо диагонального блика-шиммера:
+     в списке из 10+ карточек shimmer заметно грузит слабые Android-WebView */
+  animation: skeleton-pulse 1.4s var(--ease-inout) infinite;
 }
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-@keyframes skeleton-shimmer {
-  100% {
-    transform: translateX(100%);
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.85; }
+}
+
+/* ============================================================
+   Motion-хелперы (02-design-system §6): переходы экранов и слоёв.
+   Анимируем только opacity/transform — compositor, без reflow.
+   ============================================================ */
+/* Вход экрана: fade + лёгкий подъём 8px за 200ms (base) */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
-.skeleton-card__photo {
-  aspect-ratio: 16 / 9;
-  border-radius: 0;
+.screen-enter {
+  animation: fade-in-up var(--dur-base) var(--ease-out) both;
 }
-.skeleton-card__line {
-  height: 14px;
-  margin: var(--space-2) var(--space-4);
-}
-.skeleton-card__line--short {
-  width: 55%;
+
+/* prefers-reduced-motion (§6.2.5): transform-переходы и бесконечные
+   петли отключаем, остаётся только opacity-fade ≤150ms — ориентир
+   «что появилось» не теряется. Haptic не трогаем (не визуальное движение) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+  .screen-enter {
+    animation: fadeIn 150ms ease-out both;
+  }
 }
 
 /* ============================================================
@@ -239,11 +371,15 @@ main {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(var(--tabbar-h) + var(--space-4));
+  /* mobile ux: +safe-area — в Telegram WebView таббар выше --tabbar-h,
+     тост прятался под панелью табов */
+  bottom: calc(var(--tabbar-h, 56px) + var(--space-4) + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  z-index: 1000;
+  /* z-шкала §5.3: тост — самый верхний слой, выше модалки и скрима
+     (раньше был 1000 против 1100 у модалки и тонул под ней) */
+  z-index: var(--z-toast);
   width: min(92vw, 480px);
   pointer-events: none;
 }
@@ -288,7 +424,7 @@ main {
   flex-shrink: 0;
   padding: 5px 12px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--tg-theme-hint-color, #707579);
+  border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--text);
   font-size: 13px;
@@ -399,7 +535,7 @@ main {
      перекрыть таббар/контент; липнет к низу вьюпорта над таббаром */
   position: sticky;
   bottom: calc(var(--tabbar-h, 56px) + env(safe-area-inset-bottom, 0px));
-  z-index: 100;
+  z-index: var(--z-cta);
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -420,11 +556,23 @@ main {
 }
 
 /* Таббар telegram-ui красится своими var(--tgui--*); без темы от Telegram
-   там светло-серые (#a2acb0 ≈ 2.3:1) подписи. Переопределяем на наши токены
-   (светлая: #707579 ≈ 4.7:1; тёмная: #aaa на #212121 ≈ 6.9:1). */
+   там светло-серые подписи. Переопределяем на наши токены: светлая
+   #5b6472 ≈ 5.98:1, тёмная #9aa4b2 ≥ 6.4:1 (02-design-system §2.2). */
 .app-tabbar {
   --tgui--secondary_hint_color: var(--text-secondary);
   --tgui--bg_color: var(--bg);
+}
+/* Подписи табов не распирают таббар на узких экранах
+   (короткие подписи + ellipsis на всякий случай; Caption — это span) */
+.app-tabbar button {
+  min-width: 0;
+  flex: 1 1 0;
+}
+.app-tabbar button > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .listing-cta-bar__fav {
   flex: none;
@@ -458,8 +606,8 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: var(--touch-min, 44px); /* mobile ux: тач-зона ≥44 */
+  height: var(--touch-min, 44px);
   border: 1px solid var(--border);
   border-radius: 50%;
   background: var(--bg-secondary);
@@ -611,21 +759,10 @@ main {
 }
 
 /* --- Фильтры --- */
-.filters-form__intro {
-  margin: -6px 0 2px;
-  font-size: var(--font-sm);
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
 .filters-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-}
-.filters-form__hint {
-  margin-top: -6px;
-  font-size: var(--font-xs);
-  color: var(--text-secondary);
 }
 .filter-list {
   display: flex;
@@ -767,7 +904,7 @@ main {
 .modal {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: var(--z-modal); /* ниже тостов (z-шкала §5.3) */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -822,16 +959,7 @@ main {
   color: var(--accent-text);
 }
 
-/* --- Лента: подбар чипсы + кнопка «Фильтры» --- */
-.feed-subbar {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-.feed-subbar .chip-row {
-  flex: 1;
-  min-width: 0; /* чипсы скроллятся, кнопку не выталкивают */
-}
+/* --- Лента: кнопка «Фильтры» (F3) --- */
 .feed-toggle {
   flex: none;
   padding: 6px 12px;
@@ -849,12 +977,6 @@ main {
   border-color: var(--accent);
   color: var(--accent-text);
 }
-.feed-subbar__controls {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
 /* Сортировка ленты (PLP-стандарт): стилизована как .feed-toggle */
 .feed-sort {
   flex: none;
@@ -869,34 +991,18 @@ main {
   cursor: pointer;
 }
 
-/* --- Лента: панель фильтров --- */
-.feed-panel {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 10px;
-  margin-top: 10px;
-  padding: 10px;
-  border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-sm);
-  /* Панель внутри sticky-шапки: без лимита по высоте низ (кнопки
-     «Применить/Сбросить») оказывается за экраном и недостижим. */
-  max-height: calc(100vh - 150px);
-  max-height: calc(100dvh - 150px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
+/* --- Лента: поля фильтров (используются внутри bottom-sheet F2) --- */
 .feed-panel__pair {
   min-width: 0; /* grid-элементы не должны распирать панель шире экрана */
 }
+/* Подпись 12/500 secondary над полем (§7.12) — placeholder не теряет контекст */
 .feed-panel__field {
   display: flex;
   flex-direction: column;
   gap: 3px;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--font-xs);
+  font-weight: 500;
   color: var(--text-secondary);
 }
 .feed-panel__field input,
@@ -904,12 +1010,13 @@ main {
   width: 100%;
   min-width: 0; /* иначе input не сжимается ниже intrinsic-ширины → горизонтальный скролл */
   box-sizing: border-box;
+  min-height: var(--touch-min); /* тач-зона поля 44 (§4/§7.12) */
   padding: 7px 9px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-strong);
   background: var(--bg);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 .feed-panel__pair {
   display: grid;
@@ -921,37 +1028,6 @@ main {
   outline: none;
   border-color: var(--accent);
 }
-.feed-panel__actions {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 10px;
-}
-.feed-panel__apply {
-  flex: 1;
-  padding: 10px 0;
-  border-radius: var(--radius-md);
-  border: none;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-size: var(--font-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-.feed-panel__reset {
-  flex: none;
-  padding: 10px 18px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--text);
-  font-size: var(--font-sm);
-  cursor: pointer;
-}
-@media (min-width: 768px) {
-  .feed-panel {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
 
 /* ============================================================
    Feed-хедер (sticky)
@@ -959,7 +1035,7 @@ main {
 .feed-header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: var(--z-sticky);
   background: var(--bg);
   padding: var(--space-2) var(--space-4);
 }
@@ -973,8 +1049,8 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: var(--touch-min, 44px); /* mobile ux: тач-зона ≥44 */
+  height: var(--touch-min, 44px);
   padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
@@ -1069,57 +1145,14 @@ main {
   font-weight: 600;
 }
 
-/* Онбординг (ТЗ §2.8) */
+/* Онбординг (ТЗ §2.8): один экран — приветствие, роль-чипс, CTA.
+   Стили роли-чипсов и подписи — в блоке «Редизайн 2026-10» ниже */
 .onboarding {
   padding: var(--space-6) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
   min-height: 80vh;
-}
-.onboarding__dots {
-  display: flex;
-  gap: var(--space-2);
-  justify-content: center;
-}
-.onboarding__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-full);
-  background: var(--bg-secondary);
-}
-.onboarding__dot--active {
-  background: var(--accent);
-}
-.onboarding__roles {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.onboarding__role {
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  text-align: left;
-  cursor: pointer;
-  font-size: var(--font-md);
-  color: var(--text);
-}
-.onboarding__role--active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.onboarding__role-sub {
-  display: block;
-  color: var(--text-secondary);
-  font-size: var(--font-sm);
-  margin-top: var(--space-1);
-}
-.onboarding__countries {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-2);
 }
 
 /* ============================================================
@@ -1538,7 +1571,7 @@ main {
   margin: 8px 0 6px;
   height: 8px;
   border-radius: 4px;
-  background: var(--tg-theme-secondary-bg-color, #e8e8ec);
+  background: var(--bg-secondary);
   overflow: hidden;
 }
 .compare-bar__fill {
@@ -1714,15 +1747,8 @@ main {
 .skeleton {
   background: linear-gradient(90deg, rgba(128,128,128,0.1) 25%, rgba(128,128,128,0.18) 50%, rgba(128,128,128,0.1) 75%);
   background-size: 200% 100%;
-  animation: skeleton-wave 1.4s ease infinite;
-}
-@keyframes skeleton-wave {
-  from {
-    background-position: 200% 0;
-  }
-  to {
-    background-position: -200% 0;
-  }
+  /* единая пульсация вместо волны (02-design-system §6.2.4) */
+  animation: skeleton-pulse 1.4s var(--ease-inout) infinite;
 }
 .price-chart {
   position: relative;
@@ -1810,50 +1836,73 @@ main {
 }
 
 /* ============================================================
-   Тёмная тема (Telegram dark): вердикты/метки не сливаются с фоном
+   Тёмная тема (data-theme="dark", lib/theme.ts): вердикты/метки
+   и пастельные плашки не сливаются с фоном
    ============================================================ */
-@media (prefers-color-scheme: dark) {
-  .analysis__verdict--deal {
-    color: #5fd39a;
-    background: rgba(48, 164, 108, 0.22);
-  }
-  .analysis__verdict--fair {
-    color: #f2c14e;
-    background: rgba(240, 178, 12, 0.2);
-  }
-  .analysis__verdict--overpriced {
-    color: #ff8a8d;
-    background: rgba(229, 72, 77, 0.2);
-  }
-  .analysis__pill--good {
-    color: #5fd39a;
-    background: rgba(48, 164, 108, 0.22);
-  }
-  .analysis__pill--bad {
-    color: #ff8a8d;
-    background: rgba(229, 72, 77, 0.22);
-  }
-  .analysis--locked {
-    color: #f2c14e;
-  }
-  .analysis__bar-marker {
-    background: #1c1c1e;
-  }
-  .compare-badge {
-    color: #46c78c;
-    border-color: #46c78c;
-  }
-  .compare-delta {
-    color: #ff8a8d;
-  }
-  .guest-banner {
-    background: var(--bg-secondary);
-    color: var(--text);
-  }
-  .calc-warn {
-    color: #ffd166;
-    background: rgba(240, 178, 12, 0.12);
-  }
+:root[data-theme="dark"] .analysis__verdict--deal {
+  color: #5fd39a;
+  background: rgba(48, 164, 108, 0.22);
+}
+:root[data-theme="dark"] .analysis__verdict--fair {
+  color: #f2c14e;
+  background: rgba(240, 178, 12, 0.2);
+}
+:root[data-theme="dark"] .analysis__verdict--overpriced {
+  color: #ff8a8d;
+  background: rgba(229, 72, 77, 0.2);
+}
+:root[data-theme="dark"] .analysis__pill--good {
+  color: #5fd39a;
+  background: rgba(48, 164, 108, 0.22);
+}
+:root[data-theme="dark"] .analysis__pill--bad {
+  color: #ff8a8d;
+  background: rgba(229, 72, 77, 0.22);
+}
+:root[data-theme="dark"] .analysis--locked {
+  color: #f2c14e;
+}
+:root[data-theme="dark"] .analysis__bar-marker {
+  background: #1c1c1e;
+}
+:root[data-theme="dark"] .compare-badge {
+  color: #46c78c;
+  border-color: #46c78c;
+}
+:root[data-theme="dark"] .compare-delta {
+  color: #ff8a8d;
+}
+:root[data-theme="dark"] .guest-banner {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+:root[data-theme="dark"] .calc-warn {
+  color: #ffd166;
+  background: rgba(240, 178, 12, 0.12);
+}
+:root[data-theme="dark"] .feed-more--error span {
+  color: #ff8a8d;
+}
+:root[data-theme="dark"] .badge--deal {
+  color: #5fd39a;
+}
+/* Грейды осмотра: базовые — светлые пастели; в тёмной — тёмные тинты,
+   иначе светлый текст (тема) на светлой плашке не читается */
+:root[data-theme="dark"] .inspection__grade--excellent {
+  background: rgba(48, 164, 108, 0.22);
+  color: #5fd39a;
+}
+:root[data-theme="dark"] .inspection__grade--good {
+  background: rgba(77, 124, 254, 0.2);
+  color: #8ab4ff;
+}
+:root[data-theme="dark"] .inspection__grade--fair {
+  background: rgba(240, 178, 12, 0.18);
+  color: #f2c14e;
+}
+:root[data-theme="dark"] .inspection__grade--poor {
+  background: rgba(229, 72, 77, 0.2);
+  color: #ff8a8d;
 }
 
 /* ============================================================
@@ -1976,6 +2025,9 @@ main {
   gap: 6px;
   margin-top: 8px;
   overflow-x: auto;
+  /* превью-лента — скролл со snap (как большой трек): активная миниатюра
+     центрируется scrollIntoView({inline:'center'}) из Listing.tsx */
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
 }
 .gallery__thumb {
@@ -1987,6 +2039,7 @@ main {
   opacity: 0.65;
   cursor: pointer;
   flex: none;
+  scroll-snap-align: center;
   background: var(--bg-secondary);
 }
 .gallery__thumb--active {
@@ -2006,7 +2059,7 @@ main {
 .lightbox {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-lightbox);
   background: rgba(8, 10, 14, 0.94);
   display: flex;
   align-items: center;
@@ -2088,7 +2141,10 @@ main {
   .lightbox__nav--next { right: calc(50% - 60px); }
 }
 
-/* --- Карточка объявления: ПК = 2 колонки (галерея+инфо | действия) --- */
+/* --- Карточка объявления: ≥768px = 2 колонки (контент | sticky-колонка
+       «AI-анализ + CTA» справа — жалоба владельца: «анализ вправо»);
+       <768px — одна колонка в DOM-порядке: галерея/заголовок-цена →
+       анализ → CTA-кнопки → остальное (анализ сразу после цены) --- */
 .listing-page {
   position: relative;
   display: flex;
@@ -2100,30 +2156,43 @@ main {
   margin: 0 auto;
 }
 .listing-page__main,
+.listing-page__rest,
 .listing-page__side {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
-@media (min-width: 1024px) {
+@media (min-width: 768px) {
   .listing-page {
     display: grid;
-    grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+    /* правая колонка ~340–380px (по жалобе: анализ + CTA всегда на виду) */
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 32vw, 380px);
+    column-gap: var(--space-5);
+    row-gap: var(--space-4);
     align-items: start;
     max-width: 1200px;
     padding: var(--space-5);
   }
   /* Кнопка «Назад» — первый ребёнок .listing-page: без этого правила она
-     занимает грид-ячейку (1,1), main с галереей уезжает в узкую правую
-     колонку, а side — в широкую левую (раскладка «вывернута») */
+     занимает грид-ячейку (1,1) и выворачивает раскладку колонок */
   .listing-back {
     grid-column: 1 / -1;
   }
-  /* Комплектация/Осмотр живут в ЛЕВОЙ колонке (__main) — sticky-карточка
-     справа ограничена высотой общего ряда и не наезжает на них */
+  .listing-page__main {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  /* Правая колонка: AI-анализ цены + CTA-карточка; sticky на всю высоту
+     контента (grid-row 2/4 — от галереи до конца «rest»-колонки) */
   .listing-page__side {
+    grid-column: 2;
+    grid-row: 2 / 4;
     position: sticky;
-    top: var(--space-4);
+    top: var(--space-4); /* отступ под шапку: шапки нет — просто воздух */
+  }
+  .listing-page__rest {
+    grid-column: 1;
+    grid-row: 3;
   }
 }
 
@@ -2165,19 +2234,6 @@ main {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-.ai-chat__link {
-  align-self: center;
-  border: none;
-  background: none;
-  color: var(--accent);
-  font-size: var(--font-sm);
-  font-weight: 600;
-  cursor: pointer;
-  padding: var(--space-2);
-}
-.ai-chat__link:hover {
-  text-decoration: underline;
 }
 .ai-msg {
   max-width: 86%;
@@ -2291,9 +2347,7 @@ main {
   background: rgba(229, 72, 77, 0.12);
   color: var(--destructive);
 }
-@media (prefers-color-scheme: dark) {
-  .profile-msg--ok { color: #5fd39a; }
-}
+:root[data-theme="dark"] .profile-msg--ok { color: #5fd39a; }
 
 /* ============================================================
    PDP: карточка характеристик и панели (замена telegram-ui)
@@ -2304,11 +2358,14 @@ main {
   color: var(--accent);
   margin: 2px 0 var(--space-2);
 }
-.listing-page__side .btn--block {
-  margin-bottom: var(--space-2);
-}
-.listing-page__side .btn--block:last-child {
-  margin-bottom: 0;
+/* Подсказка под кнопкой «Открыть у источника»: источники гео-блокированы
+   в РФ (парсер ходит через прокси, пользователь — нет); подтягиваем к кнопке */
+.cta-hint {
+  margin: -4px 0 var(--space-2);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 /* --- Избранное: список строк-карточек --- */
@@ -2386,56 +2443,54 @@ main {
   display: block;
 }
 
-.inspection__body {
-  fill: var(--bg-primary);
-  stroke: var(--border-strong);
-  stroke-width: 1.5;
+.inspection__diagram {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  margin: 0 auto;
 }
 
-.inspection__glass {
-  fill: rgba(100, 116, 139, 0.18);
-  stroke: var(--border);
-  stroke-width: 1;
+.inspection__diagram-img {
+  width: 100%;
+  display: block;
+  border-radius: 8px;
+  background: var(--bg);
 }
 
-.inspection__seam {
-  fill: none;
-  stroke: var(--border-strong);
-  stroke-width: 1.2;
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-.inspection__wheel {
-  fill: var(--bg-primary);
-  stroke: var(--text-secondary);
-  stroke-width: 3;
-  pointer-events: none;
-}
-
-.inspection__hub {
-  fill: var(--bg-secondary);
-  stroke: var(--text-secondary);
-  stroke-width: 2;
-  pointer-events: none;
-}
-
-.inspection__zone {
-  fill: var(--bg-primary);
-  stroke: var(--border-strong);
-  stroke-width: 1.5;
-  cursor: pointer;
-  transition: fill 0.15s ease, opacity 0.15s ease;
-}
-.inspection__zone:hover { opacity: 0.85; }
-.inspection__zone--sel { stroke: var(--accent); stroke-width: 3; }
-
-.inspection__axis {
-  font-size: 13px;
+.inspection__dir {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
   font-weight: 700;
-  fill: var(--text-secondary);
-  text-anchor: middle;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
   pointer-events: none;
+}
+.inspection__dir--front { top: 2px; }
+.inspection__dir--rear { bottom: 2px; }
+
+.inspection__pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 10px;
+  border: 2px solid var(--bg);
+  background: var(--destructive, #ef4444);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease;
+}
+.inspection__pin:hover { transform: translate(-50%, -50%) scale(1.15); }
+.inspection__pin--sel {
+  border-color: var(--accent);
+  transform: translate(-50%, -50%) scale(1.2);
 }
 
 .inspection__legend {
@@ -2565,3 +2620,1497 @@ main {
   line-height: 1.2;
 }
 
+/* ============================================================
+   Профиль: переключатель темы (Profile, lib/theme)
+   ============================================================ */
+.theme-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.theme-row .chip {
+  flex: 1 1 96px;
+  text-align: center;
+}
+
+/* ============================================================
+   Профиль: сравнение тарифов (новая экономика, три колонки)
+   ============================================================ */
+.tier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.tier-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.tier-card--current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tier-card__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-md);
+  font-weight: 700;
+}
+.tier-card__price {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.tier-card__feature {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+.tier-card__feature > span {
+  color: #2ea44f;
+  font-weight: 700;
+}
+.tier-card__feature--off {
+  color: var(--text-secondary);
+}
+.tier-card__feature--off > span {
+  color: var(--text-secondary);
+}
+:root[data-theme="dark"] .tier-card__feature > span {
+  color: #5fd39a;
+}
+@media (max-width: 520px) {
+  .tier-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   «Анализы»: история разборов + похожие машины (Analyses.tsx)
+   ============================================================ */
+/* Вердикт: deal — зелёный, fair — серый, overpriced — красный */
+.verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.verdict-badge--deal {
+  background: rgba(48, 164, 108, 0.14);
+  color: #1b7a4b;
+}
+.verdict-badge--fair {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.verdict-badge--overpriced {
+  background: rgba(229, 72, 77, 0.12);
+  color: #c62a2f;
+}
+:root[data-theme="dark"] .verdict-badge--deal {
+  background: rgba(48, 164, 108, 0.22);
+  color: #5fd39a;
+}
+:root[data-theme="dark"] .verdict-badge--overpriced {
+  background: rgba(229, 72, 77, 0.2);
+  color: #ff8a8d;
+}
+
+/* Карточка анализа из истории */
+.analysis-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.analysis-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.analysis-card__head {
+  display: flex;
+  gap: var(--space-3);
+}
+.analysis-card__img {
+  flex: none;
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.analysis-card__img--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+.analysis-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.analysis-card__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+.analysis-card__meta {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+.analysis-card__summary {
+  margin: 2px 0 0;
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.analysis-card__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.analysis-card__actions .btn {
+  flex: 1 1 150px;
+  padding: 8px 12px;
+}
+
+/* Похожие машины (LLM-реранк): компактные строки-карточки */
+.similar-source {
+  font-size: var(--font-xs);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.similar-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.similar-item {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  cursor: pointer;
+}
+.similar-item:hover {
+  border-color: var(--border-strong);
+}
+.similar-item__img {
+  flex: none;
+  width: 88px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.similar-item__img--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+.similar-item__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.similar-item__title {
+  font-weight: 600;
+  font-size: var(--font-sm);
+}
+.similar-item__meta {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+.similar-item__reason {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
+
+/* ===== Осмотр (Inspection): новые состояния — пустая карта и отсутствие чека ===== */
+
+/* Зелёная плашка «Повреждений по чеку не зафиксировано»: показывается под
+   диаграммами, когда отчёт есть (200), но marks пустые (машина чистая или
+   чек без карты повреждений) — секция не должна молча исчезать */
+.insp-clean {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: #dcfce7;
+  color: #166534;
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+:root[data-theme="dark"] .insp-clean {
+  background: rgba(22, 101, 52, 0.35);
+  color: #86efac;
+}
+.insp-clean__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  background: #16a34a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Компактная строка «чека нет» (404 от /inspection): не пустота, а причина —
+   kcar чеков не выдаёт, у части лотов encar чек не найден */
+.insp-missing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+}
+
+/* ============================================================
+   Редизайн 2026-10 — оболочка и UI-kit (02-design-system.md)
+   ============================================================ */
+
+/* --- Tooltip (§7.13): пузырь в портале, position: fixed — никогда
+   не absolute внутри overflow-контейнеров, вёрстку не растягивает --- */
+.tooltip-trigger {
+  display: inline-flex;
+}
+.tooltip {
+  position: fixed;
+  /* выше карточек/панелей, ниже модалок и тостов (§5.3) */
+  z-index: var(--z-tooltip);
+  max-width: 240px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  /* инверсия: фон цветом текста — отрыв от любого контента под ним */
+  background: var(--text);
+  color: var(--bg);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  animation: tooltip-in var(--dur-fast) var(--ease-out);
+}
+/* в тёмной — поверхность + бордер: инверсия на графите не читается */
+:root[data-theme="dark"] .tooltip {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+@keyframes tooltip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --- Таб-бар: активный таб акцентом (иконка lucide наследует currentColor) --- */
+.app-tabbar__item--active,
+.app-tabbar__item--active span {
+  color: var(--accent);
+}
+/* Тач-зона таба ≥44px: у Tabbar telegram-ui высота итема = высоте бара */
+.app-tabbar button {
+  min-height: var(--touch-min);
+}
+
+/* --- Десктоп-sidebar (Shell): бренд + пункты-кнопки --- */
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-4);
+  font-size: var(--font-md);
+  font-weight: 700;
+}
+/* Кнопки вместо div (клавиатура/скринридеры); скоуп .app-sidebar —
+   admin/partner используют .sidebar-item в своих контейнерах */
+.app-sidebar .sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 10px var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+  font: inherit;
+  font-size: var(--font-md);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.app-sidebar .sidebar-item:hover {
+  background: var(--bg-secondary);
+}
+/* Активный пункт — тинт акцента (ghost-selected, §7.1) */
+.app-sidebar .sidebar-item--active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.app-sidebar .sidebar-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* --- Онбординг в один экран (01-ux-audit §3.6) --- */
+.onboarding__roles-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+.onboarding__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* Чипы роли: тач-зона ≥44px (§4) */
+.onboarding__chips .chip {
+  padding: 12px 16px;
+  min-height: var(--touch-min);
+  font-size: var(--font-sm);
+}
+.onboarding__hint {
+  color: var(--text-tertiary);
+  cursor: help;
+}
+
+/* ============================================================
+   Keep-alive таб-экранов (App.tsx)
+   ============================================================ */
+/* Неактивная вкладка живёт в DOM, но не показывается: состояние
+   фильтров ленты, история AI-чата и избранное переживают
+   переключение вкладок (экраны не размонтируются). */
+.keepalive-hidden {
+  display: none;
+}
+
+/* ============================================================
+   Редизайн: лента (.feed-*), карточка лота (.lcard-*), PDP (.pdp-*)
+   (01-ux-audit-ia.md §1.2/§1.3, 02-design-system §7.3/§7.10)
+   Все цвета — только через токены: тёмная тема работает автоматически.
+   ============================================================ */
+
+/* --- Карточка лота в ленте (.lcard, 02-design-system §7.3) ---
+   Фото 16:9 → бейджи-пилюли (низ-лево) → модель → мета «год · пробег ·
+   страна · источник» → цена $ + ≈₽ (F6) → 3 спека (F8). Источник —
+   текстом, ссылки нет (F9). Строки тела прибиты к общему ритму: карточки
+   в ряду сетки равной высоты (grid-stretch), спеки — к низу тела. */
+.lcard {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+/* Скелетон-карточка — та же геометрия, но не кликабельна */
+.lcard--skeleton {
+  cursor: default;
+}
+.app-shell--desktop .lcard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+.lcard:active {
+  transform: scale(0.985);
+}
+.lcard:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.lcard__media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--surface-sunken);
+  overflow: hidden; /* масштаб фото при hover не выпускает пиксели за карточку */
+}
+.lcard__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+/* Hover десктопа: лёгкий наезд фото (§7.3) — compositor, без reflow */
+.app-shell--desktop .lcard:hover .lcard__img {
+  transform: scale(1.02);
+}
+/* Фото грузится — skeleton той же геометрии (нулевой layout-shift) */
+.lcard__img-skel {
+  position: absolute;
+  inset: 0;
+  border-radius: 0;
+}
+/* Без фото — заглушка-силуэт (не машинка-клише: тихий tertiary-цвет) */
+.lcard__ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-tertiary);
+}
+/* Лот снят с продажи: фото гаснет (§7.3, состояние gone) */
+.lcard--gone .lcard__img {
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+/* Бейджи-пилюли поверх фото, НИЗ-ЛЕВО (§7.3): компактные, absolute —
+   не растягивают карточку и не двигают сетку; клики проходят в карточку */
+.lcard__badges {
+  position: absolute;
+  bottom: var(--space-2);
+  left: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  max-width: calc(100% - 72px); /* не наезжаем на счётчик фото справа-снизу */
+  pointer-events: none;
+}
+.lcard__badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px; /* компактная пилюля (масштаб счётчика чипа, §7.2) */
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  /* 0.75 — белый символ ≥3:1 даже на чисто-белом фото (§5.2) */
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  backdrop-filter: blur(4px);
+}
+/* Снижение цены — единственный «денежный» цвет карточки: deal-solid */
+.lcard__badge--drop {
+  background: var(--deal-solid);
+  color: #fff;
+}
+:root[data-theme="dark"] .lcard__badge--drop {
+  color: #111318; /* 9.53:1 на светлой заливке тёмной темы (§2.2) */
+}
+/* Избранное поверх фото; хит-зона расширена до 44px (§4) */
+.lcard__fav {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+.lcard__fav::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.lcard__count {
+  position: absolute;
+  bottom: var(--space-2);
+  right: var(--space-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(4px);
+}
+.lcard__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  flex: 1; /* карточки в ряду сетки равной высоты: тело добирает остаток */
+}
+.lcard__title {
+  margin: 0;
+  font-size: var(--font-md); /* Title S 16/600 — модель */
+  font-weight: 600;
+  line-height: var(--leading-snug);
+  overflow: hidden;
+}
+/* Модель — ellipsis максимум в 2 строки: длинные названия не распирают
+   карточку и не рвут равную высоту ряда (переполнений текста нет) */
+.lcard__title--clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.lcard__meta {
+  font-size: var(--font-xs); /* caption 12 — год · пробег · источник */
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Цена: Title M 18/700, табличные цифры — колонки цен не «пляшут» (§3.1) */
+.lcard__price {
+  margin-top: var(--space-1);
+  font-size: var(--font-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.lcard__price-alt {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  /* «≈ 1 254 000 ₽» — одной строкой: перенос «₽» на новую строку
+     (обычные пробелы вокруг валюты в formatLocal) выглядит сломанным */
+  white-space: nowrap;
+}
+.lcard__specs {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: auto; /* спеки прижаты к низу — цена в ряду всегда на одном уровне */
+}
+
+/* --- Лента: фиксированная область просмотра (viewport-scroll) ---
+   Лента не растягивает страницу бесконечно: пока лента активна, app-shell
+   занимает высоту вьюпорта, а ВСЯ прокрутка идёт внутри .feed-scroll
+   (тонкий токенизированный скроллбар). Лок на body вешает Feed.tsx
+   (класс .feed-locked) только пока лента видима: keep-alive прячет её
+   display:none, и на PDP/профиле окно скроллится как раньше. */
+body.feed-locked {
+  overflow: hidden; /* страница не скроллится — только внутренняя область */
+}
+/* Мобайл: шапка-колонка — баннер, ниже контент на остаток высоты */
+@media (max-width: 767px) {
+  body.feed-locked .app-shell {
+    height: 100vh; /* фолбэк для WebView без dvh */
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    /* Резерв под фиксированный таббар: раньше его держал #root>div
+       (padding-bottom 72px) — со скроллом внутри области тот резерв
+       мёртв, и последняя карточка уезжала ПОД таббар. Tgui-таббар выше
+       --tabbar-h (56) на собственную рамку ~24px + safe-area. */
+    padding-bottom: calc(
+      var(--tabbar-h, 56px) + 24px + env(safe-area-inset-bottom, 0px)
+    );
+  }
+  body.feed-locked .app-shell > .guest-banner {
+    flex: none;
+  }
+  body.feed-locked .app-content {
+    flex: 1;
+    min-height: 0;
+  }
+}
+/* Десктоп: сетка «сайдбар | контент», баннер — строкой сверху; высота
+   строки контента = остаток 100dvh (не 100vh + баннер, как было бы во
+   flex-wrap: контент уезжал за низ экрана) */
+@media (min-width: 768px) {
+  body.feed-locked .app-shell--desktop {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100vh;
+    height: 100dvh;
+  }
+  body.feed-locked .app-shell--desktop > .guest-banner {
+    grid-column: 1 / -1;
+  }
+  body.feed-locked .app-shell--desktop > .app-sidebar {
+    grid-column: 1;
+    grid-row: 2;
+    position: static; /* строка уже ограничена по высоте — sticky не нужен */
+    height: auto;
+    min-height: 0;
+  }
+  body.feed-locked .app-shell--desktop > .app-content {
+    grid-column: 2;
+    grid-row: 2;
+    min-height: 0;
+    min-width: 0;
+  }
+}
+/* Цепочка высот до области ленты: app-content → keep-alive-обёртка → лента.
+   width:100% обязателен: у .app-content есть margin:0 auto (центровщик),
+   а во флекс-колонке auto-маржа по поперечной оси отключает stretch —
+   без явной ширины контент растягивался шире вьюпорта (гор. скролл). */
+body.feed-locked .app-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+body.feed-locked .app-content > div:not(.keepalive-hidden) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Обёртка ленты: колонка «суббар + область прокрутки» на всю высоту */
+.feed-viewport {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+/* Область прокрутки ленты: единственный скролл-контейнер экрана */
+.feed-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* тянут из страницы — не отдаём */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.feed-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.feed-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.feed-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+/* Открыт шит фильтров — область под ним не скроллится (нет двойного
+   скролла; позиция сохраняется, т.к. overflow:hidden не сбрасывает её) */
+.feed-scroll--locked {
+  overflow: hidden;
+}
+/* Сентинел бесконечного скролла: 1px наблюдатель у конца списка */
+.feed-sentinel {
+  height: 1px;
+  flex: none;
+}
+/* Пустое/ошибочное состояние — по центру области прокрутки */
+.feed-states {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+/* Конец списка — тихая подпись */
+.feed-end {
+  padding: var(--space-4);
+}
+
+/* --- Лента: шапка (F1/F3/F4) — суббар в одну строку + чипсы вторым рядом */
+.feed-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: var(--bg);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.feed-head__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+/* Счётчик-eyebrow (F1, §3.2): 13/500 caps-трекинг + tabular-nums — тихая
+   подпись справа, НЕ огромный заголовок; эллипсис на узких экранах */
+.feed-head__count {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Чипсы (F4): «Быстрые» и «Мои сигналы» 🔔 одним скроллируемым рядом;
+   маска-затемнение по краям — видно, что ряд продолжается (§7.2) */
+.feed-head__chips {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  /* mobile ux: snap-ряд чипсов — долистанный чипс останавливается под пальцем */
+  scroll-snap-type: x proximity;
+  padding: var(--space-2) 0 0;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+}
+.feed-head__chips::-webkit-scrollbar {
+  display: none;
+}
+.feed-head__chips .chip {
+  flex-shrink: 0;
+  scroll-snap-align: start; /* mobile ux */
+}
+
+/* --- Лента: панель фильтров — bottom-sheet (F2, 02 §7.10) ---
+   Шит рендерится в portal (document.body): обёртка keep-alive держит
+   transform после входной анимации экрана, и fixed-позиционирование
+   относительно неё уводило шит влево на десктопе и оставляло сайдбар
+   вне scrim. Высота ≤85dvh, скроллится только тело, футер прилипнут. */
+.feed-sheet__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet);
+  background: rgba(8, 10, 14, 0.6);
+  backdrop-filter: blur(4px);
+  animation: fadeIn var(--dur-base) var(--ease-out);
+}
+.feed-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: calc(var(--z-sheet) + 1);
+  display: flex;
+  flex-direction: column;
+  max-height: 85dvh;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-bottom: none;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-lg);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: feed-sheet-in var(--dur-slow) var(--ease-out);
+}
+@keyframes feed-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+.feed-sheet__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: var(--space-3) var(--space-4) var(--space-1);
+}
+.feed-sheet__handle {
+  position: absolute;
+  top: var(--space-1);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+}
+.feed-sheet__title {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+.feed-sheet__close {
+  position: absolute;
+  right: var(--space-2);
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+}
+/* Тело шита — ЕДИНСТВЕННЫЙ внутренний скролл: min-height:0 обязателен,
+   иначе flex-ребёнок не сжимается и контент вываливается за max-height */
+.feed-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4) var(--space-3);
+}
+/* Пары селектов и широкие поля — на всю ширину шита: раньше пара попадала
+   в ОДНУ колонку сетки тела (grid-in-grid) и сжималась в четверть ширины */
+.feed-panel__pair {
+  grid-column: 1 / -1;
+}
+.feed-panel__field--wide {
+  grid-column: 1 / -1;
+}
+/* Футер прилипнут к низу шита (вне скролла тела) — «Применить» всегда в зоне тапа */
+.feed-sheet__foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+/* Живой счётчик «N авто найдено» (F2): зарезервированная строка — не прыгает */
+.feed-sheet__count {
+  min-height: 16px;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.feed-sheet__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.feed-sheet__apply {
+  flex: 1;
+  min-height: var(--touch-min);
+  padding: 10px 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.feed-sheet__reset {
+  flex: none;
+  min-height: var(--touch-min);
+  padding: 10px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+/* Десктоп: шит — центрированная карточка, а не «лист от таббара» */
+@media (min-width: 768px) {
+  .feed-sheet {
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(480px, 92vw);
+    border-radius: var(--radius-xl);
+    border-bottom: 1px solid var(--border-strong);
+    animation: fadeIn var(--dur-base) var(--ease-out);
+  }
+}
+
+/* --- PDP (.pdp-*, аудит §1.3 P1–P9) --- */
+/* Верликт-бейдж (P-анализ): цвет из семантических токенов --deal/--warn/
+   --danger; дот дублирует цвет — статус читается без чтения слова (§7.4) */
+.pdp-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pdp-verdict::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pdp-verdict--deal {
+  color: var(--deal);
+  background: var(--deal-bg);
+}
+.pdp-verdict--fair {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+.pdp-verdict--overpriced {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+/* Бейдж статуса продажи (P4): один, сразу под ценой; снятое — danger */
+.pdp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin: var(--space-1) 0 var(--space-2);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+.pdp-status--active {
+  color: var(--deal);
+  background: var(--deal-bg);
+}
+.pdp-status--gone {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+/* Оригинал названия (P9): мелкая строка под заголовком, не отдельная секция */
+.pdp-orig {
+  margin: -6px 0 var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.pdp-orig__note {
+  color: var(--text-tertiary);
+}
+/* «?»-иконка Tooltip (P3): пояснение неочевидного вместо hint-строк */
+.pdp-qmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+}
+/* VIN и ID источника — моноширинно (§3.1) */
+.pdp-mono {
+  font-family: var(--font-mono);
+}
+/* Кнопка-раскрытие «Детали ▾ / Все изменения ▾» (P4/P6) */
+.pdp-disc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--touch-min);
+  padding: 4px 8px;
+  margin: 0 calc(-1 * var(--space-2));
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+/* Заголовок секции осмотра со сводкой (P8) + кнопка раскрытия */
+.pdp-insp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.pdp-insp-head h3 {
+  margin: 0;
+}
+.pdp-insp-summary {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-xs);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+/* CTA-блок (P1): один primary + вторичные, отступы — flex-gap без дублей */
+.pdp-cta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pdp-cta .btn--block {
+  margin-bottom: 0;
+}
+.pdp-cta__row {
+  display: flex;
+  gap: var(--space-2);
+}
+.pdp-cta__btn {
+  flex: 1;
+  min-width: 0;
+}
+/* «Доставка и растаможка» (P1): обычная ссылка-строка, не кнопка */
+.pdp-cta__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: var(--touch-min);
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  color: var(--link);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pdp-cta__link:hover {
+  text-decoration: underline;
+}
+/* Инлайн-секция «Похожие» (P5): с V2 — своя панель в ЛЕВОЙ колонке
+   (AI-анализ уехал в правую, похожие остались с контентом) */
+.pdp-similar__src {
+  margin-left: var(--space-2);
+}
+.pdp-similar__empty {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ============================================================
+   PDP, V2: правая sticky-колонка (анализ + CTA) и заявка менеджеру
+   ============================================================ */
+/* Цена в CTA-карточке: деньги — главный сигнал решения (§3.3);
+   табличные цифры — цена не «дёргается», как в остальном UI */
+.pdp-cta__price {
+  font-size: var(--font-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+}
+/* Статус в CTA: вертикальный ритм задаёт flex-gap карточки — без
+   двойных отступов из базового .pdp-status */
+.pdp-cta .pdp-status {
+  margin: 0;
+}
+/* Мини-форма заявки «Связаться с менеджером» (задача 2): инлайн под
+   primary-кнопкой в правой колонке, НЕ модалка — контекст не теряется;
+   опциональный textarea + «Отправить заявку» */
+.pdp-contact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pdp-contact__input {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-sm);
+  line-height: 1.45;
+}
+.pdp-contact__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.pdp-contact__hint {
+  font-size: var(--font-xs);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+   Карточка ленты: мини-карусель фото (.lcarousel-*)
+   Десктоп ≥768px (media-запросом): горизонтальная прокрутка со snap,
+   скрытый скроллбар, drag мышью, точки-индикаторы внизу-центру.
+   Мобайл <768px: как раньше — ровно одно фото, индикаторов нет.
+   ============================================================ */
+/* База (= мобайл): контейнер первого фото, геометрия 16:9 не меняется */
+.lcarousel {
+  width: 100%;
+  height: 100%;
+  user-select: none; /* drag мышью не выделяет подписи/alt */
+  -webkit-user-select: none;
+}
+.lcarousel__slide {
+  position: relative;
+  height: 100%;
+  overflow: hidden; /* hover-зум фото не выпускает пиксели за свой слайд */
+}
+/* Лимит 5 фото: на последнем слайде — градиент-затемнение + «+N фото»
+   (клик — как обычно в карточку; все фото смотрим уже в PDP) */
+.lcarousel__more {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.05));
+  color: #fff;
+  font-size: var(--font-md);
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); /* читаемость на любом фото */
+}
+/* Мобайл: карусели нет — одно фото, как до карусели (точки скрыты) */
+@media (max-width: 767px) {
+  .lcarousel__slide:not(:first-child),
+  .lcarousel__dots {
+    display: none;
+  }
+}
+/* Десктоп ≥768: мини-карусель — overflow-x scroll со snap; тонкий
+   скроллбар скрыт (точки-индикаторы вместо него); shift+колесо и
+   горизонтальный тик колеса работают нативно */
+@media (min-width: 768px) {
+  .lcarousel {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none; /* Firefox */
+    cursor: grab; /* drag-to-scroll мышью */
+  }
+  .lcarousel::-webkit-scrollbar {
+    display: none; /* Chromium/Safari */
+  }
+  .lcarousel__slide {
+    flex: 0 0 100%;
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+}
+/* Точки-индикаторы поверх фото, низ-центр: белые с чёрной тенью-подложкой —
+   контраст на любом фото и в ОБЕИХ темах (задача 3); активная — акцент */
+.lcarousel__dots {
+  position: absolute;
+  bottom: var(--space-2);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 2; /* над фото и бейджами */
+}
+.lcarousel__dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); /* подложка на светлых фото */
+  cursor: pointer;
+}
+.lcarousel__dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px; /* хит-зона вокруг точки (§4 — палец/мышь не в 8px) */
+}
+.lcarousel__dot--active {
+  background: var(--accent);
+  transform: scale(1.15);
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.lcarousel__dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   Галерея PDP: точки-индикаторы (.pdp-dots-*) ПОД большим фото.
+   Фото ≤10 — точки (кликабельны, синхронны с треком, превью-лентой и
+   лайтбоксом); больше 10 — остаётся счётчик «N / M», точки не рендерим.
+   Точки НЕ поверх фото (фон панели) — обычные токены, тёмная тема
+   работает автоматически; transitions гасит prefers-reduced-motion.
+   ============================================================ */
+.pdp-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+.pdp-dots__dot {
+  position: relative; /* mobile ux: якорь ::after-хит-зоны */
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+  transition: transform var(--dur-fast) var(--ease-out);
+  cursor: pointer;
+}
+.pdp-dots__dot--active {
+  background: var(--accent);
+  transform: scale(1.25);
+}
+.pdp-dots__dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Бейдж внутреннего рынка (05 §1): лот из витрины партнёра */
+.lcard__badge--market {
+  background: color-mix(in srgb, var(--accent, #1e73b8) 14%, transparent);
+  color: var(--accent, var(--link));
+}
+:root[data-theme="dark"] .lcard__badge--market {
+  background: color-mix(in srgb, var(--accent, #5ca9f0) 22%, transparent);
+}
+
+/* ============================================================
+   Mobile UX 2026-10 (<768px, Telegram WebView; маркер ищется в
+   styles.test.ts): закон Фиттса — тач-таргеты >=44px без визуального
+   разрастания иконок (хит-зона псевдоэлементом); закон Хика —
+   секции и «Ещё параметры» в шите фильтров; зона пальца — слои
+   над таббаром не перекрываются. Десктоп не затронут.
+   ============================================================ */
+@media (max-width: 767px) {
+  /* --- Фиттс: чипсы и мелкие контролы ленты >=44px высотой --- */
+  .chip,
+  .feed-toggle,
+  .feed-sort {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-min);
+  }
+  .feed-toggle,
+  .feed-sort {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  /* «Пересчитать» в AI-разборе: текст-кнопка была ~20px высотой */
+  .analysis__retry {
+    min-height: var(--touch-min);
+    padding: var(--space-1) var(--space-2);
+  }
+  /* «Наверх» — выше FAB «+ Продать»: оба справа снизу и раньше
+     перекрывали друг друга (44px «Наверх» налегал на 56px FAB) */
+  .to-top {
+    bottom: calc(
+      var(--tabbar-h, 56px) + var(--space-3) + 56px + var(--space-2) +
+      env(safe-area-inset-bottom, 0px)
+    );
+  }
+}
+
+/* --- Хит-зоны без визуального разрастания: иконки остаются
+       компактными, псевдоэлемент расширяет область тапа до ~44px --- */
+/* Кнопка-лупа «во весь экран» галереи PDP (визуально 34px) */
+.gallery__expand::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+}
+/* Точки-индикаторы галереи PDP (визуально 8px) */
+.pdp-dots__dot::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+/* Пины зон на карте осмотра (визуально 20px, плотная карта) */
+.inspection__pin::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+/* Закрытие раскрытой зоны осмотра: была текст-кнопка ~16px */
+.inspection__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+/* Крестик сворачивания гостевого баннера: был ~18px */
+.guest-banner__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+
+/* --- Шит фильтров ленты: секции-заголовки (гештальт «общая область»,
+       Хик — поля сгруппированы по смыслу, а не одним списком) --- */
+.feed-panel__section {
+  grid-column: 1 / -1;
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.feed-sheet__body > .feed-panel__section:first-child {
+  margin-top: 0;
+}
+/* Кнопка-раскрытие «Ещё параметры» (Хик: редкие поля — цвет/привод/
+   объём/кузов/КПП — скрыты до явного запроса; тач-зона 44px) */
+.feed-panel__more {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--touch-min);
+  margin-top: var(--space-1);
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+/* Развёрнутый блок редких полей: сетка тела шита */
+.feed-panel__extra {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* --- PDP: характеристики на узких экранах — подпись сверху,
+       значение ниже (F-паттерн; длинные значения не сплющиваются
+       в правую колонку с ellipsis) --- */
+@media (max-width: 480px) {
+  .info-row--spec {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .info-row--spec .info-row__value {
+    text-align: left;
+  }
+}
+
+
+/* === NAV-V2: Главная (Лента|AI) и Авто (Избранное|История|Мои) === */
+/* Главная: сегмент + панели. Лента — viewport-scroll (body.feed-locked),
+   цепочка высот app-content → keep-alive-обёртка → home-screen → панель →
+   .feed-viewport. AI-сегмент — обычный page-scroll (feed-locked снят). */
+.home-screen {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.home-screen__seg {
+  flex: none;
+  margin: var(--space-2, 8px) auto 0;
+  padding-top: 2px;
+}
+.home-screen__panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-2, 8px);
+}
+/* Авто: сегмент + панели-экраны; вложенные .screen без своего паддинга —
+   его даёт корневой .auto-screen */
+.auto-screen > div > .screen {
+  padding: 0;
+  max-width: none;
+  margin: 0;
+}
+/* Бейдж непрочитанных на табе «Чаты» (NAV-V2 §2: конверт и сайдбар-бейдж
+   убраны — бейдж живёт на табе) */
+.app-tabbar__icon {
+  position: relative;
+  display: inline-flex;
+}
+.app-tabbar__badge {
+  position: absolute;
+  top: -7px;
+  right: -12px;
+  min-width: 18px;
+  padding: 2px 5px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 11px/1 var(--font-sans);
+  text-align: center;
+}
+.sidebar-item__badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: 600 var(--font-xs, 12px)/1.4 var(--font-sans);
+  text-align: center;
+}

@@ -44,6 +44,13 @@ class Conflict(AppError):
     default_message = "State conflict"
 
 
+class PaymentRequired(AppError):
+    """Действие требует оплаты (не хватает баланса и т.п.)."""
+
+    code = "payment_required"
+    default_message = "Payment required"
+
+
 class InvalidInput(AppError):
     """Некорректный ввод, не пойманный схемой."""
 

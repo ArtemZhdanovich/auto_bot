@@ -81,6 +81,13 @@ async def fetch_source_task(
                 stats = await save_listings(
                     session, redis, result.items, storage=ctx.get("storage")
                 )
+                # Зеркалирование — фоновой задачей: не удлиняет fetch
+                # (encar с чеками уже упирается в job-timeout очереди).
+                pub = ctx.get("publisher")
+                if pub is not None and (
+                    stats.get("new") or stats.get("updated")
+                ):
+                    await pub.enqueue("mirror_photos_task", source_name)
                 for key, value in stats.items():
                     if key == "price_changed_ids":
                         event_ids["price_drop"].extend(value)
@@ -331,13 +338,54 @@ async def stale_check_job(ctx: dict[str, Any]) -> dict[str, Any]:
 
     Источники в circuit breaker пропускаются внутри mark_stale; для
     деактивированных ставится скан «gone»-уведомлений (аудитория sent_log).
+    Исчезнувшие ВНЕШНИЕ лоты чистятся из S3 (docs/REDESIGN/11 §4):
+    зеркало фото и raw-объект; owner-лоты рынка не трогаем.
     """
     async with session_factory() as session:
         gone_ids = await mark_stale(session)
     if gone_ids:
         await enqueue_status_scan(ctx, "gone", gone_ids)
+        await _purge_gone_storage(gone_ids)
     logger.info("stale_check_done: gone=%s", len(gone_ids))
     return {"gone": len(gone_ids)}
+
+
+async def _purge_gone_storage(listing_ids: list[int]) -> dict[str, int]:
+    """Удалить S3-объекты исчезнувших внешних лотов (best-effort).
+
+    Ошибки логируются: очистка не должна ронять stale-check.
+    """
+    from app.infrastructure.db.repositories.listings_writer import (
+        SqlAlchemyListingsWriter,
+    )
+    from app.infrastructure.storage.photos import photos_storage_from_settings
+    from app.infrastructure.storage.s3 import storage_from_settings
+
+    settings = get_settings()
+    stats = {"mirrors": 0, "raws": 0}
+    photos = photos_storage_from_settings()
+    raw_store = storage_from_settings() if settings.s3_endpoint_url else None
+    try:
+        async with session_factory() as session:
+            rows = await SqlAlchemyListingsWriter(session).gone_external_rows(
+                listing_ids
+            )
+        for _id, source, source_id, raw_key in rows:
+            try:
+                stats["mirrors"] += await photos.delete_lot_mirror(source, source_id)
+            except Exception:  # noqa: BLE001 — очистка best-effort
+                logger.warning("purge_mirror_failed %s/%s", source, source_id)
+            if raw_store is not None and raw_key:
+                try:
+                    await raw_store.delete(raw_key)
+                    stats["raws"] += 1
+                except Exception:  # noqa: BLE001
+                    logger.warning("purge_raw_failed key=%s", raw_key)
+        if stats["mirrors"] or stats["raws"]:
+            logger.info("stale_purge_storage: %s", stats)
+    except Exception:  # noqa: BLE001 — сама выборка тоже best-effort
+        logger.warning("stale_purge_select_failed", exc_info=True)
+    return stats
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -345,14 +393,18 @@ async def startup(ctx: dict[str, Any]) -> None:
     redis = Redis.from_url(settings.redis_url)
     # Прокси-пул: DataImpulse-шлюз (если настроен) или статический пул из Redis.
     # Подключается только к источникам с capabilities.use_proxy=true.
+    # Переводчик (NLLB): адаптерам с корейским контентом (encar) — полей
+    # объявления и отчёта осмотра; при TRANSLATE_ENABLED=false отдаёт None.
+    translate = translate_client_from_settings(redis)
     registry = AdapterRegistry(
-        session_factory, proxy_pool=build_proxy_pool(settings, redis)
+        session_factory, proxy_pool=build_proxy_pool(settings, redis),
+        translator=translate,
     )
     await registry.load()
     ctx["registry"] = registry
     ctx["redis"] = redis
-    # Клиент перевода (фаза 5): disabled, если TRANSLATE_ENABLED=false или URL пуст
-    ctx["translate"] = translate_client_from_settings(redis)
+    # Клиент перевода (фаза 5): тот же инстанс, что и у адаптеров.
+    ctx["translate"] = translate
     # S3-хранилище raw_payload (фаза 6): disabled, если S3_ENDPOINT_URL пуст
     storage = storage_from_settings()
     try:
@@ -361,6 +413,14 @@ async def startup(ctx: dict[str, Any]) -> None:
         # воркер должен подняться (fetch работает, raw_payload деградирует)
         logger.warning("ensure_bucket_failed: raw_payload may be unavailable", exc_info=True)
     ctx["storage"] = storage
+    # Фото-хранилище (зеркалирование внешних лотов + загрузки рынка)
+    from app.infrastructure.storage.photos import photos_storage_from_settings
+
+    ctx["photos_storage"] = photos_storage_from_settings()
+    # Publisher (зеркалирование уходит фоновой задачей в очередь)
+    from app.infrastructure.messaging.legacy_worker import TaskPublisher
+
+    ctx["publisher"] = TaskPublisher(settings.rabbitmq_url)
     logger.info("fetch_worker_started: sources=%s", [a.source_name for a in registry.all()])
 
 
@@ -374,8 +434,90 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     logger.info("fetch_worker_stopped")
 
 
+async def mirror_photos_task(ctx: dict[str, Any], source: str) -> dict[str, Any]:
+    """Фоновое зеркалирование фото внешних лотов (docs/REDESIGN/11 §3).
+
+    Берёт свежие активные лоты источника (parsed_at DESC, лимит на прогон
+    mirror_batch) и зеркалит первые N фото; уже зеркаленные skip.
+    """
+    from sqlalchemy import select as _select
+
+    from app.infrastructure.db.models import Listing as _Listing
+
+    settings = get_settings()
+    limit = settings.market_photo_mirror_limit
+    photos = ctx.get("photos_storage")
+    if limit <= 0 or photos is None or not photos.enabled:
+        return {"mirrored": 0, "skipped": "disabled"}
+    import httpx
+
+    from app.infrastructure.db.models import Listing
+
+    batch = settings.market_mirror_batch
+    mirrored = skipped = 0
+    try:
+        async with session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        _select(
+                            Listing.id, Listing.source, Listing.source_id,
+                            Listing.images,
+                        )
+                        .where(
+                            Listing.source == source,
+                            Listing.is_active.is_(True),
+                            Listing.owner_type.is_(None),
+                        )
+                        .order_by(Listing.parsed_at.desc())
+                        .limit(batch)
+                    )
+                ).all()
+            )
+        replaced: list[tuple[int, list[str]]] = []
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            for _id, src, sid, images in rows:
+                urls = [u for u in (images or []) if isinstance(u, str) and u]
+                if not urls:
+                    continue
+                if await photos.has_mirror(src, sid):
+                    skipped += 1
+                    continue
+                out: list[str] = []
+                ok = True
+                for idx, url in enumerate(urls[:limit]):
+                    try:
+                        resp = await client.get(url)
+                        resp.raise_for_status()
+                        ctype = resp.headers.get("content-type", "")
+                        ext = "png" if "png" in ctype else "webp" if "webp" in ctype else "jpg"
+                        out.append(await photos.mirror_photo(src, sid, idx, resp.content, ext))
+                    except Exception:  # noqa: BLE001 — фото опционально
+                        ok = False
+                        break
+                if ok and len(out) == min(len(urls), limit):
+                    mirrored += len(out)
+                    replaced.append((_id, out))
+                elif out:  # частичное — убрать, не ломать порядок
+                    await photos.delete_lot_mirror(src, sid)
+        if replaced:
+            async with session_factory() as session:
+                for lid, new_urls in replaced:
+                    await session.execute(
+                        _Listing.__table__.update()
+                        .where(_Listing.id == lid)
+                        .values(images=new_urls)
+                    )
+                await session.commit()
+    except Exception:  # noqa: BLE001 — фоновая задача
+        logger.warning("mirror_task_failed source=%s", source, exc_info=True)
+    logger.info("mirror_done: source=%s mirrored=%s skipped=%s", source, mirrored, skipped)
+    return {"mirrored": mirrored, "skipped": skipped}
+
+
 HANDLERS = {
     "fetch_source_task": fetch_source_task,
+    "mirror_photos_task": mirror_photos_task,
     "stale_check_job": stale_check_job,
     "translate_listings": translate_listings,
     "raw_retention_job": raw_retention_job,
@@ -399,7 +541,7 @@ async def main() -> None:
         handlers=HANDLERS,
         ctx=ctx,
         concurrency=3,   # как arq max_jobs=3
-        job_timeout=120,  # как arq job_timeout
+        job_timeout=360,  # encar: чеки+перевод+NLLB — 120s не хватало
         interval_jobs=[IntervalSpec(schedule_fetch_due, every_sec=60)],
         cron_jobs=[
             CronSpec(stale_check_job, hour=4, minute=0),

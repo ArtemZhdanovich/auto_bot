@@ -1,4 +1,5 @@
-/** Юнит-тесты auth-слоя: Telegram-контекст, гостевой режим, веб-вход. */
+/** Юнит-тесты auth-слоя: Telegram-контекст, гостевой режим, веб-вход,
+ *  персистентная сессия и авто-refresh токенов. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,21 +11,16 @@ import {
   webLogin,
   webRegister,
 } from "./auth";
+import {
+  api,
+  getAccessToken,
+  getRefreshToken,
+  setSessionExpiredHandler,
+  setTokens,
+} from "./client";
 
-
-function mockStorage(): Storage {
-  const map = new Map<string, string>();
-  return {
-    getItem: (k: string) => map.get(k) ?? null,
-    setItem: (k: string, v: string) => void map.set(k, v),
-    removeItem: (k: string) => void map.delete(k),
-    clear: () => void map.clear(),
-    key: () => null,
-    get length() {
-      return map.size;
-    },
-  } as Storage;
-}
+/** Токены и гостевой флаг хранятся в localStorage (lib/persistentState);
+ *  jsdom даёт настоящий localStorage — чистим его перед каждым тестом. */
 
 const fetchMock = vi.fn();
 
@@ -45,12 +41,13 @@ const AUTH = {
 };
 
 beforeEach(() => {
-  vi.stubGlobal("sessionStorage", mockStorage());
+  localStorage.clear();
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
   fetchMock.mockReset();
+  setSessionExpiredHandler(null);
 });
 
 describe("Telegram-контекст", () => {
@@ -117,5 +114,104 @@ describe("веб-вход", () => {
       json: () => Promise.resolve({ detail: "Email already registered" }),
     } as unknown as Response);
     await expect(webRegister("a@b.ru", "pw")).rejects.toThrow("Email already registered");
+  });
+});
+
+describe("персистентная сессия (localStorage, переживает F5)", () => {
+  it("токены и гостевой флаг читаются после ре-инициализации модуля", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, AUTH));
+    await guestLogin();
+    // «перезагрузка страницы»: модульная карта чистится, но localStorage — тот же
+    vi.resetModules();
+    const { getAccessToken: getAccess2, getRefreshToken: getRefresh2 } = await import("./client");
+    expect(getAccess2()).toBe("a1");
+    expect(getRefresh2()).toBe("r1");
+    const { isGuest: isGuest2 } = await import("./auth");
+    expect(isGuest2()).toBe(true);
+  });
+
+  it("logout стирает и токены, и гостевой флаг", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, AUTH));
+    await guestLogin();
+    const { logout } = await import("./auth");
+    logout();
+    expect(getAccessToken()).toBeNull();
+    expect(getRefreshToken()).toBeNull();
+    expect(isGuest()).toBe(false);
+  });
+});
+
+describe("авто-refresh при 401", () => {
+  it("401 → POST /auth/refresh → повтор запроса с новым токеном", async () => {
+    setTokens("old", "r1");
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { detail: "expired" }))
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "a2", refresh_token: "r2" }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: 1 }));
+    const data = await api<{ ok: number }>("/me");
+    expect(data).toEqual({ ok: 1 });
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/auth/refresh");
+    const refreshInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(JSON.parse(refreshInit.body as string)).toEqual({ refresh_token: "r1" });
+    const retryInit = fetchMock.mock.calls[2][1] as RequestInit;
+    expect((retryInit.headers as Record<string, string>).Authorization).toBe("Bearer a2");
+    expect(getAccessToken()).toBe("a2"); // новая пара сохранена
+  });
+
+  it("refresh не прошёл → исходная 401 наверх + тихий гостевой fallback, токены не стираем", async () => {
+    setTokens("old", "dead");
+    const onExpired = vi.fn().mockResolvedValue(undefined);
+    setSessionExpiredHandler(onExpired);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { detail: "expired" }))
+      .mockResolvedValueOnce(jsonResponse(401, { detail: "bad refresh" }));
+    await expect(api("/me")).rejects.toThrow("expired");
+    expect(onExpired).toHaveBeenCalledOnce();
+    expect(getAccessToken()).toBe("old"); // «Выход» — единственный способ стереть
+  });
+
+  it("без refresh-токена — сразу fallback, без запроса /auth/refresh", async () => {
+    const onExpired = vi.fn();
+    setSessionExpiredHandler(onExpired);
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { detail: "expired" }));
+    await expect(api("/me")).rejects.toThrow("expired");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onExpired).toHaveBeenCalledOnce();
+  });
+
+  it("параллельные 401 ждут один refresh (промис-синглтон)", async () => {
+    setTokens("old", "r1");
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/auth/refresh") {
+        return jsonResponse(200, { access_token: "a2", refresh_token: "r2" });
+      }
+      const auth = (init?.headers as Record<string, string>)?.Authorization;
+      return auth === "Bearer old"
+        ? jsonResponse(401, { detail: "expired" })
+        : jsonResponse(200, { ok: 1 });
+    });
+    const [a, b] = await Promise.all([api("/a"), api("/b")]);
+    expect(a).toEqual({ ok: 1 });
+    expect(b).toEqual({ ok: 1 });
+    const refreshCalls = fetchMock.mock.calls.filter(([u]) => u === "/api/auth/refresh");
+    expect(refreshCalls).toHaveLength(1);
+  });
+
+  it("401 на /auth/* не запускает авто-восстановление (учётные данные неверны)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { detail: "Invalid credentials" }));
+    await expect(api("/auth/login", { method: "POST", body: "{}" })).rejects.toThrow(
+      "Invalid credentials",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("после 401 от повтора — ошибка наверх без повторного refresh", async () => {
+    setTokens("old", "r1");
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { detail: "expired" }))
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "a2", refresh_token: "r2" }))
+      .mockResolvedValueOnce(jsonResponse(401, { detail: "still bad" }));
+    await expect(api("/me")).rejects.toThrow("still bad");
+    expect(fetchMock).toHaveBeenCalledTimes(3); // исходный + refresh + один повтор
   });
 });

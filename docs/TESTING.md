@@ -3,53 +3,36 @@
 ## Запуск
 
 ```bash
-uv run pytest -q                 # все тесты (без test-БД: passed + skipped)
-uv run pytest tests/partners -q  # один пакет
-uv run ruff check app tests
-uv run mypy app
-cd frontend && npm run build     # tsc --noEmit + vite build + vitest
+uv run pytest -q                      # весь бэкенд (~1470, ~7 мин)
+uv run pytest tests/catalog -q        # контур каталога/рынка/чатов
+uv run pytest tests/infrastructure -q # воркеры, S3-зеркало, источники
+cd frontend && npx vitest run         # фронт (~547)
+cd frontend && npm run build          # tsc -b + vite (типы)
+uv run ruff check app tests          # линт
 ```
 
-Часть интеграционных тестов требует тестовой БД/Redis — без них они
-скипаются (ожидаемо ~250 skip).
+Postgres должен быть поднят (docker или локально; тесты сессии
+пропускаются с skip, если БД недоступна). Известный флейк:
+`tests/dialog/test_rag.py::test_answer_question_without_rag_uses_llm_answer`
+— ходит в живой RAG-сервис; изолированно зелёный (см. RUNBOOK).
 
-## Структура (зеркало архитектуры)
+## Структура
 
-| Пакет | Что тестирует |
-|---|---|
-| `tests/identity/` | auth API, guest-сценарии, онбординг, /me, security initData |
-| `tests/catalog/` | лента/keyset-пагинация, избранное, analysis API, AI-анализ цены, перевод |
-| `tests/billing/` | платежи Stars API |
-| `tests/partners/` | партнёрский контур, CPL-биллинг, лиды (+ `helpers.py` — сборка UoW+репозиторий+юзкейс) |
-| `tests/dialog/` | dialog API, хранилище диалогов, агент, RAG-клиент, tools, AI-поиск |
-| `tests/admin/` | admin API, ассистент, аудит, метрики, мониторинг, аналитика, воронки, ParserDoctor, реестр |
-| `tests/bot/` | хендлеры бота: анализ, калькулятор, dialog UI, inline-share, throttle |
-| `tests/security/` | prod-секреты (fail-fast), пустой internal-токен, PQ-крипто, token bucket |
-| `tests/infrastructure/` | адаптеры encar/kcar/che168, normalize/dedup, fetch/send/delivery/notify, storage (S3), scheduler/cron, heartbeat, LLM/http клиенты, proxy, trace |
-| `tests/transport/` | gateway routing/proxy, miniapp API, notifications API, calc API, enrich-хендлер |
-| `tests/architecture/` | правила слоёв, смоук всех микросервисов (границы доменов, OpenAPI-паритет) |
-| `tests/application/` | ingest-пайплайн, quota use cases |
-| `tests/domain/` | чистая логика избранного |
-| `tests/infrastructure/` (репозитории) | favorites repository |
-| `tests/di/` | dishka-контейнер (разрешение графа) |
-| `tests/messaging/` | publisher, outbox-релей, топология |
+- `tests/catalog` — API-контур: listings/analysis/similar/market
+  (lifecycle, пакеты, quality)/chats (groups, governance, операторы,
+  личный канал, summary)/history_report/description.
+- `tests/transport` — gateway-маршруты, мини-апп API, notifications.
+- `tests/infrastructure` — fetch/send воркеры (дайджесты, экспирация
+  размещений, S3-зеркало), адаптеры encar/kcar, link-preview (SSRF).
+- `tests/partners`, `tests/billing`, `tests/bot`, `tests/dialog`,
+  `tests/identity`, `tests/di`, `tests/architecture`, `tests/messaging`,
+  `tests/application`, `tests/domain`, `tests/security`.
+- Фикстуры: `tests/conftest.py` — FakeSession/FakeRedis, test-контейнер
+  Dishka (install_test_container), фабрики users/listings; автous-фикстура
+  фиксирует партнёрский sampling вне тестов сэмплинга.
 
-Хелперы уровня проекта — `tests/conftest.py` (см. ниже).
+## Соглашения
 
-## Фикстуры и стабы (`tests/conftest.py`)
-
-- `FakeSession` — строковые PK, rollback, `get`, `executed_params`;
-- `FakeRedis` — `get/set/setex/delete` + `ttls` (дедуп, диалоги);
-- `MockLLMClient` — `script`, `.calls`;
-- `session` — живая тестовая БД (для сервисных инвариантов: атомарный claim и
-  т.п. — на FakeSession невоспроизводимо);
-- ASGI-клиент (`httpx.AsyncClient` + `ASGITransport`) с реальной сессией и
-  FakeRedis; dishka-контейнер с переопределениями.
-
-## Конвенции
-
-- Тест-модули уникальны по имени файла (importmode=prepend, без `__init__.py`).
-- Внутрипакетные хелперы импортируются как
-  `from tests.<package>.helpers import …` (pythonpath = корень репо).
-- Архитектурные инварианты — в `tests/architecture/test_layers.py`: слои не
-  нарушают зависимости, порты — `Protocol`.
+Транспорт тонкий: логика в application-сценариях, их и тестируем
+фабриками-фейками (порты подменяются через extra-провайдеры dishka).
+SQL-зависимое — сквозные через test-клиент ASGI на реальном PG.

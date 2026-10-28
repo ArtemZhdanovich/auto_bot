@@ -16,6 +16,13 @@ class SubscriptionOut(BaseModel):
     ai_daily_limit: int | None
     instant: bool
     prices: dict[str, int]  # {"pro_month": 500, "pro_year": 4800, "business_month": 2500, ...}
+    # Прод-экономика (2026-10): каденс дайджеста, доступ к чекам, агент,
+    # лимит разборов цены и окно.
+    digest: str = "weekly"  # weekly | daily | instant
+    inspection: bool = False
+    agent: bool = False
+    analyses_limit: int | None = None
+    analyses_window_days: int = 7
 
 
 class StarsInvoiceRequest(BaseModel):

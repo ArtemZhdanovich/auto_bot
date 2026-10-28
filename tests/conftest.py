@@ -218,6 +218,10 @@ class FakeSession:
                 # для count-запросов: число строк-результатов
                 return len(rows)
 
+            # UPDATE в mark_paid: фейк-сессия не знает строк, но платёж
+            # в тестах pending — считаем «одна строка изменена».
+            rowcount = 1
+
         return _Result()
 
     async def commit(self) -> None:
@@ -242,6 +246,25 @@ class FakeSession:
 @pytest.fixture
 def fake_redis() -> FakeRedis:
     return FakeRedis()
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_moderation_sampling(monkeypatch):
+    """Сэмплинг партнёрской модерации (10 §2) — детерминизм тестов.
+
+    10% партнёрских лотов уходят в ручную модерацию по random<0.1 —
+    без фиксации любые API-тесты создания partner-лотов флапали бы.
+    Здесь random() всегда вне выборки; тесты самого сэмплинга
+    (test_listing_lifecycle) патчуют random локально поверх.
+    """
+    from app.application.market import moderation as _moderation
+
+    class _NoSampling:
+        @staticmethod
+        def random() -> float:
+            return 0.99
+
+    monkeypatch.setattr(_moderation, "random", _NoSampling())
 
 
 @pytest.fixture
@@ -541,6 +564,22 @@ async def pro_user(session: AsyncSession) -> User:
         username="fixture_pro",
         role="buyer",
         subscription_tier="pro",
+        subscription_until=datetime.now(UTC) + timedelta(days=30),
+        is_active=True,
+        created_at=datetime.now(UTC),
+    )
+    session.add(user)
+    await session.flush()
+    return user
+
+@pytest.fixture
+async def business_user(session: AsyncSession) -> User:
+    """Пользователь с действующей подпиской Business (instant, агент, чеки)."""
+    user = User(
+        telegram_id=900012,
+        username="fixture_business",
+        role="buyer",
+        subscription_tier="business",
         subscription_until=datetime.now(UTC) + timedelta(days=30),
         is_active=True,
         created_at=datetime.now(UTC),

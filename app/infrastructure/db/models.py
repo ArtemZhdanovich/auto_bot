@@ -272,6 +272,12 @@ class Payment(Base):
             "tier IS NULL OR tier IN ('free','pro','business')",
             name="tier_valid",
         ),
+        # Вид платежа (миграция 0027): подписка или продление размещения
+        # лота рынка (kind='placement' — см. ConfirmPayment).
+        CheckConstraint(
+            "kind IN ('subscription','placement')",
+            name="kind_valid",
+        ),
         # Идемпотентность вебхуков: один provider_payment_id = один платёж.
         UniqueConstraint(
             "provider", "provider_payment_id",
@@ -291,6 +297,12 @@ class Payment(Base):
     status: Mapped[str | None] = mapped_column(String(16))
     tier: Mapped[str | None] = mapped_column(String(16))
     period_days: Mapped[int | None] = mapped_column(Integer)
+    # Продление размещения: kind='placement' + предмет (lot юзера).
+    kind: Mapped[str] = mapped_column(
+        String(16), default="subscription",
+        server_default=text("'subscription'"), nullable=False,
+    )
+    listing_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -408,6 +420,42 @@ class Listing(Base):
             "engine_volume IS NULL OR engine_volume BETWEEN 0 AND 20",
             name="engine_volume_range",
         ),
+        # Рынок с владельцами (миграция 0027): owner_type ('user'|'partner')
+        # и ровно один заполненный owner_id — два частичных CHECK.
+        CheckConstraint(
+            "owner_type IS NULL OR owner_type IN ('user','partner')",
+            name="owner_type_valid",
+        ),
+        CheckConstraint(
+            "owner_type IS DISTINCT FROM 'user' "
+            "OR (owner_user_id IS NOT NULL AND owner_partner_id IS NULL)",
+            name="owner_user_filled",
+        ),
+        CheckConstraint(
+            "owner_type IS DISTINCT FROM 'partner' "
+            "OR (owner_partner_id IS NOT NULL AND owner_user_id IS NULL)",
+            name="owner_partner_filled",
+        ),
+        Index("idx_listings_owner", "owner_type", "owner_user_id", "owner_partner_id"),
+        # Жизненный цикл owner-лота (миграция 0030, 10 §1): автомат
+        # статусов модерации; очередь ручной модерации и патчей —
+        # частичные индексы (строк в очереди мало).
+        CheckConstraint(
+            "status IN ('draft','moderation','accepted','rejected',"
+            "'archived','expired')",
+            name="listing_status_valid",
+        ),
+        Index("idx_listings_status", "status"),
+        Index(
+            "idx_listings_moderation_queue",
+            "id",
+            postgresql_where=text("status = 'moderation'"),
+        ),
+        Index(
+            "idx_listings_pending_patch",
+            "id",
+            postgresql_where=text("pending_patch IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -466,6 +514,44 @@ class Listing(Base):
     # источника). NULL = ещё не пробовали; выставляется после ПЕРВОЙ
     # попытки — источники, не отдающие spec/rvo, не долбятся на каждом PDP.
     specs_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Владелец лота рынка (миграция 0027): user (частник) или partner
+    # (салон). owner_type IS NULL — внешний лот (encar/kcar) без владельца.
+    owner_type: Mapped[str | None] = mapped_column(String(8))
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.telegram_id"), nullable=True
+    )
+    owner_partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("partner_accounts.id"), nullable=True
+    )
+    # Описание от владельца (PDP-блок «От владельца», ≤2000).
+    owner_description: Mapped[str | None] = mapped_column(Text)
+    # Размещение (user): конец бесплатного периода / оплачено до.
+    placement_free_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    placement_paid_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    # Жизненный цикл owner-лота (миграция 0030, 10 §1): статус автомата
+    # модерации. Внешние лоты (парсеры) всегда 'accepted' — server_default
+    # закрывает вставки без явного статуса.
+    status: Mapped[str] = mapped_column(
+        String(16), server_default=text("'accepted'"), nullable=False
+    )
+    # Причина отказа (правила авто-модерации или текст администратора).
+    rejected_reason: Mapped[str | None] = mapped_column(Text)
+    # Последний скрининг: {violations: [{rule, detail, risk}], risk_score}.
+    moderation_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Версия-на-модерации при правке опубликованного лота (10 §1):
+    # NOT NULL = патч на проверке; отклонение дописывает
+    # patch_reject_reason внутрь JSON.
+    pending_patch: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # История машины «как в Корее» (миграция 0028): события партнёра
+    # [{date, title, note?}] <=50, отдаётся в ListingOut для PDP-таймлайна.
+    owner_history: Mapped[list[Any]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
 
 
 class ListingPriceHistory(Base):
@@ -585,6 +671,18 @@ class PartnerAccount(Base):
         server_default=text("0"),
     )
     cpl_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    # Владелец счёта (клиент/сотрудник партнёра): получает Business
+    # автоматически, пока партнёр активен (прод-ревизия 2026-10).
+    # Уникальный индекс — по naming-конвенции `uq_partner_accounts_...`.
+    owner_telegram_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
+    # Пакеты размещений на рынке (миграция 0027): bought = slots,
+    # потрачено = slots_used; слот расходуется на публикацию (возврата нет).
+    placement_slots: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False
+    )
+    placement_slots_used: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -715,4 +813,271 @@ class InspectionReport(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+# =========================================================================
+# Chats (редизайн часть 5, миграция 0026)
+# =========================================================================
+
+
+class ChatThread(Base):
+    """Тред чата: support (юзер ↔ бот/операторы), seller (юзер ↔ продавец
+    лота), deal (юзер ↔ агент по лиду), group (переговорная до 5 человек,
+    миграция 0028).
+
+    `id` — UUID: имя centrifugo-канала `thread:{uuid}`. Уникальность «один
+    тред на предмет» — частичными индексами по типу (см. `__table_args__`),
+    поэтому повторное создание даёт reuse (POST .../seller-chat → 200).
+    У group-тредов естественного ключа нет: сколько создано — столько есть.
+    """
+
+    __tablename__ = "chat_threads"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('support','seller','deal','group')", name="type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('active','closed')", name="status_valid",
+        ),
+        # Singleton поддержки: один тред на юзера.
+        Index(
+            "uq_chat_threads_support",
+            "type", "user_id",
+            unique=True, postgresql_where=text("type = 'support'"),
+        ),
+        # Один seller-тред на пару (юзер, лот).
+        Index(
+            "uq_chat_threads_seller",
+            "type", "user_id", "listing_id",
+            unique=True,
+            postgresql_where=text("type = 'seller' AND listing_id IS NOT NULL"),
+        ),
+        # Один deal-тред на лид.
+        Index(
+            "uq_chat_threads_deal",
+            "type", "lead_id",
+            unique=True,
+            postgresql_where=text("type = 'deal' AND lead_id IS NOT NULL"),
+        ),
+        Index("idx_chat_threads_user_last", "user_id", "last_message_at"),
+        Index("idx_chat_threads_partner_last", "partner_id", "last_message_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID, primary_key=True, default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Название переговорной (group, миграция 0028): задаёт юзер, 3-120
+    # символов. Для support/seller/deal — NULL (заголовок генерится при
+    # выдаче из типа и предмета).
+    title: Mapped[str | None] = mapped_column(String(120))
+    # Владелец-юзер (telegram_id); без FK — как dialog_sessions (исторические
+    # треды не должны исчезать при каскадах users).
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    partner_id: Mapped[int | None] = mapped_column(BigInteger)
+    listing_id: Mapped[int | None] = mapped_column(BigInteger)
+    lead_id: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default=text("'active'"),
+        nullable=False,
+    )
+    bot_paused: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # Момент закрытия (архив 08 §2 / пустой тред после leave): точка
+    # отсчёта 90-дневного retention — закрытые старше скрываются фильтром
+    # из списков чатов (08 §5, cron не нужен — данные остаются для аудита).
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ChatMessage(Base):
+    """Сообщение треда: markdown ≤4000 (лимит — Pydantic/сценарий).
+
+    `sender_type` — user/operator/partner/bot/system; `sender_id` —
+    telegram_id юзера или id партнёрского счёта (для bot/system — NULL).
+    """
+
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        CheckConstraint(
+            "sender_type IN ('user','operator','partner','bot','system')",
+            name="sender_type_valid",
+        ),
+        # Пагинация вниз: WHERE thread_id=... ORDER BY id DESC LIMIT.
+        Index("idx_chat_messages_thread_desc", "thread_id", text("id DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=True
+    )
+    thread_id: Mapped[UUID] = mapped_column(
+        PGUUID,
+        ForeignKey("chat_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sender_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    sender_id: Mapped[int | None] = mapped_column(BigInteger)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ChatParticipant(Base):
+    """Участник треда + read-маркер (unread = сообщения после last_read).
+
+    Владелец-юзер — неявный участник (строки может не быть до первого
+    read); строка нужна партнёрам/операторам и для персистентных маркеров.
+    """
+
+    __tablename__ = "chat_participants"
+    __table_args__ = (
+        PrimaryKeyConstraint("thread_id", "user_type", "user_id"),
+        CheckConstraint(
+            "user_type IN ('user','operator','partner')", name="user_type_valid",
+        ),
+        # Говернанс (миграция 0029, 08 §2): владелец переговорной —
+        # 'owner' (создатель), вошедшие по коду — 'member'.
+        CheckConstraint(
+            "role IN ('owner','member')", name="role_valid",
+        ),
+        Index("idx_chat_participants_user", "user_id"),
+    )
+
+    thread_id: Mapped[UUID] = mapped_column(
+        PGUUID,
+        ForeignKey("chat_threads.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_type: Mapped[str] = mapped_column(String(16), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    last_read_message_id: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(
+        String(8), default="member", server_default=text("'member'"),
+        nullable=False,
+    )
+    # Свои уведомления (08 §6): muted-тред не инкрементит бейдж конверта
+    # (unread считается, фильтрует бейдж — фронт).
+    muted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+
+
+class ChatEvent(Base):
+    """Аудит-событие треда (миграция 0029, 08 §5): операции говернанса.
+
+    Пишется репозиторным методом `log_event` во всех операциях §2-§4;
+    actor — инициатор (user/partner/operator; id — telegram_id или id
+    счёта, для служебных субъектов NULL).
+    """
+
+    __tablename__ = "chat_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event IN ('created','joined','left','invited','kicked',"
+            "'archived','reported','muted','unmuted')",
+            name="event_valid",
+        ),
+        # Лента событий треда: новые сверху (ORDER BY id DESC).
+        Index("idx_chat_events_thread_id", "thread_id", "id"),
+        # Поток по типу события (например, все kick/reported за период).
+        Index("idx_chat_events_event_created", "event", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=True
+    )
+    thread_id: Mapped[UUID] = mapped_column(
+        PGUUID,
+        ForeignKey("chat_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    actor_type: Mapped[str] = mapped_column(String(8), nullable=False)
+    actor_id: Mapped[int | None] = mapped_column(BigInteger)
+    event: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ChatReport(Base):
+    """Жалоба участника на тред (миграция 0029, 08 §4).
+
+    Идемпотентность «открытой» жалобы — частичный unique (thread,
+    reporter, reason) WHERE status='new': повтор → 200 без новой строки;
+    после обработки (resolved/dismissed) пожаловаться можно снова.
+    """
+
+    __tablename__ = "chat_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "reason IN ('spam','fraud','offtop','abuse')", name="reason_valid",
+        ),
+        CheckConstraint(
+            "status IN ('new','resolved','dismissed')", name="status_valid",
+        ),
+        Index("idx_chat_reports_status_created", "status", "created_at"),
+        Index(
+            "uq_chat_reports_open",
+            "thread_id", "reporter_type", "reporter_id", "reason",
+            unique=True, postgresql_where=text("status = 'new'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=True
+    )
+    thread_id: Mapped[UUID] = mapped_column(
+        PGUUID,
+        ForeignKey("chat_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reporter_type: Mapped[str] = mapped_column(String(8), nullable=False)
+    reporter_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reason: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        String(16), default="new", server_default=text("'new'"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PartnerOffer(Base):
+    """Лот в витрине внутреннего рынка: партнёр + заметка (§1, §3).
+
+    `listing_id` UNIQUE — лот может быть в витрине только у одного партнёра;
+    продавец в seller-чате берётся отсюда (`partner_id_for_listing`).
+    """
+
+    __tablename__ = "partner_offers"
+    __table_args__ = (
+        Index(
+            "idx_partner_offers_partner_created", "partner_id", "created_at"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    partner_id: Mapped[int] = mapped_column(
+        ForeignKey("partner_accounts.id", ondelete="CASCADE"), nullable=False,
+    )
+    listing_id: Mapped[int] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), nullable=False, unique=True,
+    )
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

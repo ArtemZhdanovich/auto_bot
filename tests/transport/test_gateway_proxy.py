@@ -22,6 +22,7 @@ TEST_URLS: dict[str, str] = {
     "partners": "http://partners.test",
     "dialog": "http://dialog.test",
     "admin": "http://admin.test",
+    "chat": "http://chat.test",
 }
 
 

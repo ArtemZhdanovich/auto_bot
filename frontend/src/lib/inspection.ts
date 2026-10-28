@@ -30,6 +30,8 @@ export interface InspectionMark {
   zone: BodyZone;
   type: MarkType;
   note?: string | null;
+  /** Пиксельные координаты метки на диаграмме Encar (254x282, вид сверху). */
+  pos?: [number, number] | null;
 }
 
 export interface InspectionItem {

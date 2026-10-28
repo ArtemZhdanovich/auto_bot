@@ -36,6 +36,9 @@ class PartnerAccountState:
     balance: Decimal
     daily_quota: int | None = None
     cpl_rate: Decimal | None = None
+    # Пакеты размещений рынка (миграция 0027): куплено/занято мест.
+    placement_slots: int = 0
+    placement_slots_used: int = 0
 
 
 @dataclass(frozen=True, slots=True)

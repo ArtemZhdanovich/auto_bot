@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -21,6 +22,7 @@ from app.application.partners.dto import (
     TxView,
 )
 from app.application.errors import NotFound
+from app.application.chat.ports import ChatRepository, ThreadEventPublisher
 from app.application.partners.ports import PartnerRepository
 from app.application.shared.ports import AuditLog, EventTracker, UnitOfWork
 from app.domain.analytics.events import EVENT_LEAD_SOLD
@@ -28,6 +30,11 @@ from app.domain.partners import pricing
 from app.domain.partners.ports import CLAIM_OK, PartnerAccountState, PartnerLead
 
 CHARGE_LEAD = "charge_lead"
+
+# System-сообщение в deal-тред, когда партнёр забрал заявку (§1).
+AGENT_CONNECTED = "Агент {partner_name} подключился"
+
+logger = logging.getLogger(__name__)
 
 
 def _view(account: PartnerAccountState) -> PartnerView:
@@ -64,17 +71,29 @@ async def _refusal(
 
 
 class ClaimLead:
-    """Забрать один лид: проверки, атомарный claim, списание."""
+    """Забрать один лид: проверки, атомарный claim, списание.
+
+    Если рядом с лидом есть deal-тред (заявка на агента, §1), успешный
+    claim привязывает его к счёту партнёра и пишет system-сообщение
+    «агент подключился». Чаты внедряются опционально: без них claim
+    работает как раньше (существующие тесты/микропрофили не трогаем).
+    """
 
     def __init__(
         self,
         uow: UnitOfWork,
         partners: PartnerRepository,
         events: EventTracker | None = None,
+        chats: ChatRepository | None = None,
+        publisher: ThreadEventPublisher | None = None,
     ) -> None:
         self._uow = uow
         self._partners = partners
         self._events = events
+        self._chats = chats
+        # 09 §1: system-строка подключения агента уходит в личные каналы
+        # участников deal-треда; None — claim работает без пушей.
+        self._publisher = publisher
 
     async def _track(
         self, lead: PartnerLead | None, partner_id: int, plan: str
@@ -87,6 +106,51 @@ class ClaimLead:
             EVENT_LEAD_SOLD,
             {"lead_id": lead.id, "partner_id": partner_id, "plan": plan},
         )
+
+    async def _link_deal_thread(
+        self, lead_id: int, partner_id: int, partner_name: str
+    ) -> None:
+        """Привязать deal-тред лида к партнёру + system-сообщение (§1).
+
+        Треда может не быть (лид из пула «свяжитесь со мной»); сбой чатов
+        не отменяет claim — сообщения доедут состоянием треда.
+        """
+        if self._chats is None:
+            return
+        try:
+            thread = await self._chats.attach_partner_to_deal(
+                lead_id, partner_id
+            )
+            if thread is None:
+                return
+            from app.application.chat.dto import ParticipantRef, SendMessageCommand
+            from app.application.chat.use_cases import message_event
+
+            message = await self._chats.add_message(
+                SendMessageCommand(
+                    thread_id=thread.id,
+                    sender=ParticipantRef(user_type="system", user_id=0),
+                    body=AGENT_CONNECTED.format(partner_name=partner_name),
+                )
+            )
+            if self._publisher is not None and message is not None:
+                # Полный MessageView в личные каналы участников (09 §1);
+                # сбой пуша не ломается — весь блок под try/except ниже.
+                await self._publisher.publish_to_participants(
+                    thread.id, message_event(thread.id, message)
+                )
+            logger.info(
+                "deal_thread_linked thread=%s lead_id=%s partner_id=%s",
+                thread.id,
+                lead_id,
+                partner_id,
+            )
+        except Exception:  # noqa: BLE001 — чаты не должны ронять claim
+            logger.exception(
+                "deal_thread_link_failed lead_id=%s partner_id=%s",
+                lead_id,
+                partner_id,
+            )
 
     async def execute(self, partner_id: int, lead_id: int) -> ClaimResult:
         """Выполнить claim.
@@ -129,6 +193,11 @@ class ClaimLead:
                 amount=-unit_cost,
                 kind=CHARGE_LEAD,
                 balance_after=balance_after,
+            )
+            # Успешный claim агента: deal-тред перепривязывается к счёту,
+            # юзер видит system-сообщение (§1). Внутри той же транзакции.
+            await self._link_deal_thread(
+                lead_id, partner_id, account.name
             )
             await self._uow.commit()
             await self._track(attempt.lead, partner_id, account.plan)

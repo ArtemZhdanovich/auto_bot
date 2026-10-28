@@ -81,6 +81,19 @@ class ListingCard:
     # Комплектация (миграция 0023): русифицированные опции источника.
     options: list[str] = field(default_factory=list)
     is_active: bool = True
+    # Есть ли чек осмотра (бейдж «чек» на карточке ленты, аудит F7).
+    has_inspection: bool = False
+    # Лот внутреннего рынка (бейдж «🏪 Рынок», редизайн 06 §4): owner-лоты
+    # — owner_type IS NOT NULL (JOIN partner_offers из ленты убран).
+    has_market: bool = False
+    # Владелец owner-лота (06 §4): 'user' («👤 Частник») | 'partner'
+    # («🏪 Салон») | None (внешний лот encar/kcar).
+    owner_type: str | None = None
+    # Описание от владельца (PDP-блок «От владельца», <=2000).
+    owner_description: str | None = None
+    # История машины (миграция 0028): события [{date, title, note?}]
+    # партнёра — PDP-таймлайн «как в Корее» (07 §3), пуст для юзер-лотов.
+    owner_history: list[dict] = field(default_factory=list)
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
     updated_at: datetime | None = None
@@ -320,7 +333,8 @@ GUEST_FORBIDDEN_MESSAGE = (
     "guest_forbidden: AI-анализ цены доступен только после входа или регистрации"
 )
 QUOTA_EXCEEDED_MESSAGE = (
-    "quota_exceeded: 1 разбор этой машины в неделю на Free. Безлимит — в Pro"
+    "quota_exceeded: лимит разборов исчерпан — Free 1 в неделю, Pro 30 в день. "
+    "Безлимитные разборы — в Business"
 )
 
 
@@ -381,12 +395,17 @@ class PriceAnalysisResult:
 
 @dataclass(frozen=True, slots=True)
 class AnalyzePriceCommand:
-    """Вход сценария: объявление, пользователь и остаток бесплатной квоты."""
+    """Вход сценария: объявление, пользователь и остаток квоты окна.
+
+    `inspection_digest` — выжимка чека осмотра (Business-«глубокий» разбор):
+    None на тарифах без доступа к чекам.
+    """
 
     listing: ListingSnapshot
     user_id: int
     tier: str = "free"
     free_quota_left: int | None = None
+    inspection_digest: str | None = None
 
 
 # ---------------------------------------------------------------------------

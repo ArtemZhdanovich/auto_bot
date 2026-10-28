@@ -9,7 +9,15 @@
 
 from fastapi import FastAPI
 
-from app.transport.http.routers import analysis, calc, favorites, filters, listings, notifications
+from app.transport.http.routers import (
+    analysis,
+    calc,
+    deals,
+    favorites,
+    filters,
+    listings,
+    notifications,
+)
 from services._base import create_domain_service
 
 SERVICE_NAME = "catalog"
@@ -23,6 +31,7 @@ def create_app() -> FastAPI:
             listings.router,
             analysis.router,  # AI-анализ цены: GET/POST /api/listings/{id}/analysis
             analysis.bot_router,  # + внутренний канал бота /api/bot/listings/*
+            deals.router,  # агент на сделку: POST /api/listings/{id}/agent (business)
             favorites.router,
             filters.router,
             notifications.router,

@@ -73,12 +73,57 @@ describe("контраст: текст не сливается с фоном", (
   });
 });
 
-describe("тёмная тема", () => {
+describe("тёмная тема (data-theme на <html>, lib/theme.ts)", () => {
+  it("палитра :root[data-theme=dark] перекрывает фон/текст/бордеры/тени", () => {
+    const dark = rule(':root[data-theme="dark"]');
+    expect(dark).toContain("color-scheme: dark");
+    // Значения — сцена «закрытого автосалона» (02-design-system.md §8.2)
+    expect(dark).toContain("--bg: #0f1115");
+    expect(dark).toContain("--bg-secondary: #171a20");
+    expect(dark).toContain("--surface: #1d2129");
+    expect(dark).toContain("--text: #f0f2f5");
+    expect(dark).toContain("--text-secondary: #9aa4b2");
+    expect(dark).toContain("--shadow-md:");
+    expect(dark).toContain("--border:");
+  });
+
+  it("семантические токены (--deal/--warn/--danger) заданы в обеих темах", () => {
+    const light = rule(":root");
+    const dark = rule(':root[data-theme="dark"]');
+    for (const block of [light, dark]) {
+      expect(block).toContain("--deal:");
+      expect(block).toContain("--warn:");
+      expect(block).toContain("--danger:");
+      expect(block).toContain("--accent-ring:");
+    }
+    // тёмная не наследует фолбэки светлой: акцент светлее, текст на нём тёмный
+    expect(dark).toContain("var(--tg-theme-button-color, #5ca9f0)");
+    expect(dark).toContain("var(--tg-theme-button-text-color, #0f1115)");
+  });
+
+  it("z-шкала: тосты выше модалок (§5.3)", () => {
+    const light = rule(":root");
+    expect(light).toContain("--z-toast: 1100");
+    expect(light).toContain("--z-modal: 1050");
+    expect(rule(".toast-host")).toContain("z-index: var(--z-toast)");
+    expect(rule(".modal")).toContain("z-index: var(--z-modal)");
+  });
+
+  it("не перекрывает --tg-theme-* напрямую (Telegram — источник акцента)", () => {
+    expect(rule(':root[data-theme="dark"]')).not.toMatch(/--tg-theme-[a-z-]+:\s*#/);
+  });
+
   it("вердикты AI-анализа и бейджи перекрашены для dark", () => {
-    const dark = css.slice(css.indexOf("prefers-color-scheme: dark"));
+    const dark = css.slice(css.indexOf('[data-theme="dark"]'));
     expect(dark).toContain(".analysis__verdict--deal");
     expect(dark).toContain(".analysis__verdict--overpriced");
     expect(dark).toContain(".analysis__pill--good");
+  });
+
+  it("грейды осмотра читаемы в dark (не светлые пастели под светлым текстом)", () => {
+    const dark = css.slice(css.indexOf('[data-theme="dark"]'));
+    expect(dark).toContain(".inspection__grade--excellent");
+    expect(dark).toContain(".inspection__grade--poor");
   });
 });
 
@@ -99,11 +144,53 @@ describe("предупреждение и disabled-состояния", () => {
   });
 
   it("тёмная тема: предупреждение читаемо (перекрашено, не тёмно-жёлтое на тёмном)", () => {
-    const dark = css.slice(css.indexOf("prefers-color-scheme: dark"));
+    const dark = css.slice(css.indexOf('[data-theme="dark"]'));
     expect(dark).toContain(".calc-warn");
   });
 
   it("у чипов есть disabled-стейт (без инлайн-opacity в компонентах)", () => {
     expect(rule(".chip:disabled")).toContain("cursor: not-allowed");
+  });
+});
+
+describe("mobile ux (Фиттс/Хик, <768px — блок «Mobile UX» в конце index.css)", () => {
+  /** Мобильный блок дописан в конец index.css; срезаем от его заголовка. */
+  const mobile = css.slice(css.indexOf("Mobile UX 2026-10"));
+  const mobileRule = (sel: string): string => {
+    const idx = mobile.indexOf(sel);
+    expect(idx, `селектор ${sel} в мобильном блоке`).toBeGreaterThanOrEqual(0);
+    const open = mobile.indexOf("{", idx);
+    const close = mobile.indexOf("}", open);
+    return mobile.slice(open + 1, close);
+  };
+
+  it("чипы и мелкие контролы ленты ≥44px на мобиле (закон Фиттса)", () => {
+    expect(mobileRule(".chip")).toContain("min-height: var(--touch-min)");
+    expect(mobileRule(".feed-toggle")).toContain("min-height: var(--touch-min)");
+    expect(mobileRule(".feed-sort")).toContain("min-height: var(--touch-min)");
+  });
+
+  it("ряд чипсов ленты скроллится со snap (Хик: один ряд, не выбор из всех)", () => {
+    expect(rule(".feed-head__chips")).toContain("scroll-snap-type: x proximity");
+  });
+
+  it("«Ещё параметры»: кнопка-раскрытие с тач-зоной 44 и сеткой блока", () => {
+    expect(rule(".feed-panel__more")).toContain("min-height: var(--touch-min)");
+    expect(rule(".feed-panel__extra")).toContain("display: grid");
+  });
+
+  it("зона пальца: «Наверх» выше FAB, тост — над таббаром с safe-area", () => {
+    expect(mobileRule(".to-top")).toContain("env(safe-area-inset-bottom");
+    expect(rule(".toast-host")).toContain("env(safe-area-inset-bottom");
+  });
+
+  it("хит-зоны мелких иконок расширены псевдоэлементом, без раздувания", () => {
+    for (const sel of [
+      ".gallery__expand::after",
+      ".pdp-dots__dot::after",
+      ".inspection__pin::after",
+    ]) {
+      expect(rule(sel)).toContain("inset:");
+    }
   });
 });

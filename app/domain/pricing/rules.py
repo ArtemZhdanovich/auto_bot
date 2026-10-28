@@ -19,12 +19,17 @@ OVERPRICED_RATIO: Final[float] = 1.07
 FACTORS_LIMIT: Final[int] = 4
 
 FREE_TIER: Final[str] = "free"
-FREE_QUOTA_LIMIT: Final[int] = 1
-FREE_QUOTA_WINDOW_DAYS: Final[int] = 7
+PRO_TIER: Final[str] = "pro"
+
+# Прод-экономика: лимит разбора на ОКНО (окно зависит от тарифа):
+# free — 1 разбор в неделю на ВСЕ машины (не на каждую),
+# pro — 30 в день, business — без лимита (quota_applies → False).
+ANALYSES_LIMITS: Final[dict[str, int]] = {"free": 1, "pro": 30}
+ANALYSES_WINDOW_DAYS: Final[dict[str, int]] = {"free": 7, "pro": 1}
 
 
 class QuotaExceeded(Exception):
-    """Бесплатный разбор этой машины на этой неделе уже израсходован."""
+    """Лимит разборов на текущем окне (неделя для free) исчерпан."""
 
 
 def market_stats(prices: list[float]) -> dict[str, float | int] | None:
@@ -120,13 +125,18 @@ def normalize_amount(value: Any) -> float | None:
 
 
 def quota_applies(tier: str) -> bool:
-    """Ограничена ли квота на этом тарифе (free — да, pro/business — нет)."""
-    return tier == FREE_TIER
+    """Ограничена ли квота на этом тарифе (free/pro — да, business — нет)."""
+    return tier in ANALYSES_LIMITS
 
 
-def quota_left(used: int, limit: int = FREE_QUOTA_LIMIT) -> int:
-    """Сколько бесплатных разборов осталось при `used` израсходованных."""
-    return max(0, limit - used)
+def quota_window_days(tier: str) -> int:
+    """Окно квоты: неделя для free, сутки для pro."""
+    return ANALYSES_WINDOW_DAYS.get(tier, 7)
+
+
+def quota_left(used: int, tier: str = FREE_TIER) -> int:
+    """Сколько разборов осталось при `used` израсходованных в окне тарифа."""
+    return max(0, ANALYSES_LIMITS.get(tier, 0) - used)
 
 
 def ensure_quota(tier: str, left: int | None) -> None:
@@ -134,10 +144,10 @@ def ensure_quota(tier: str, left: int | None) -> None:
 
     Args:
         tier: Тариф пользователя.
-        left: Остаток бесплатных разборов (`None` — тариф без лимита).
+        left: Остаток разборов в окне (`None` — тариф без лимита).
 
     Raises:
-        QuotaExceeded: Бесплатный лимит исчерпан.
+        QuotaExceeded: Лимит на окне исчерпан.
     """
     if quota_applies(tier) and left is not None and left <= 0:
         raise QuotaExceeded

@@ -1,0 +1,2298 @@
+/*
+ * Партнёрский кабинет — стили редизайна (docs/REDESIGN/04-partner-redesign.md).
+ * Токены и базовые классы (.btn/.input/.tbl/.panel) — из глобального index.css
+ * (02-design-system.md §8–9); здесь только партнёрская специфика.
+ * Мобильный-first: <768px — таб-бар и карточки; ≥768px — sidebar и таблицы.
+ * Тач-зоны ≥44px (02 §4), focus-visible — глобальное правило индекс.css.
+ */
+
+/* ---------- Каркас: шапка + таб-бар (N1) ---------- */
+
+.pa-app {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.pa-sidebar {
+  display: none; /* мобайл: сайдбар скрыт, навигация — таб-бар */
+}
+
+.pa-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pa-topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky, 10);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  min-height: 52px;
+}
+
+.pa-topbar__id {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.pa-topbar__name {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pa-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  position: relative;
+}
+
+.pa-topbar__balance {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pa-topbar__balance b {
+  color: var(--text);
+}
+
+.pa-topbar__menu {
+  min-width: 44px;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.pa-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  z-index: calc(var(--z-sticky, 10) + 1);
+}
+
+.pa-menu__item {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: var(--font-sm);
+  text-decoration: none;
+  cursor: pointer;
+}
+.pa-menu__item:hover {
+  background: var(--bg-secondary);
+}
+
+.pa-content {
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-max, 1200px);
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-3) calc(var(--tabbar-h, 56px) + var(--space-5) + env(safe-area-inset-bottom, 0px));
+}
+
+/* Нижний таб-бар: 5 пунктов — Обзор/Пул/Мои/Чаты/«Ещё» (NAV-V2 §3) + бейджи (N1) */
+.pa-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-cta, 100);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: calc(var(--tabbar-h, 56px) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.pa-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--touch-min, 44px);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--font-xs);
+  /* таб «Ещё» — button: сбрасываем нативные стили под вид ссылки-таба */
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pa-tab--active {
+  color: var(--accent);
+  font-weight: 600;
+}
+.pa-tab__label {
+  font-size: 11px;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap; /* 5 пунктов таб-бара: подписи не переносятся */
+}
+
+/* ---------- Бейдж навигации (§6.2 TabBadge) ---------- */
+
+.pa-navbadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: auto;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+/* в таб-баре бейдж лепится к углу иконки */
+.pa-tab .pa-navbadge {
+  position: absolute;
+  top: 4px;
+  right: calc(50% - 22px);
+  margin-left: 0;
+}
+.pa-navbadge--dot {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  background: var(--warn);
+}
+.pa-tab .pa-navbadge--dot {
+  top: 6px;
+  right: calc(50% - 16px);
+}
+
+/* Точка на табе «Ещё»: внутри группы есть активный раздел (NAV-V2 §3) */
+.pa-tab__dot {
+  position: absolute;
+  top: 6px;
+  right: calc(50% - 16px);
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
+
+/* ---------- Шторка «Ещё»: разделы группы (NAV-V2 §3) ---------- */
+
+.pa-more {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pa-more__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--touch-min, 44px);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--font-sm);
+}
+.pa-more__item--active {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+/* Хвост строки: бейджи (lowBalance у «Биллинга») + галочка текущего */
+.pa-more__trail {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pa-more__check {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+/* ---------- Десктоп ≥768: sidebar (§3.2) ---------- */
+
+@media (min-width: 768px) {
+  .pa-tabbar,
+  .pa-topbar__menu {
+    display: none;
+  }
+  .pa-sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 232px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: var(--space-4) var(--space-2);
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    box-sizing: border-box;
+  }
+  .pa-sidebar__logo {
+    font-weight: 700;
+    font-size: var(--font-md);
+    padding: 0 var(--space-3) var(--space-4);
+    white-space: nowrap;
+  }
+  .pa-sidebar__nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .pa-sidebar__foot {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+  .pa-navitem {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: var(--touch-min, 44px);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    text-decoration: none;
+    font-size: var(--font-sm);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+  }
+  .pa-navitem:hover {
+    background: var(--bg-secondary);
+  }
+  .pa-navitem--active {
+    background: var(--bg-secondary);
+    font-weight: 600;
+  }
+  .pa-navitem .pa-navbadge {
+    margin-left: auto;
+  }
+  .pa-content {
+    padding: var(--space-5) var(--space-5) var(--space-6);
+  }
+}
+
+/* ---------- Заголовки и секции ---------- */
+
+.pa-title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  margin: 0 0 var(--space-4);
+}
+
+.pa-section {
+  margin-top: var(--space-5);
+}
+.pa-section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.pa-section__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  margin: 0;
+}
+.pa-section__empty {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  margin: var(--space-2) 0;
+}
+
+.pa-link {
+  border: none;
+  background: transparent;
+  color: var(--link);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  padding: var(--space-2) 0;
+  min-height: var(--touch-min, 44px);
+}
+.pa-link:hover {
+  text-decoration: underline;
+}
+
+.pa-footnote {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  margin: var(--space-2) 0 0;
+  line-height: 1.5;
+}
+
+/* ---------- KPI-плитки (§6.2) ---------- */
+
+.pa-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+@media (min-width: 768px) {
+  .pa-kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+}
+
+.pa-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-sm);
+  text-align: left;
+  font-family: inherit;
+}
+.pa-kpi--action {
+  cursor: pointer;
+  transition: transform var(--dur-fast, 120ms) var(--ease-out, ease-out);
+}
+.pa-kpi--action:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.pa-kpi--warn .pa-kpi__value {
+  color: var(--warn);
+}
+.pa-kpi--danger .pa-kpi__value {
+  color: var(--danger);
+}
+.pa-kpi--accent {
+  border-color: var(--accent);
+}
+.pa-kpi__label {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+.pa-kpi__value {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-tight, 1.15);
+  /* fmtUsd/fmtMoneyCompact не группируют разряды в длинных суммах
+     ("$12345678") — без anywhere цифра выпирает из плитки на 360px */
+  overflow-wrap: anywhere;
+}
+.pa-kpi__hint {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+
+/* ---------- Квота (§6.2 QuotaMeter) ---------- */
+
+.pa-quota {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.pa-quota__labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+.pa-quota__count {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pa-quota__track {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken, var(--bg-secondary));
+  overflow: hidden;
+}
+.pa-quota__fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  transition: width var(--dur-slow, 300ms) var(--ease-out, ease-out);
+}
+.pa-quota__fill--warn,
+.pa-quota__fill--done {
+  background: var(--warn);
+}
+.pa-quota__note {
+  font-size: var(--font-xs);
+  color: var(--warn);
+}
+
+/* ---------- Баннеры предупреждений (§4.1.2) ---------- */
+
+.pa-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  background: var(--warn-bg);
+  color: var(--text);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  font-size: var(--font-sm);
+}
+.pa-banner--danger {
+  background: var(--danger-bg);
+  border-left-color: var(--danger);
+}
+.pa-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pa-banner__close {
+  min-width: 36px;
+  min-height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Быстрые действия Обзора (§4.1.4) ---------- */
+
+.pa-quick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+/* Двойной класс: partner.css подключается РАНЬШЕ index.css (порядок
+   импортов в main.tsx/App.tsx), равная специфичность проиграла бы
+   .btn { white-space: nowrap } из index.css */
+.pa-quick__btn.pa-quick__btn {
+  min-height: 52px;
+  min-width: 0;
+  font-size: var(--font-md);
+  /* «Взять до 10 лидов» + nowrap у .btn на 320px (колонка ~136px)
+     вылезало за край сетки — длинная подпись переносится, а не режется */
+  white-space: normal;
+}
+.pa-quick__hint {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  margin: var(--space-2) 0 0;
+}
+
+/* ---------- «Ждут отметки» (§4.1.5) ---------- */
+
+.pa-pending {
+  display: flex;
+  flex-direction: column;
+}
+.pa-pending__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-2);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.pa-pending__row:hover {
+  background: var(--bg-secondary);
+}
+.pa-pending__id {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pa-pending__qual {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-pending__time {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+/* ---------- Лоты: ряд/таблица (§4.4.3, R4) ---------- */
+
+.pa-deals {
+  display: flex;
+  flex-direction: column;
+}
+.pa-deal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.pa-deal:last-child {
+  border-bottom: none;
+}
+.pa-deal__main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.pa-deal__name {
+  font-weight: 600;
+  font-size: var(--font-sm);
+}
+.pa-deal__year {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.pa-deal__price {
+  font-size: var(--font-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pa-deal__badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--deal-solid);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="dark"] .pa-deal__badge {
+  color: #111318; /* пара к светлому --deal-solid тёмной темы (02 §2.2) */
+}
+.pa-deal__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ---------- Свёрнутое обучение (§4.1.7) ---------- */
+
+.pa-how {
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+.pa-how summary {
+  cursor: pointer;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  min-height: var(--touch-min, 44px);
+  display: flex;
+  align-items: center;
+}
+.pa-how p {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ---------- Фильтры и чипы (02 §7.2) ---------- */
+
+.pa-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.pa-filters__q {
+  min-height: 44px;
+}
+.pa-filters__chips {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+  scrollbar-width: none;
+}
+.pa-filters__chips::-webkit-scrollbar {
+  display: none;
+}
+
+.pa-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+/* тач-зона 44 — псевдоэлементом (02 §4) */
+.pa-chip::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.pa-chip {
+  position: relative;
+}
+.pa-chip:hover {
+  background: var(--bg-secondary);
+}
+.pa-chip--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.pa-chip__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pa-chip--active .pa-chip__count {
+  background: color-mix(in srgb, var(--accent-text) 20%, var(--accent));
+  color: var(--accent-text);
+}
+.pa-chip-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+.pa-chip-wrap .pa-chip {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.pa-chip__x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-left: none;
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+}
+.pa-chip__x:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+.pa-chip-wrap .pa-chip--active + .pa-chip__x {
+  border-color: var(--accent);
+  border-left: 1px solid var(--accent);
+}
+
+/* ---------- Тулбар пула (§4.2.2) ---------- */
+
+.pa-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.pa-toolbar__count {
+  flex: 1;
+  min-width: 0; /* длинный счётчик не выталкивает кнопку «Взять до N» */
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+
+/* ---------- Карточки-лиды <768 (P1/M5, §6.2 LeadCard) ---------- */
+
+.pa-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pa-leadcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  transition: opacity var(--dur-slow, 300ms) var(--ease-in, ease-in),
+    transform var(--dur-slow, 300ms) var(--ease-in, ease-in);
+}
+.pa-leadcard--gone {
+  opacity: 0;
+  transform: scale(0.98);
+  pointer-events: none;
+}
+.pa-leadcard__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pa-leadcard__id {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.pa-leadcard__time {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+.pa-leadcard__comment {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pa-leadcard__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.pa-leadcard__claim {
+  width: 100%;
+  min-height: 48px;
+}
+.pa-leadcard__blocked {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--font-xs);
+}
+
+.pa-badge-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  color: var(--accent);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pa-badge-new::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
+
+/* ---------- Квалификация чипами (§4.2.3) ---------- */
+
+.pa-qual {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.pa-qual__budget {
+  font-size: var(--font-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding-left: 6px;
+  border-left: 3px solid var(--accent); /* тик-метка бюджетной цифры (§4.2) */
+}
+.pa-qual__chip {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+/* ---------- Таблицы пула ≥768 ---------- */
+
+.pa-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pa-pool-table__comment {
+  max-width: 320px;
+}
+.pa-created {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.pa-row--gone {
+  opacity: 0;
+  transition: opacity var(--dur-slow, 300ms) var(--ease-in, ease-in);
+}
+
+.pa-more {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-4);
+}
+
+/* ---------- Мои лиды: статусная лента (§4.3) ---------- */
+
+.pa-myleads {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--space-3);
+}
+.pa-mylead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+}
+.pa-mylead__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.pa-mylead__id {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pa-mylead__time {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+.pa-mylead__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pa-mylead__comment {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+.pa-mylead__contact {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: flex-start;
+}
+.pa-mylead__tg {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.pa-mylead__tglabel {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+.pa-tglink {
+  color: var(--link);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  text-decoration: none;
+  word-break: break-all;
+}
+.pa-tglink:hover {
+  text-decoration: underline;
+}
+.pa-mylead__tghint {
+  color: var(--text-tertiary);
+  font-size: var(--font-xs);
+}
+.pa-mylead__feedback {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.pa-mylead__feedback .btn {
+  min-height: 44px;
+  flex: 1 1 auto;
+}
+
+.pa-btn-sm {
+  min-height: 36px;
+  font-size: var(--font-xs);
+}
+
+/* ---------- Статусные пилюли (§6.2 StatusPill: цвет + слово) ---------- */
+
+.pa-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pa-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  flex-shrink: 0;
+}
+.pa-pill--new {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+}
+.pa-pill--accepted {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+.pa-pill--deal {
+  background: var(--deal-solid);
+  color: #fff;
+}
+:root[data-theme="dark"] .pa-pill--deal {
+  color: #111318;
+}
+.pa-pill--returned {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.pa-pill--junk {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.pa-pill--current {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ---------- Скелетоны (X3, 02 §7.7) ---------- */
+
+.pa-skel {
+  display: inline-block;
+  background: var(--bg-secondary);
+  animation: pa-skel-pulse 1.4s var(--ease-inout, ease-in-out) infinite;
+}
+@keyframes pa-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pa-skel {
+    animation: none;
+    opacity: 0.7;
+  }
+  .pa-leadcard,
+  .pa-row--gone,
+  .pa-quota__fill,
+  .pa-kpi--action {
+    transition: none;
+  }
+}
+
+.pa-skel-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pa-skel-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+/* ---------- Пустые состояния и ошибки (02 §7.9, без машинки §6.3) ---------- */
+
+.pa-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+.pa-mark {
+  color: var(--text-tertiary);
+}
+.pa-mark--danger {
+  color: var(--danger);
+}
+.pa-empty__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+.pa-empty__desc {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  max-width: 420px;
+}
+.pa-empty__action {
+  margin-top: var(--space-2);
+}
+
+/* ---------- Sheet: подтверждения/ротация (02 §7.10) ---------- */
+
+.pa-sheet-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet, 900);
+  background: rgba(8, 10, 14, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: pa-fade-in var(--dur-base, 200ms) var(--ease-out, ease-out);
+}
+@keyframes pa-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.pa-sheet {
+  width: min(92vw, 480px);
+  max-height: 80dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: var(--radius-xl, 20px) var(--radius-xl, 20px) 0 0;
+  padding: var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--shadow-lg);
+  animation: pa-sheet-up var(--dur-slow, 300ms) var(--ease-out, ease-out);
+}
+@keyframes pa-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@media (min-width: 768px) {
+  .pa-sheet-wrap {
+    align-items: stretch;
+    justify-content: flex-end;
+  }
+  .pa-sheet {
+    width: 400px;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    animation: pa-sheet-in var(--dur-slow, 300ms) var(--ease-out, ease-out);
+  }
+  @keyframes pa-sheet-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+}
+.pa-sheet__handle {
+  width: 36px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken, var(--bg-secondary));
+  margin: var(--space-1) auto var(--space-2);
+}
+.pa-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.pa-sheet__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+.pa-sheet__close {
+  min-width: 44px;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+.pa-sheet__body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.pa-sheet__text {
+  font-size: var(--font-sm);
+  margin: 0 0 var(--space-2);
+  line-height: 1.5;
+}
+.pa-sheet__hint {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  margin: 0;
+}
+.pa-sheet__footer {
+  display: flex;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+}
+.pa-sheet__footer .btn {
+  flex: 1;
+  min-height: 48px;
+  min-width: 0;
+  /* «Запросить у менеджера» + nowrap у .btn на 320px шире половины
+     футера шита — переносим подпись, кнопки остаются равной ширины */
+  white-space: normal;
+}
+
+/* ---------- Тосты с действием (02 §7.8) ---------- */
+
+.pa-toast-host {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h, 56px) + env(safe-area-inset-bottom, 0px) + var(--space-3));
+  z-index: var(--z-toast, 1100);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(92vw, 480px);
+  pointer-events: none;
+}
+@media (min-width: 768px) {
+  .pa-toast-host {
+    bottom: var(--space-5);
+  }
+}
+.pa-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: #17191e;
+  color: #fff;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-sm);
+  pointer-events: auto;
+  animation: pa-toast-in var(--dur-base, 200ms) var(--ease-out, ease-out);
+}
+:root[data-theme="dark"] .pa-toast {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+@keyframes pa-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.pa-toast--error {
+  border-left: 3px solid var(--danger);
+}
+.pa-toast__text {
+  flex: 1;
+  min-width: 0;
+}
+.pa-toast__action {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--link);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+}
+
+/* ---------- Рынок (§4.4) ---------- */
+
+.pa-saved {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-1);
+  scrollbar-width: none;
+}
+.pa-saved::-webkit-scrollbar {
+  display: none;
+}
+.pa-market-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.pa-market-form .input {
+  flex: 1 1 140px;
+  min-height: 44px;
+}
+.pa-market-form .btn {
+  min-height: 44px;
+}
+.pa-slice {
+  font-size: var(--font-md);
+  font-weight: 600;
+  margin: 0 0 var(--space-3);
+}
+
+/* ---------- Биллинг (§4.5) ---------- */
+
+.pa-tx-income {
+  color: var(--deal);
+}
+.pa-tx-outcome {
+  color: var(--danger);
+}
+.pa-plan-desc {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  font-weight: 400;
+  margin-top: 2px;
+  max-width: 260px;
+}
+
+/* ---------- Ключ (§4.6) ---------- */
+
+.pa-keycard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.pa-keycard__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.pa-keycard__label {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+.pa-keycard__prefix {
+  font-family: var(--font-mono);
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+.pa-keycard__note {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  margin: var(--space-2) 0 0;
+}
+
+.pa-code {
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+.pa-code code {
+  font-family: var(--font-mono);
+  white-space: pre;
+}
+
+/* ---------- Вход (§4.7) ---------- */
+
+.pa-login {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  padding: var(--space-4);
+}
+.pa-login__panel {
+  width: min(420px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-5);
+}
+.pa-login__title {
+  font-size: 20px;
+  margin: 0 0 var(--space-2);
+}
+.pa-login__desc {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  margin: 0 0 var(--space-4);
+  line-height: 1.5;
+}
+.pa-login__banner {
+  background: var(--warn-bg);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-sm);
+  margin-bottom: var(--space-3);
+}
+.pa-login__keyrow {
+  display: flex;
+  gap: var(--space-2);
+}
+.pa-login__keyrow .input {
+  min-height: 44px;
+}
+.pa-login__show {
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--link);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pa-login__remember {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  margin: var(--space-3) 0;
+  min-height: 44px;
+  cursor: pointer;
+}
+.pa-login__remember input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.pa-login__error {
+  color: var(--danger);
+  font-size: var(--font-sm);
+  margin: 0 0 var(--space-2);
+}
+.pa-login__submit {
+  width: 100%;
+  min-height: 48px;
+}
+
+/* ---------- Загрузка каркаса ---------- */
+
+.pa-boot {
+  max-width: 720px;
+  margin: var(--space-6) auto;
+  padding: 0 var(--space-3);
+}
+
+/* ---------- Общие тонкости ---------- */
+
+.pa-content :is(h1, h2, h3) {
+  font-family: inherit;
+}
+.pa-content .tbl {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Чаты (05-chats-marketplace.md §7, F2) ----------
+   Пузыри/композер/лента — глобальные классы ядра F1 из screens/chats.css
+   (бандл общий); здесь — только обвязка раздела кабинета .pa-chat-*. */
+
+.pa-chat-page__hint {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+}
+/* Сделки ждут отметки (долг ревизора №6): CTA-блок над списком тредов */
+.pa-chat-deals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.pa-chat-deal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.pa-chat-deal__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pa-chat-deal__title {
+  font-weight: 600;
+  font-size: var(--font-sm);
+}
+.pa-chat-deal__hint {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Overlay /partner/chats/:id: чат занимает область экрана, лента скроллится
+   внутри (шапка кабинета ~52px + таб-бар; десктоп — без таб-бара) */
+.pa-chat-page__overlay {
+  height: calc(100dvh - 52px - var(--tabbar-h, 56px) - var(--space-3));
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 768px) {
+  .pa-chat-page__overlay {
+    height: calc(100dvh - 52px - var(--space-4));
+  }
+}
+/* В кабинете нет Telegram-инициализации: фокус-обводка композера — токены */
+.pa-chat-page .chat-composer__input:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+/* ---------- OG-превью внешних ссылок (05 §8, F2) ----------
+   Классы .chat-og* живут здесь, а не в chats.css (мини-апп не трогаем):
+   пока карточку рендерит только партнёрский PartnerChatRoom. */
+
+.chat-og {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 2px 0 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  text-decoration: none;
+  text-align: left;
+}
+.chat-msg--own .chat-og {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.chat-og__img {
+  flex: none;
+  width: 96px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--surface-sunken);
+}
+.chat-og__img--empty {
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+}
+.chat-og__body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.chat-og__title {
+  font: 600 var(--font-sm)/1.3 var(--font-sans);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-og__desc {
+  font: 400 var(--font-xs)/1.35 var(--font-sans);
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.chat-og__domain {
+  font: 500 var(--font-xs)/1 var(--font-sans);
+  color: var(--text-tertiary);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/* ---------- Витрина (05 §1/§7, F2) ---------- */
+
+.pa-offers {
+  display: grid;
+  gap: var(--space-2);
+}
+.pa-offer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.pa-offer__img {
+  flex: none;
+  width: 72px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+.pa-offer__img--empty {
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+}
+.pa-offer__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.pa-offer__name {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-offer__meta {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.pa-offer__note {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.pa-offer__actions {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
+}
+/* Узкие экраны: действия под карточкой, не в строку с текстом */
+@media (max-width: 480px) {
+  .pa-offer {
+    flex-wrap: wrap;
+  }
+  .pa-offer__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+.pa-offer-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pa-offer-form .input {
+  flex: 1 1 120px;
+  min-height: 44px;
+}
+.pa-offer-form .btn {
+  min-height: 44px;
+}
+
+/* === Объявления (06-market-user-listings.md §6): пакеты + свои лоты === */
+
+/* Счётчик свободных мест в заголовке секции пакетов. */
+.pa-mkt-slots {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Карточки пакетов размещений: сетка size/цена/«Купить». */
+.pa-mkt-packages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-2);
+}
+.pa-mkt-package {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: center;
+}
+.pa-mkt-package__size {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+.pa-mkt-package__size b {
+  font-size: var(--font-xl);
+  color: var(--text);
+  margin-right: 4px;
+}
+.pa-mkt-package__price {
+  font-size: var(--font-md);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.pa-mkt-package .btn {
+  margin-top: var(--space-2);
+}
+
+/* Форма «Разместить лот»: те же поля, что у user-размещения. */
+.pa-mkt-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+  align-items: start;
+}
+.pa-mkt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+.pa-mkt-field--wide {
+  grid-column: 1 / -1;
+}
+.pa-mkt-field .input {
+  min-height: 44px;
+}
+.pa-mkt-field textarea.input {
+  resize: vertical;
+  min-height: 72px;
+}
+.pa-mkt-field__error {
+  min-height: 14px;
+  font-size: var(--font-xs);
+  font-style: normal;
+  color: var(--danger);
+  line-height: 1.4;
+}
+.pa-mkt-form .btn {
+  justify-self: start;
+  min-height: 44px;
+}
+
+/* Список размещённых лотов. */
+.pa-mkt-lots {
+  display: grid;
+  gap: var(--space-2);
+}
+.pa-mkt-lot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.pa-mkt-lot__img {
+  flex: none;
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.pa-mkt-lot__img--empty {
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+}
+.pa-mkt-lot__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.pa-mkt-lot__name {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.pa-mkt-lot__meta {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.pa-mkt-lot .pa-pill {
+  justify-self: start;
+}
+.pa-mkt-lot__actions {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
+}
+@media (max-width: 480px) {
+  .pa-mkt-lot {
+    flex-wrap: wrap;
+  }
+  .pa-mkt-lot__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* === Чеки и история (07-sell-chats-partner-inspection.md §3, F2) === */
+
+/* Список своих лотов с индикатором «чек есть/нет». */
+.pa-insp-lots {
+  display: grid;
+  gap: var(--space-2);
+}
+.pa-insp-lot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.pa-insp-lot__img {
+  flex: none;
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.pa-insp-lot__img--empty {
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+}
+.pa-insp-lot__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+}
+.pa-insp-lot__name {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.pa-insp-lot__meta {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.pa-insp-lot__actions {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
+}
+
+/* Индикатор чека: зелёный «есть» / нейтральный «нет» (токены — тёмная тема
+   подхватывается data-theme="dark" автоматически). */
+.pa-insp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
+.pa-insp-check i {
+  font-style: normal;
+  font-size: 11px;
+}
+.pa-insp-check--ok {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+.pa-insp-check--none {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+/* Кнопка «← К списку лотов» в редакторе. */
+.pa-insp-back {
+  margin-bottom: var(--space-2);
+}
+
+/* Шапка чека: сетка полей центр/дата/оценка + комментарий на всю ширину. */
+.pa-insp-head {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+  align-items: start;
+}
+
+/* Диаграммы Encar: контейнер как в мини-аппе (.inspection__schemes),
+   партнёрская копия — классы pa-insp-*. */
+.pa-insp-diagrams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-2);
+}
+.pa-insp-scheme {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+}
+.pa-insp-scheme-title {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: var(--space-1);
+}
+.pa-insp-diagram {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  margin: 0 auto;
+}
+.pa-insp-diagram-img {
+  width: 100%;
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.pa-insp-dir {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+}
+.pa-insp-dir--front {
+  top: 2px;
+}
+.pa-insp-dir--rear {
+  bottom: 2px;
+}
+
+/* Тач-зона клика: прозрачная, проявляется на hover/focus — координаты
+   зон (% канвы 254x282) задаёт инлайн-стиль из мини-карты ZONE_POS. */
+.pa-insp-hotspot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 1.5px dashed transparent;
+  background: transparent;
+  cursor: pointer;
+  z-index: 1;
+}
+.pa-insp-hotspot:hover,
+.pa-insp-hotspot:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Пин поверх зоны: счётчик отметок, заливка — самый сильный дефект. */
+.pa-insp-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 10px;
+  border: 2px solid var(--bg);
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  z-index: 2; /* пин поверх тач-зон: клик по нему открывает список отметок */
+}
+.pa-insp-pin:hover {
+  transform: translate(-50%, -50%) scale(1.15);
+}
+.pa-insp-pin--sel {
+  border-color: var(--accent);
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+/* Легенда типов повреждений. */
+.pa-insp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+.pa-insp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-insp-legend-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+}
+
+/* Панель зоны: список отметок + форма добавить/изменить. */
+.pa-insp-zone {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  display: grid;
+  gap: var(--space-1);
+}
+.pa-insp-zone-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+.pa-insp-close {
+  min-width: 32px;
+  min-height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+}
+.pa-insp-close:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+.pa-insp-zone-ok {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+.pa-insp-markrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+.pa-insp-markrow__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+}
+.pa-insp-markrow__actions {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+.pa-insp-markform {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.pa-insp-markform .input {
+  flex: 1 1 140px;
+  min-height: 44px;
+}
+.pa-insp-markform .btn {
+  min-height: 44px;
+}
+
+/* Чек-лист агрегатов: строки «название | сегмент статуса | заметка». */
+.pa-insp-items {
+  display: grid;
+  gap: var(--space-1);
+}
+.pa-insp-item {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto minmax(160px, 1.4fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pa-insp-item__label {
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+.pa-insp-item__note {
+  min-height: 36px;
+  font-size: var(--font-xs);
+}
+
+/* Сегмент статуса: 4 кнопки-сегмента, активная подкрашена семантикой
+   (--deal/--warn/--danger — их тёмные значения задаёт index.css). */
+.pa-insp-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.pa-insp-seg__btn {
+  min-height: 36px;
+  padding: 0 10px;
+  border: none;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.pa-insp-seg__btn + .pa-insp-seg__btn {
+  border-left: 1px solid var(--border);
+}
+.pa-insp-seg__btn--active {
+  font-weight: 700;
+}
+.pa-insp-seg__btn[aria-pressed="true"] {
+  color: var(--text);
+}
+.pa-insp-seg__btn[aria-pressed="true"]:first-child {
+  background: var(--deal-bg);
+  color: var(--deal);
+}
+.pa-insp-seg__btn[aria-pressed="true"]:nth-child(2) {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.pa-insp-seg__btn[aria-pressed="true"]:nth-child(3) {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.pa-insp-seg__btn[aria-pressed="true"]:nth-child(4) {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+/* Фото чека: ввод URL + список превью со ссылками. */
+.pa-insp-imgform {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pa-insp-imgform .input {
+  flex: 1 1 220px;
+  min-height: 44px;
+}
+.pa-insp-imgform .btn {
+  min-height: 44px;
+}
+.pa-insp-images {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+.pa-insp-image {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pa-insp-image img {
+  flex: none;
+  width: 48px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.pa-insp-image__url {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Панель сохранения: кнопка + подсказка в ряд. */
+.pa-insp-savebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+/* История машины: строки-события (дата | заголовок | заметка | удалить). */
+.pa-insp-hist {
+  display: grid;
+  gap: var(--space-1);
+}
+.pa-insp-hist-row {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) minmax(140px, 1.2fr) minmax(140px, 1.6fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pa-insp-hist-row .input {
+  min-height: 40px;
+  font-size: var(--font-xs);
+}
+
+/* Мобильная адаптация (<768): чек-лист и история — карточками в колонку. */
+@media (max-width: 767px) {
+  .pa-insp-item {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+  .pa-insp-item__note {
+    width: 100%;
+  }
+  .pa-insp-seg {
+    width: 100%;
+  }
+  .pa-insp-seg__btn {
+    flex: 1;
+    min-height: 40px;
+  }
+  .pa-insp-hist-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .pa-insp-hist-row .input:nth-child(2),
+  .pa-insp-hist-row .input:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .pa-insp-hist-row .btn {
+    justify-self: end;
+  }
+  .pa-insp-lot {
+    flex-wrap: wrap;
+  }
+  .pa-insp-lot__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

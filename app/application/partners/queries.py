@@ -110,6 +110,8 @@ class GetPartnerOverview:
             quota_remaining=max((account.daily_quota or 0) - used, 0),
             balance=account.balance,
             cpl_cost=pricing.cpl_cost(account.plan, account.cpl_rate),
+            placement_slots=getattr(account, "placement_slots", 0) or 0,
+            placement_slots_used=getattr(account, "placement_slots_used", 0) or 0,
         )
 
 
@@ -231,11 +233,15 @@ class CreatePartner:
         daily_quota: int,
         balance: Decimal,
         cpl_rate: Decimal | None,
+        owner_telegram_id: int | None = None,
     ) -> IssuedKey:
         """Создать счёт и ключ.
 
+        `owner_telegram_id` — владелец счёта (клиент/сотрудник партнёра):
+        новому счёту выдаётся бессрочный Business (см. репозиторий).
+
         Raises:
-            InvalidInput: Неизвестный тариф.
+            InvalidInput: Неизвестный тариф или пользователь-владелец не найден.
         """
         if plan not in pricing.PLAN_CATALOG:
             raise InvalidInput(f"Unknown plan: {plan}")
@@ -246,12 +252,18 @@ class CreatePartner:
             daily_quota=daily_quota,
             balance=balance,
             cpl_rate=cpl_rate,
+            owner_telegram_id=owner_telegram_id,
         )
         await _audit(
             self._audit,
             "partner.create",
             issued.partner_id,
-            {"name": name, "plan": plan, "daily_quota": daily_quota},
+            {
+                "name": name,
+                "plan": plan,
+                "daily_quota": daily_quota,
+                "owner_telegram_id": owner_telegram_id,
+            },
         )
         return issued
 
@@ -342,7 +354,7 @@ class TopUpPartner:
 
 
 class UpdatePartner:
-    """Обновить план/квоту/статус/индивидуальный CPL."""
+    """Обновить план/квоту/статус/индивидуальный CPL/владельца."""
 
     def __init__(
         self,
@@ -361,11 +373,17 @@ class UpdatePartner:
         status: str | None = None,
         cpl_rate: Decimal | None = None,
         reset_cpl_rate: bool = False,
+        owner_telegram_id: int | None = None,
     ) -> PartnerAdminView:
         """Записать только фактически изменённые поля.
 
+        `owner_telegram_id=None` — владельца не менять. Смена владельца или
+        статуса синхронизирует его тариф: active → Business, suspended →
+        free (правило живёт в репозитории, вместе с коммитом).
+
         Raises:
             NotFound: Партнёра нет.
+            InvalidInput: Пользователь-владелец не найден.
         """
         view = await _require_partner(self._repository, partner_id)
         changes: dict[str, Any] = {}
@@ -379,6 +397,8 @@ class UpdatePartner:
             changes["cpl_rate"] = None
         elif cpl_rate is not None and cpl_rate != view.cpl_rate:
             changes["cpl_rate"] = cpl_rate
+        if owner_telegram_id is not None and owner_telegram_id != view.owner_telegram_id:
+            changes["owner_telegram_id"] = owner_telegram_id
 
         if changes:
             await self._repository.update_account(partner_id, changes)

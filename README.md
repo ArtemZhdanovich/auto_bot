@@ -1,80 +1,115 @@
-# bot-encar — Экосистема подбора автомобилей (Encar + KCar + Che168)
+# Auto Selection — экосистема подбора автомобилей из Кореи
 
-Telegram-бот + Mini App для подбора автомобилей из Кореи и Китая: агрегация
-объявлений с нескольких источников, AI-диалоговый ассистент (GLM) с RAG-базой
-знаний, уведомления по фильтрам, монетизация (Telegram Stars + CPL-лиды для
-партнёров), партнёрский API и полный админ-контур.
+Telegram-бот + Mini App + партнёрский кабинет: агрегация объявлений
+(encar.com, kcar.com), внутренний рынок с размещениями от пользователей
+и партнёров, чаты (поддержка/продавцы/переговорные до 5 человек),
+AI-контур (анализ цены, отчёты истории, генерация описаний, RAG-бот
+поддержки), монетизация (Stars, пакеты размещений, CPL-лиды).
 
 - **Языки/рантайм**: Python 3.13 (asyncio), TypeScript/React 18
-- **Менеджер пакетов**: `uv` (Python), `npm` (frontend)
-- **БД/инфраструктура**: PostgreSQL 16, Redis 7, RabbitMQ 3, Qdrant, MinIO (S3)
-- **Качество**: `uv run pytest -q` — зелёные, `ruff` clean, `mypy` настроен
+- **Менеджеры пакетов**: `uv` (Python), `npm` (frontend)
+- **Инфраструктура**: PostgreSQL 16, Redis 7, RabbitMQ 3, Centrifugo v6
+  (realtime), MinIO (S3: фото/сырые payload), Qdrant (RAG)
+- **Качество**: `uv run pytest -q` — ~1470 зелёных, `ruff` clean,
+  фронт `vitest` — ~547, `tsc` clean
 
 ## Возможности
 
-- **Агрегация**: encar.com, kcar.com, che168.com — адаптеры с конфигом в БД,
-  дедупликация, история цен, сырые ответы в MinIO, прокси для гео-блокировок.
-- **AI-подбор**: диалоговый агент (GLM) извлекает критерии поиска, ищет по БД,
-  отвечает с кнопками; RAG-база знаний (гибридный поиск) — отдельный
-  микросервис; перевод тайтлов (NLLB) — отдельный микросервис.
-- **Мини-приложение**: лента, карточка, фильтры, избранное, AI-поиск, профиль;
-  авторизация через Telegram initData.
-- **Монетизация**: подписки за Telegram Stars (Free/Pro/Business — лимиты
-  фильтров), лиды с AI-квалификацией, партнёрский CPL-контур с балансами.
-- **Админка**: источники и их health без деплоя, ручной парсинг, лиды,
-  воронки/retention, аудит действий, AI-ассистент, ParserDoctor (авторемонт
-  селекторов), метрики и алерты в Telegram.
+### Пользователям (Mini App)
+- **Лента** объявлений Кореи с фильтрами (марка/цена/год/пробег/спеки),
+  keyset-пагинацией, сортировкой; бейджи «Салон/Частник», чек-бейджи;
+  карусель фото на десктопе (drag, лимит 5 фото, точки-индикаторы).
+- **Карточка (PDP)**: две цены ($ и ₽), история цен, комплектация,
+  осмотр по чеку Encar (карта повреждений на диаграммах), AI-анализ
+  цены (вердикт deal/fair/overpriced + факторы), «Отчёт истории»
+  (ДТП/владельцы/пробег — факт-парсер + LLM-вывод), инлайн «Похожие»,
+  «Спросить продавца» (чат), «Агент на сделку» (Business).
+- **Продажа своего авто**: визард (Авто → Фото → Цена) с файловой
+  загрузкой в S3, «✨ Сгенерировать описание», live «Качество
+  объявления»; жизненный цикл (draft → модерация → accepted/rejected →
+  archived/expired), монетизация размещений (free 7 дней → 20★/нед,
+  включённый лот на платных тарифах).
+- **Чаты**: поддержка (RAG-бот + операторы), продавцы/сделки,
+  переговорные до 5 участников (инвайт-коды, роли owner/member,
+  кик/архив/mute, жалобы); Markdown + предпросмотр ссылок; realtime
+  по личному каналу Centrifugo (поллинг-фоллбэк), typing, онлайн.
+- **AI-поиск** диалогом, избранное, история просмотров/разборов,
+  калькулятор «под ключ» (доставка/растаможка, РФ/РБ), сравнение,
+  тёмная/светлая тема.
 
-## Архитектура (кратко)
+### Партнёрам (кабинет `/partner`, вход по API-ключу)
+- Обзор (баланс/квота/новые лиды/выгодные лоты), пул лидов с
+  batch-claim и фильтрами, мои лиды со статусами и фидбеком.
+- **Объявления рынка**: пакеты размещений (10/50/200 мест со баланса),
+  витрина, размещение лотов; **чеки осмотра и история машины**
+  «как в Корее»: диаграммы Encar с пинами повреждений, чек-лист 12
+  агрегатов, таймлайн событий.
+- Чаты (seller/deal/переговорные), выжимка диалога одной кнопкой,
+  рынок (медианы/выгодные лоты), биллинг.
+
+### Админам (`/admin`)
+Источники и их health, ручной парсинг, лиды, модерация объявлений
+(очереди лотов и патчей с причинами), поддержка (операторские чаты,
+жалобы, выжимки), аналитика (воронки/retention), ParserDoctor.
+
+## Архитектура
 
 ```
                 ┌──────────────────── Telegram ────────────────────┐
                 │  Bot API (long polling)     WebApp (Mini App)    │
-                └────────┬─────────────────────────┬───────────────┘
+                └────────┬─────────────────┬───────────────────────┘
                     ┌───▼────┐   enqueue   ┌──────▼───────┐
                     │  bot   │────────────▶│  Mini App    │ React 18 + nginx
                     └───┬────┘             └──────┬───────┘
-                        │                         │ REST (JWT)
-┌──────────────┐   ┌────▼─────────────────────────▼───────┐
-│ encar/kcar/  │   │   gateway :8000 → 6 доменных        │
-│ che168 ──────┼──▶│   сервисов (identity, catalog,       │
-│ (адаптеры,   │   │   billing, partners, dialog, admin)  │
-│  прокси)     │   │   = один код app/ в двух профилях    │
-└──────────────┘   └──┬──────┬───────┬───────┬──────┬─────┘
-                   PG 16  Redis 7  Rabbit 3  LLM   services/rag + translate
+                        │                         │ REST (JWT) / WS
+┌──────────────┐   ┌────▼─────────────────────────▼───────┐   ┌─────────────┐
+│ encar/kcar ──┼──▶│ gateway :8000 → доменные сервисы     │◀──│ Centrifugo  │
+│ (адаптеры,   │   │ (identity, catalog, billing, partners,│   │ :8008 WS/HT │
+│  прокси, S3- │   │  dialog, chat, admin) = app/ в двух   │   └─────────────┘
+│  зеркалиро-  │   │  профилях (mono/micro)                │   ┌─────────────┐
+│  вание фото) │   └──┬──────┬───────┬────────┬────────┬───┘   │ translate   │
+└──────────────┘      PG 16  Redis 7 Rabbit 3  LLM    ┌─┴───────┴──────────┐
+                                        Qdrant ◀──── │ rag_api + worker    │
+                                                     └────────────────────┘
 ```
 
-Подробно — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Стек разворачивается **поэтапно** (base → core → storage → workers →
+realtime → ai → micro), ядро деградирует без периферии — детали в
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Быстрый старт
 
 ```bash
-cp .env.example .env          # заполнить BOT_TOKEN, APP_SECRET_KEY, DSN
-uv run alembic upgrade head   # миграции
-uv run uvicorn app.main_api:app --port 8000        # backend (mono)
-uv run python -m app.bot                            # бот (другой терминал)
-uv run python -m app.infrastructure.workers.fetch   # воркеры (ещё два)
-uv run python -m app.infrastructure.workers.send
-cd frontend && npm run dev     # Mini App :8080 (ещё один)
+cp .env.example .env          # заполнить BOT_TOKEN, APP_SECRET_KEY, DSN, креды MinIO
+uv run alembic upgrade head   # миграции (30 шт.)
+docker compose up -d --profile core   # минимальный продукт: backend+bot+miniapp+pg+redis
+# дальше по желанию: --profile storage / workers / realtime / ai / micro
 ```
 
-Docker Compose (вся инфраструктура + mono/micro профили) и полный набор
-конфигурации — [docs/OPERATIONS.md](docs/OPERATIONS.md).
+Локально без Docker:
+
+```bash
+uv run uvicorn app.main_api:app --port 8000        # backend (mono)
+uv run python -m app.transport.bot                  # бот
+uv run python -m app.infrastructure.workers.fetch   # парсинг+S3-зеркало
+uv run python -m app.infrastructure.workers.send    # дайджесты/уведомления
+cd frontend && npm run dev                          # Mini App :8080
+```
 
 ## Документация
 
 | Документ | Что внутри |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | слои, 6 прикладных сервисов (ports/dto), DI, очередь, микросервисы, БД |
-| [docs/API.md](docs/API.md) | HTTP API: аутентификация, все эндпоинты |
-| [docs/SOURCES.md](docs/SOURCES.md) | адаптеры источников, парсинг, дедуп, воркеры, raw_payload |
-| [docs/AI.md](docs/AI.md) | LLM-клиенты, агент, RAG-микросервис, перевод |
-| [docs/MONETIZATION.md](docs/MONETIZATION.md) | подписки Stars, лимиты тарифов, лиды, партнёрский CPL-контур |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | запуск, docker compose, конфиг (.env), мониторинг, прод-чеклист |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | слои, доменные сервисы, DI, очередь, Centrifugo (личный канал), S3 |
+| [docs/API.md](docs/API.md) | HTTP API: аутентификация, все эндпоинты пользователя/партнёра/админа |
+| [docs/SOURCES.md](docs/SOURCES.md) | адаптеры encar/kcar, S3-зеркалирование фото, stale-cleanup, перевод |
+| [docs/AI.md](docs/AI.md) | LLM, анализ цены, отчёт истории, генерация описаний, RAG-бот |
+| [docs/MONETIZATION.md](docs/MONETIZATION.md) | тарифы Free/Pro/Business, размещения и пакеты, CPL, лиды |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | поэтапное развёртывание, конфиг (.env), degradation, мониторинг |
 | [docs/TESTING.md](docs/TESTING.md) | структура тестов, фикстуры, как запускать |
 | [docs/SECURITY.md](docs/SECURITY.md) | модель безопасности; журнал аудита — [INCIDENTS.md](INCIDENTS.md) |
-| [docs/UIUX_TZ.md](docs/UIUX_TZ.md) | UI/UX-ТЗ: дизайн-система, Mini App, админка |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | инциденты: DLQ, circuit breaker, флейки |
+| [docs/ADR.md](docs/ADR.md) | архитектурные решения |
 
-Журнал работ и статус — [PROGRESS.md](PROGRESS.md) (статус-дашборд в §0),
-план фаз — [PLAN.md](PLAN.md), техдолг — [TECHDEBT.md](TECHDEBT.md),
-проектные документы рефакторинга — [docs/REFACTOR/](docs/REFACTOR/README.md).
+Журнал работ (полная история волн и решений) — [PROGRESS.md](PROGRESS.md),
+актуальный техдолг — [TECHDEBT.md](TECHDEBT.md).

@@ -8,13 +8,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.infrastructure.db.models import Listing, SentLog, User, UserFilter
+from app.infrastructure.db.models import Favorite, Listing, SentLog, User, UserFilter
 from app.domain.search.criteria import SearchCriteria
+from app.domain.subscription.policies import effective_tier
 from app.infrastructure.services.search import build_listing_query
 
 from app.domain.notifications.rules import (
@@ -115,6 +116,76 @@ async def event_audience(session: AsyncSession, listing_id: int) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
+# Проданные избранного («машина из избранного продана», требование владельца)
+
+
+SOLD_FAV_KIND = "sold_fav"
+"""kind антидубля уведомления о проданном избранном (PK sent_log)."""
+
+
+async def collect_sold_favorites(
+    session: AsyncSession, redis: Redis, limit: int = 200
+) -> list[tuple[int, int, Listing]]:
+    """Неотправленные пары (user_id, listing_id, Listing): избранное, чьё
+    объявление больше не активно (is_active = FALSE или disappeared_at).
+
+    Условие «не отправляли» двойное, как в остальном контуре (п. 8.6):
+    LEFT JOIN отсекает sent_log kind='sold_fav' (переживает TTL Redis),
+    свежие повторы в рамках TTL добирает Python-side проверка Redis-ключа
+    notified:{uid}:{lid}:sold_fav.
+    """
+    stmt = (
+        select(Favorite.user_id, Listing)
+        .join(Listing, Favorite.listing_id == Listing.id)
+        .outerjoin(
+            SentLog,
+            and_(
+                SentLog.user_id == Favorite.user_id,
+                SentLog.listing_id == Listing.id,
+                SentLog.kind == SOLD_FAV_KIND,
+            ),
+        )
+        .where(
+            or_(
+                Listing.is_active.is_(False),
+                Listing.disappeared_at.is_not(None),
+            ),
+            SentLog.user_id.is_(None),
+        )
+        .order_by(Favorite.user_id, Favorite.created_at)
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    pairs: list[tuple[int, int, Listing]] = []
+    for user_id, listing in rows:
+        if await was_sent(redis, user_id, listing.id, SOLD_FAV_KIND):
+            continue
+        pairs.append((user_id, listing.id, listing))
+    return pairs
+
+
+async def drop_favorites(
+    session: AsyncSession, user_id: int, listing_ids: list[int]
+) -> None:
+    """Удалить строки избранного одним DELETE.
+
+    Требование владельца: проданную машину убираем из избранного в любом
+    случае — и при успехе, и при ошибке отправки, — поэтому фиксируем
+    коммитом сразу, не дожидаясь отметки об отправке.
+    """
+    if not listing_ids:
+        return
+    await session.execute(
+        delete(Favorite).where(
+            Favorite.user_id == user_id,
+            Favorite.listing_id.in_(listing_ids),
+        )
+    )
+    await session.commit()
+
+
+# ---------------------------------------------------------------------------
 # Тихие часы ("23:00-08:00"; интерпретируем в UTC — упрощение этапа 4)
 
 
@@ -141,24 +212,50 @@ async def _filter_rows(session: AsyncSession, mode: str) -> list[UserFilter]:
     return list(result.scalars().all())
 
 
+def effective_channel(filter_mode: str, tier: str) -> str | None:
+    """Канал доставки фильтра с учётом тарифа владельца (экономика 2026-10).
+
+    instant при публикации — только Business; Pro с instant-фильтром
+    получает дайджест раз в день, Free — раз в неделю.
+
+    Returns:
+        `"instant"` / `"digest"` / `None` (фильтр выключен).
+    """
+    if filter_mode == "off":
+        return None
+    if filter_mode == "instant" and tier == "business":
+        return "instant"
+    return "digest"
+
+
 async def collect_for_filters(
     session: AsyncSession,
     redis: Redis,
     mode: str,
     window_sec: int | None = None,
 ) -> list[tuple[UserFilter, list[Listing]]]:
-    """Свежие неотправленные объявления для всех фильтров в режиме `mode`.
+    """Свежие неотправленные объявления для фильтров с каналом `mode`.
 
-    window_sec ограничивает «свежесть» по parsed_at (обычно = интервалу скана).
+    `mode` — ЭФФЕКТИВНЫЙ канал после пересечения с тарифом владельца:
+    "instant" собирает Business-фильтры с instant, "digest" — все
+    остальные (включая Pro, которые просили instant). window_sec
+    ограничивает «свежесть» по parsed_at (обычно = интервалу скана).
     """
     settings = get_settings()
     window = window_sec if window_sec is not None else settings.notify_scan_window_sec
     since = datetime.now(timezone.utc) - timedelta(seconds=window)
 
+    wanted_modes = ("instant",) if mode == "instant" else ("digest", "instant")
+    rows: list[UserFilter] = []
+    for flt_mode in wanted_modes:
+        rows.extend(await _filter_rows(session, flt_mode))
+
     pairs: list[tuple[UserFilter, list[Listing]]] = []
-    for flt in await _filter_rows(session, mode):
+    for flt in rows:
         user = await session.get(User, flt.user_id)
-        if user is not None and not user.is_active:
+        if user is None or not user.is_active:
+            continue
+        if effective_channel(flt.notify_mode, effective_tier(user)) != mode:
             continue
 
         criteria = SearchCriteria(**(flt.criteria or {}))

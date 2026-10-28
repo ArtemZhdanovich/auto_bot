@@ -21,12 +21,16 @@ class PartnerCreateIn(BaseModel):
     daily_quota: int = Field(default=10, ge=1, le=1000)
     balance: float = Field(default=0.0, ge=0, le=1_000_000)
     cpl_rate: float | None = Field(default=None, ge=0, le=10_000)
+    # Владелец счёта (клиент/сотрудник партнёра) — получает Business.
+    owner_telegram_id: int | None = None
 
 
 class PartnerUpdateIn(BaseModel):
     """PATCH /api/admin/partners/{id} — план/квота/статус/тариф.
 
     cpl_rate None = не менять; reset_cpl_rate=True → вернуть тариф плана.
+    owner_telegram_id None = не менять (снятие владельца — отдельная
+    операция, тариф не откатывает).
     """
 
     plan: PartnerPlan | None = None
@@ -34,6 +38,7 @@ class PartnerUpdateIn(BaseModel):
     status: Literal["active", "suspended"] | None = None
     cpl_rate: float | None = Field(default=None, ge=0, le=10_000)
     reset_cpl_rate: bool = False
+    owner_telegram_id: int | None = None
 
 
 class PartnerKeyOut(BaseModel):
@@ -57,6 +62,7 @@ class PartnerOut(BaseModel):
     status: str
     balance: float = 0.0
     cpl_rate: float | None = None
+    owner_telegram_id: int | None = None
     created_at: datetime
 
 
@@ -190,6 +196,8 @@ class PartnerCreateIn(BaseModel):
     daily_quota: int = Field(default=10, ge=0, le=10_000)
     balance: Decimal = Field(default=Decimal("0"), ge=0, le=Decimal("100000000"))
     cpl_rate: Decimal | None = Field(default=None, gt=0, le=Decimal("10000"))
+    # Владелец счёта (клиент/сотрудник партнёра) — получает Business.
+    owner_telegram_id: int | None = None
 
 
 class PartnerUpdateIn(BaseModel):
@@ -198,6 +206,8 @@ class PartnerUpdateIn(BaseModel):
     status: PartnerStatus | None = None
     cpl_rate: Decimal | None = Field(default=None, gt=0, le=Decimal("10000"))
     reset_cpl_rate: bool = False
+    # None = не менять (в отличие от cpl_rate, снятие владельца не требуется).
+    owner_telegram_id: int | None = None
 
 
 class PartnerKeyOut(BaseModel):
@@ -217,6 +227,7 @@ class PartnerOut(BaseModel):
     status: PartnerStatus
     balance: Decimal
     cpl_rate: Decimal | None
+    owner_telegram_id: int | None = None
     created_at: datetime
 
 
@@ -245,6 +256,8 @@ class PartnerMeOut(BaseModel):
     balance: Decimal
     cpl_cost: Decimal
     key_prefix: str | None = None
+    placement_slots: int = 0
+    placement_slots_used: int = 0
 
 
 class PartnerLeadPublicOut(BaseModel):
@@ -309,3 +322,40 @@ class BillingOut(BaseModel):
     balance: Decimal
     cpl_cost: Decimal
     plans: list[PlanInfo]
+
+
+# --- Рынок (партнёрский контур, X-API-Key) ---------------------------
+
+
+class MarketDealOut(BaseModel):
+    """«Выгодный» лот: дешевле 93% медианы рынка.
+
+    `discount_pct` — насколько процентов цена ниже медианы.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    make: str | None
+    model: str | None
+    year: int | None
+    price: float
+    currency: str | None
+    mileage_km: int | None
+    url: str
+    discount_pct: float
+
+
+class MarketOut(BaseModel):
+    """GET /api/partner/market — сводка рынка + выгодные лоты.
+
+    `make`/`model` не заданы — срез по всему каталогу (общая медиана).
+    """
+
+    make: str | None
+    model: str | None
+    count: int
+    min_price: float | None
+    max_price: float | None
+    median_price: float | None
+    deals: list[MarketDealOut]

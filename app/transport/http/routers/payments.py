@@ -180,7 +180,11 @@ async def prepare_payment(
 async def payment_success(
     body: PaymentSuccessIn, use_case: ConfirmPaymentDep
 ) -> dict:
-    """successful_payment от бота: платёж → paid, подписка активирована."""
+    """successful_payment от бота: платёж → paid, эффект по kind.
+
+    kind='subscription' — подписка активирована; kind='placement' —
+    размещение лота рынка продлено (`placement_paid_until`, 06 §2).
+    """
     try:
         result = await use_case.execute(
             payment_id=body.payment_id,
@@ -189,16 +193,19 @@ async def payment_success(
         )
     except NotFound as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=exc.public_message
+            status.HTTP_404_NOT_FOUND, detail=exc.public_message
         ) from exc
     except Conflict as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=exc.public_message
+            status.HTTP_409_CONFLICT, detail=exc.public_message
         ) from exc
     return {
         "activated": result.activated,
         "tier": result.tier,
         "subscription_until": result.subscription_until,
+        "kind": result.kind,
+        "listing_id": result.listing_id,
+        "placement_paid_until": result.placement_paid_until,
     }
 
 

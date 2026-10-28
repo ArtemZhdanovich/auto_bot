@@ -20,6 +20,9 @@ from app.infrastructure.db.repositories.listings_writer import (
     SqlAlchemyListingsWriter,
 )
 from app.infrastructure.db.session import session_factory
+from app.infrastructure.services.translate_client import (
+    translate_client_from_settings,
+)
 from app.infrastructure.sources.common.http import HttpClient
 from app.infrastructure.sources.encar import EncarApiAdapter
 
@@ -28,8 +31,11 @@ BATCH = 30
 
 async def main() -> None:
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    # Переводчик: корейские строки отчётов/полей уйдут в NLLB при пересборке.
     adapter = EncarApiAdapter(
-        source_name="encar", http_client=HttpClient(timeout=15)
+        source_name="encar",
+        http_client=HttpClient(timeout=15),
+        translator=translate_client_from_settings(),
     )
     try:
         async with session_factory() as session:

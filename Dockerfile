@@ -22,6 +22,7 @@ COPY services/gateway ./services/gateway
 COPY services/identity ./services/identity
 COPY services/catalog ./services/catalog
 COPY services/billing ./services/billing
+COPY services/chat ./services/chat
 COPY services/partners ./services/partners
 COPY services/dialog ./services/dialog
 COPY services/admin ./services/admin

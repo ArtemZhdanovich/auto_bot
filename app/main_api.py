@@ -14,11 +14,14 @@ from app.transport.http.routers import (
     analysis,
     auth,
     calc,
+    chats,
+    deals,
     dialog,
     favorites,
     filters,
     leads,
     listings,
+    market,
     me,
     metrics,
     notifications,
@@ -160,13 +163,21 @@ app.include_router(filters.router)
 app.include_router(listings.router)
 app.include_router(analysis.router)
 app.include_router(analysis.bot_router)
+app.include_router(deals.router)
 app.include_router(calc.router)
 app.include_router(favorites.router)
 app.include_router(payments.router)
 app.include_router(admin.router)
+app.include_router(chats.admin_router)  # /api/admin/chats — оператор поддержки (§2/§6)
 app.include_router(dialog.router)
 app.include_router(ai_search.router)
 app.include_router(notifications.router)
 app.include_router(leads.router)
 app.include_router(partners.admin_router)
+app.include_router(market.admin_router)  # /api/admin/moderation — очередь модерации лотов (10 §2)
 app.include_router(partners.router)
+# Чаты и внутренний рынок (редизайн часть 5): те же роутеры крутятся
+# в режиме micro отдельным сервисом services/chat.
+app.include_router(chats.router)
+app.include_router(market.market_router)
+app.include_router(market.partner_router)

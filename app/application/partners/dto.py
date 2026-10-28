@@ -88,6 +88,7 @@ class PartnerAdminView:
     created_at: datetime
     claimed_today: int = 0
     key_prefix: str | None = None
+    owner_telegram_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +104,9 @@ class PartnerOverview:
     balance: Decimal
     cpl_cost: Decimal
     key_prefix: str | None = None
+    # Пакеты размещений рынка (06 §1): сколько мест куплено/занято.
+    placement_slots: int = 0
+    placement_slots_used: int = 0
 
 
 @dataclass(frozen=True, slots=True)

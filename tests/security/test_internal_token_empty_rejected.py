@@ -48,6 +48,9 @@ def test_prod_app_env_normalized(monkeypatch):
         DATABASE_URL="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
         RABBITMQ_URL="amqp://svc:pw@mq.internal:5672/",
         REDIS_URL="redis://redis.internal:6379/0",
+        # чаты: дев-секреты centrifugo в prod тоже запрещены (05 §4)
+        CENTRIFUGO_SECRET="cs" * 16,
+        CENTRIFUGO_HTTP_API_KEY="ck" * 16,
     )
     assert Settings().app_env == "prod"
 
@@ -61,6 +64,8 @@ def test_prod_app_env_production_alias(monkeypatch):
         DATABASE_URL="postgresql+asyncpg://u:p@db.internal:5432/autoselect",
         RABBITMQ_URL="amqp://svc:pw@mq.internal:5672/",
         REDIS_URL="redis://redis.internal:6379/0",
+        CENTRIFUGO_SECRET="cs" * 16,
+        CENTRIFUGO_HTTP_API_KEY="ck" * 16,
     )
     assert Settings().app_env == "prod"
 
@@ -92,8 +97,10 @@ def test_proxy_user_pass_pair(monkeypatch):
 
 def test_s3_enabled_requires_creds(monkeypatch):
     _clear(monkeypatch, RAW_PAYLOAD_ENABLED="true", S3_ENDPOINT_URL="http://s3:9000")
+    # `_env_file=None`: репо-`.env` содержит рабочие креды MinIO (фото
+    # лотов, 07 §1) — проверяем валидатор, а не состояние репозитория.
     with pytest.raises(ValidationError, match="S3_ACCESS_KEY"):
-        Settings()
+        Settings(_env_file=None)
 
 
 def test_refresh_must_exceed_access(monkeypatch):

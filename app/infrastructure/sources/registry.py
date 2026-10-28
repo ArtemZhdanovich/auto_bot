@@ -152,10 +152,14 @@ class AdapterRegistry:
         session_factory: Any,
         secret_store: SecretStore | None = None,
         proxy_pool: Any | None = None,
+        translator: Any = None,
     ) -> None:
         self._session_factory = session_factory
         self._secrets: SecretStore = secret_store or EnvSecretStore()
         self._proxy_pool = proxy_pool
+        # Переводчик (NLLB-микросервис) — пробрасывается в адаптеры
+        # источников с корейским контентом (encar).
+        self._translator = translator
         self._cache: dict[str, BaseApiAdapter] = {}
         self._reload_lock = asyncio.Lock()
 
@@ -270,6 +274,7 @@ class AdapterRegistry:
             timeout=timeout,
             capabilities=capabilities,
             http_client=http_client,
+            translator=self._translator,
         )
 
     async def reload_source(self, name: str) -> BaseApiAdapter | None:
