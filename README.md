@@ -41,7 +41,7 @@
 | `configs/` | конфиг Centrifugo (шаблон с env-подстановкой) |
 | `scripts/` | утилиты: туннель миниаппа (miniapp_tunnel.ps1), backfill-скрипты инспекций, разовые фиксы данных |
 | `tests/` | pytest-сьюты, зеркально архитектуре (identity/catalog/billing/partners/dialog/admin/infrastructure/…) |
-| `alembic` (в `app/infrastructure/db/migrations`) | 30 миграций PostgreSQL |
+| `app/infrastructure/db/migrations/` | 30 миграций PostgreSQL (Alembic) |
 
 ## Стек
 
@@ -102,7 +102,8 @@ uv run python -m app.infrastructure.workers.fetch && uv run python -m app.infras
 | [TESTING.md](docs/TESTING.md) | структура тестов, фикстуры, как запускать, известный флэйк |
 | [SECURITY.md](docs/SECURITY.md) | модель безопасности; журнал аудита и инцидентов — [INCIDENTS.md](INCIDENTS.md) |
 | [RUNBOOK.md](docs/RUNBOOK.md) | эксплуатационные сценарии: DLQ, circuit breaker, флейки |
-| [ADR.md](docs/ADR.md) | реестр архитектурных решений (12 ADR) |
+| [ADR.md](docs/ADR.md) | реестр архитектурных решений (18 ADR: Контекст/Решение/Последствия) |
+| [NAV-V2.md](docs/NAV-V2.md) | навигация v4: лендинг всегда на «/», 4 таба мини-апп, партнёрка 5+«Ещё» — решения и «как реализовано» |
 
 Журнал работ (полная история волн и решений) — [PROGRESS.md](PROGRESS.md);
 актуальный техдолг — [TECHDEBT.md](TECHDEBT.md).

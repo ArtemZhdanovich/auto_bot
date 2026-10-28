@@ -148,15 +148,16 @@
   (`frontend/src/lib/external.ts`): `target="_blank"`/`window.open` в
   WebView Telegram молча не работают.
 - **jsdom-глитч aria-expanded**: jsdom не воспроизводит поведение
-  `aria-expanded` кнопки «Ещё» (react_testing library не видит смену
+  `aria-expanded` кнопки «Ещё» (testing-library не видит смену
   атрибута после клика) — `partnerChats.test.tsx` переписан
   **структурно** (наличие кнопки, `aria-haspopup`, рендер шторки по
   состоянию), живой клик подтверждён browser-use. Аналогично структурно
   проверяется таб-бар в `components/Shell.test.tsx` (4 таба,
   aria-current, бейдж, «99+», редирект комнаты чатов).
-- **Тесты vitest**: после NAV-V2 — 552/552 (44 файла); запуск требует
-  `threads=2` с `minThreads=1` (tinypool конфликтует с дефолтной min —
-  зависает), см. `frontend/vitest.config.ts` / PROGRESS #NAV-V2.
+- **Тесты vitest**: после NAV-V2 — 552/552 (44 файла); прогон на этой
+  машине требовал флагов `threads=2` + `minThreads=1` (tinypool
+  конфликтует с дефолтной min и зависает — зафиксировано в PROGRESS;
+  в `frontend/package.json` скрипт `test` — обычный `vitest run`).
 
 ### 4.7. Что осталось вне NAV-V2
 

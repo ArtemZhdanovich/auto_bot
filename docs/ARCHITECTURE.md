@@ -219,9 +219,9 @@ Telegram Stars и CPL-лиды партнёров.
 | Провайдер (`app/di/providers/`) | Скоуп | Что даёт |
 |---|---|---|
 | `SettingsProvider` | APP | `Settings` (singleton `get_settings`, `app/config.py`) |
-| `DatabaseProvider` | APP: `AsyncEngine` (pool_pre_ping, statement_timeout 30 s, lock_timeout 5 s, idle_in_transaction 60 s), `async_sessionmaker`; REQUEST: `AsyncSession`, `SqlAlchemyUnitOfWork`, `OutboxDAO` | |
+| `DatabaseProvider` | APP / REQUEST | APP: `AsyncEngine` (pool_pre_ping, statement_timeout 30 s, lock_timeout 5 s, idle_in_transaction 60 s), `async_sessionmaker`; REQUEST: `AsyncSession`, `SqlAlchemyUnitOfWork`, `OutboxDAO` |
 | `RedisProvider` | APP | `redis.asyncio.Redis` (socket_timeout 5 s) |
-| `BrokerProvider` | APP: `RabbitBroker` (FastStream, graceful_timeout 30 s), `RawEventPublisher`; REQUEST: `BufferedEventPublisher` (flush после commit) | |
+| `BrokerProvider` | APP / REQUEST | APP: `RabbitBroker` (FastStream, graceful_timeout 30 s), `RawEventPublisher`; REQUEST: `BufferedEventPublisher` (flush после commit) |
 | `RepositoryProvider` | REQUEST | SQLAlchemy-репозитории портов (`repositories.py`, `provide_all`) |
 | `AdapterProvider` | REQUEST (часть APP) | инфраструктурные адаптеры портов: RAG-клиент, translate, S3, Centrifugo, лимитеры, LLM, источники |
 | `SecurityProvider` | APP | `TokenIssuer`, `AccessTokenVerifier`, `InitDataVerifier`, `PasswordHasher`, `LoginCodeStore` |
