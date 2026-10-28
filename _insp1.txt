@@ -1,3 +1,0 @@
-== 43013344 ERR FetchError('HTTP 404 for https://api.encar.com/v1/readside/inspection/vehicle/43
-== 42757015 ERR FetchError('HTTP 404 for https://api.encar.com/v1/readside/inspection/vehicle/42
-== 42877762 ERR FetchError('HTTP 404 for https://api.encar.com/v1/readside/inspection/vehicle/42

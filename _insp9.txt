@@ -1,5 +1,0 @@
-record 43013519 ERR FetchError('HTTP 404 for https://api.encar.com/v1/
-record 43009007 200 {"regDate":"2026-10-23T20:11:42.97178","carNo":"215고9330","year":"2023","maker":null,"carKind":"1","use":"2","displacement":"2497","carName":null,"firstDate":"2
-inspection detail keys: ['accident', 'inspection', 'seizing']
-inspection outers: 0 inners: 8 images: 0
-insp sample outer: null
