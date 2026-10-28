@@ -1,115 +1,140 @@
-# Auto Selection — экосистема подбора автомобилей из Кореи
+# Auto Selection — подбор авто из Кореи: Telegram Mini App + партнёрский кабинет + бот
 
-Telegram-бот + Mini App + партнёрский кабинет: агрегация объявлений
-(encar.com, kcar.com), внутренний рынок с размещениями от пользователей
-и партнёров, чаты (поддержка/продавцы/переговорные до 5 человек),
-AI-контур (анализ цены, отчёты истории, генерация описаний, RAG-бот
-поддержки), монетизация (Stars, пакеты размещений, CPL-лиды).
+Продукт для тех, кто зарабатывает на автомобилях из Кореи: перекупов,
+маклеров/брокеров и частных продавцов. Агрегирует объявления (encar.com;
+конвейер парсинга рассчитан на несколько источников), тянет «как в Корее»
+чеки осмотра и историю машины, добавляет AI-анализ цены, чаты с продавцами
+и партнёрами, внутренний рынок с размещениями и монетизацию (Stars, CPL).
+Внутри — Telegram-бот, Mini App, партнёрский кабинет и админка на одном
+бэкенде.
 
-- **Языки/рантайм**: Python 3.13 (asyncio), TypeScript/React 18
-- **Менеджеры пакетов**: `uv` (Python), `npm` (frontend)
-- **Инфраструктура**: PostgreSQL 16, Redis 7, RabbitMQ 3, Centrifugo v6
-  (realtime), MinIO (S3: фото/сырые payload), Qdrant (RAG)
-- **Качество**: `uv run pytest -q` — ~1470 зелёных, `ruff` clean,
-  фронт `vitest` — ~547, `tsc` clean
+## Три сценария (зачем это каждому)
 
-## Возможности
+1. **Пользователь (перекуп/частник)** — открывает Mini App из бота: лента
+   объявлений Кореи с фильтрами и бейджами чеков, AI-поиск диалогом,
+   карточка с двумя ценами ($ и ₽), картой повреждений и AI-разбором
+   цены («выгода / справедливо / переплата» + факторы), «Отчёт истории»
+   (ДТП/владельцы/пробег), избранное, история, калькулятор «под ключ»
+   (доставка/растаможка РФ/РБ), сравнение; подписывается на «сигналы» —
+   бот присылает новые лоты и смены цен.
+2. **Партнёр (салон/маклер)** — кабинет `/partner` по API-ключу: пул
+   лидов с batch-claim и фильтрами, мои лиды со статусами, чаты с
+   клиентами, рынок с медианами и «выгодными» лотами, витрина,
+   объявления (пакеты размещений со счёта), конструктор чеков осмотра
+   «как в Корее» (диаграммы с пинами, чек-лист 12 агрегатов), биллинг.
+3. **Владелец объявления (частник)** — «+ Продать» в Mini App: визард
+   Авто → Фото → Цена с загрузкой фото в S3, «Сгенерировать описание» и
+   live «Качество объявления»; жизненный цикл (черновик → модерация →
+   публикация → архив/истечение), бесплатное размещление 7 дней, дальше
+   20★/нед или пакет на платном тарифе; чаты с покупателями и
+   переговорные до 5 участников по инвайт-кодам.
 
-### Пользователям (Mini App)
-- **Лента** объявлений Кореи с фильтрами (марка/цена/год/пробег/спеки),
-  keyset-пагинацией, сортировкой; бейджи «Салон/Частник», чек-бейджи;
-  карусель фото на десктопе (drag, лимит 5 фото, точки-индикаторы).
-- **Карточка (PDP)**: две цены ($ и ₽), история цен, комплектация,
-  осмотр по чеку Encar (карта повреждений на диаграммах), AI-анализ
-  цены (вердикт deal/fair/overpriced + факторы), «Отчёт истории»
-  (ДТП/владельцы/пробег — факт-парсер + LLM-вывод), инлайн «Похожие»,
-  «Спросить продавца» (чат), «Агент на сделку» (Business).
-- **Продажа своего авто**: визард (Авто → Фото → Цена) с файловой
-  загрузкой в S3, «✨ Сгенерировать описание», live «Качество
-  объявления»; жизненный цикл (draft → модерация → accepted/rejected →
-  archived/expired), монетизация размещений (free 7 дней → 20★/нед,
-  включённый лот на платных тарифах).
-- **Чаты**: поддержка (RAG-бот + операторы), продавцы/сделки,
-  переговорные до 5 участников (инвайт-коды, роли owner/member,
-  кик/архив/mute, жалобы); Markdown + предпросмотр ссылок; realtime
-  по личному каналу Centrifugo (поллинг-фоллбэк), typing, онлайн.
-- **AI-поиск** диалогом, избранное, история просмотров/разборов,
-  калькулятор «под ключ» (доставка/растаможка, РФ/РБ), сравнение,
-  тёмная/светлая тема.
+## Карта репозитория
 
-### Партнёрам (кабинет `/partner`, вход по API-ключу)
-- Обзор (баланс/квота/новые лиды/выгодные лоты), пул лидов с
-  batch-claim и фильтрами, мои лиды со статусами и фидбеком.
-- **Объявления рынка**: пакеты размещений (10/50/200 мест со баланса),
-  витрина, размещение лотов; **чеки осмотра и история машины**
-  «как в Корее»: диаграммы Encar с пинами повреждений, чек-лист 12
-  агрегатов, таймлайн событий.
-- Чаты (seller/deal/переговорные), выжимка диалога одной кнопкой,
-  рынок (медианы/выгодные лоты), биллинг.
-
-### Админам (`/admin`)
-Источники и их health, ручной парсинг, лиды, модерация объявлений
-(очереди лотов и патчей с причинами), поддержка (операторские чаты,
-жалобы, выжимки), аналитика (воронки/retention), ParserDoctor.
-
-## Архитектура
-
-```
-                ┌──────────────────── Telegram ────────────────────┐
-                │  Bot API (long polling)     WebApp (Mini App)    │
-                └────────┬─────────────────┬───────────────────────┘
-                    ┌───▼────┐   enqueue   ┌──────▼───────┐
-                    │  bot   │────────────▶│  Mini App    │ React 18 + nginx
-                    └───┬────┘             └──────┬───────┘
-                        │                         │ REST (JWT) / WS
-┌──────────────┐   ┌────▼─────────────────────────▼───────┐   ┌─────────────┐
-│ encar/kcar ──┼──▶│ gateway :8000 → доменные сервисы     │◀──│ Centrifugo  │
-│ (адаптеры,   │   │ (identity, catalog, billing, partners,│   │ :8008 WS/HT │
-│  прокси, S3- │   │  dialog, chat, admin) = app/ в двух   │   └─────────────┘
-│  зеркалиро-  │   │  профилях (mono/micro)                │   ┌─────────────┐
-│  вание фото) │   └──┬──────┬───────┬────────┬────────┬───┘   │ translate   │
-└──────────────┘      PG 16  Redis 7 Rabbit 3  LLM    ┌─┴───────┴──────────┐
-                                        Qdrant ◀──── │ rag_api + worker    │
-                                                     └────────────────────┘
-```
-
-Стек разворачивается **поэтапно** (base → core → storage → workers →
-realtime → ai → micro), ядро деградирует без периферии — детали в
-[docs/OPERATIONS.md](docs/OPERATIONS.md).
-
-## Быстрый старт
-
-```bash
-cp .env.example .env          # заполнить BOT_TOKEN, APP_SECRET_KEY, DSN, креды MinIO
-uv run alembic upgrade head   # миграции (30 шт.)
-docker compose up -d --profile core   # минимальный продукт: backend+bot+miniapp+pg+redis
-# дальше по желанию: --profile storage / workers / realtime / ai / micro
-```
-
-Локально без Docker:
-
-```bash
-uv run uvicorn app.main_api:app --port 8000        # backend (mono)
-uv run python -m app.transport.bot                  # бот
-uv run python -m app.infrastructure.workers.fetch   # парсинг+S3-зеркало
-uv run python -m app.infrastructure.workers.send    # дайджесты/уведомления
-cd frontend && npm run dev                          # Mini App :8080
-```
-
-## Документация
-
-| Документ | Что внутри |
+| Каталог | Что внутри (1 строка) |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | слои, доменные сервисы, DI, очередь, Centrifugo (личный канал), S3 |
-| [docs/API.md](docs/API.md) | HTTP API: аутентификация, все эндпоинты пользователя/партнёра/админа |
-| [docs/SOURCES.md](docs/SOURCES.md) | адаптеры encar/kcar, S3-зеркалирование фото, stale-cleanup, перевод |
-| [docs/AI.md](docs/AI.md) | LLM, анализ цены, отчёт истории, генерация описаний, RAG-бот |
-| [docs/MONETIZATION.md](docs/MONETIZATION.md) | тарифы Free/Pro/Business, размещения и пакеты, CPL, лиды |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | поэтапное развёртывание, конфиг (.env), degradation, мониторинг |
-| [docs/TESTING.md](docs/TESTING.md) | структура тестов, фикстуры, как запускать |
-| [docs/SECURITY.md](docs/SECURITY.md) | модель безопасности; журнал аудита — [INCIDENTS.md](INCIDENTS.md) |
-| [docs/RUNBOOK.md](docs/RUNBOOK.md) | инциденты: DLQ, circuit breaker, флейки |
-| [docs/ADR.md](docs/ADR.md) | архитектурные решения |
+| `app/` | весь Python-бэкенд по слоям Clean Architecture: `domain/` (правила), `application/` (сценарии, 6 доменных групп), `infrastructure/` (db/sources/workers/storage/messaging), `transport/` (HTTP-роутеры, бот), `di/` (Dishka) |
+| `services/` | тот же код в профиле micro: gateway + доменные сервисы (identity/catalog/billing/partners/dialog/admin) + `translate/`, `rag/` |
+| `frontend/` | Mini App + партнёрка + админка: React 18 + telegram-ui (`src/screens`, `src/components`, `src/partner`, `src/admin`) |
+| `docs/` | документация проекта (карта ниже) |
+| `deploy/` | боевой рантайм: Caddyfile, prod/test compose, bootstrap/backup-скрипты |
+| `configs/` | конфиг Centrifugo (шаблон с env-подстановкой) |
+| `scripts/` | утилиты: туннель миниаппа (miniapp_tunnel.ps1), backfill-скрипты инспекций, разовые фиксы данных |
+| `tests/` | pytest-сьюты, зеркально архитектуре (identity/catalog/billing/partners/dialog/admin/infrastructure/…) |
+| `alembic` (в `app/infrastructure/db/migrations`) | 30 миграций PostgreSQL |
 
-Журнал работ (полная история волн и решений) — [PROGRESS.md](PROGRESS.md),
+## Стек
+
+| Слой | Технологии |
+|---|---|
+| Backend | Python 3.13, asyncio, FastAPI, SQLAlchemy 2 (async), Alembic, Dishka (DI), aio-pika + FastStream (очереди) |
+| Бот | aiogram 3 (long polling), inline-режим для шаринга карточек |
+| Frontend | TypeScript, React 18, @telegram-apps/telegram-ui, react-router, Vite, vitest + testing-library |
+| Данные | PostgreSQL 16, Redis 7 (кэш/лимиты/дедуп), RabbitMQ 3 (fetch/send), MinIO/S3 (фото + raw-payload), Qdrant (RAG) |
+| Realtime | Centrifugo v6: один личный канал `user:{id}` / `partner:{id}`, поллинг-фоллбэк |
+| AI | LLM GLM/Anthropic/Ollama (анализ цены, отчёты, описания, выжимки), RAG-бот поддержки, NLLB-200 (перевод ko→ru) |
+| Инфра | Docker Compose (профили mono/micro + ступени), uv (Python), npm (frontend), GitHub Actions (pytest/ruff/pip-audit/bandit) |
+
+## Быстрый старт (Docker)
+
+```bash
+cp .env.example .env                  # BOT_TOKEN, APP_SECRET_KEY, DSN, MinIO-креды
+docker compose up -d --profile core   # postgres+redis+backend(монолит)+bot+miniapp
+cd frontend && npm ci && npm run dev  # Mini App для разработки: :8080
+```
+
+Минимум для живого продукта — профиль `core`; дальше по потребности
+(ступени и деградация — [docs/OPERATIONS.md](docs/OPERATIONS.md)):
+
+```bash
+docker compose --profile storage up -d   # + MinIO: фото и S3-зеркало
+docker compose --profile workers up -d   # + RabbitMQ, парсинг/уведомления/перевод
+docker compose --profile realtime up -d  # + Centrifugo: мгновенные чаты
+docker compose --profile ai up -d        # + RAG/Qdrant
+docker compose --profile micro up -d     # декомпозиция сервисами вместо монолита
+```
+
+Миграции применяются образом (`alembic upgrade head` в контейнере
+backend/gateway) или локально: `uv run alembic upgrade head`.
+
+Локально без Docker (полный список команд — OPERATIONS.md):
+
+```bash
+uv run uvicorn app.main_api:app --port 8000   # backend (mono)
+uv run python -m app.transport.bot            # бот
+uv run python -m app.infrastructure.workers.fetch && uv run python -m app.infrastructure.workers.send
+```
+
+Миниапп в Telegram требует публичный HTTPS — туннель одной командой
+`miniapp-url.bat` (localhost.run; подробности и нюансы — OPERATIONS.md).
+
+## Документация (docs/)
+
+| Файл | О чём |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Clean-слои, 6 доменных сервисов, DI, личный канал Centrifugo, данные/деградация |
+| [API.md](docs/API.md) | HTTP API: аутентификация (JWT/гость/API-ключ), эндпоинты пользователя/партнёра/админа |
+| [SOURCES.md](docs/SOURCES.md) | парсинг: контракт адаптера, encar детально, registry, fetch-воркер, S3-зеркало фото, stale-чистка, перевод, как добавить источник |
+| [NAV-V2.md](docs/NAV-V2.md) | навигация v4: лендинг всегда на «/», 4 таба мини-аппа, 5+«Ещё» партнёрки; как реализовано |
+| [AI.md](docs/AI.md) | AI-контур: анализ цены, отчёт истории, генерация описаний, качество объявления, выжимки, RAG-бот |
+| [MONETIZATION.md](docs/MONETIZATION.md) | тарифы Free/Pro/Business, размещения и пакеты, CPL-лиды, идемпотентность Stars |
+| [OPERATIONS.md](docs/OPERATIONS.md) | запуск и деплой: ступени compose, .env, туннель миниаппа, мониторинг, прод-чеклист |
+| [TESTING.md](docs/TESTING.md) | структура тестов, фикстуры, как запускать, известный флэйк |
+| [SECURITY.md](docs/SECURITY.md) | модель безопасности; журнал аудита и инцидентов — [INCIDENTS.md](INCIDENTS.md) |
+| [RUNBOOK.md](docs/RUNBOOK.md) | эксплуатационные сценарии: DLQ, circuit breaker, флейки |
+| [ADR.md](docs/ADR.md) | реестр архитектурных решений (12 ADR) |
+
+Журнал работ (полная история волн и решений) — [PROGRESS.md](PROGRESS.md);
 актуальный техдолг — [TECHDEBT.md](TECHDEBT.md).
+
+## Тесты
+
+```bash
+uv run pytest -q                          # бэкенд (~1470, ~7 мин)
+uv run pytest tests/infrastructure -q     # только воркеры/S3/источники
+cd frontend && npx vitest run             # фронт (~550)
+cd frontend && npm run build              # tsc -b + vite (проверка типов)
+uv run ruff check app tests               # линт
+```
+
+Детали (фикстуры, Postgres-скипы, флэйк test_rag) — [docs/TESTING.md](docs/TESTING.md).
+
+## Деплой
+
+Прод — VPS + docker compose (профиль mono или micro) + Caddy с авто-
+Let's Encrypt: пошаговый ранбук [deploy/DEPLOY.md](deploy/DEPLOY.md)
+(bootstrap-скрипт, бэкапы, тест-стенд). Конфигурация окружения и
+мониторинг — [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+## Статус проекта
+
+MVP в активной разработке; история волн, решений и живых прогонов —
+[PROGRESS.md](PROGRESS.md) (новое сверху). Последняя крупная волна —
+NAV-V2 навигация + AI-контур доверия (отчёты истории, качество объявлений,
+выжимки) + резильентность S3-ингеста (2026-10-28). Открытые долги —
+[TECHDEBT.md](TECHDEBT.md).
+
+## Лицензия
+
+Файла лицензии в репозитории нет — код распространяется как
+проприетарный (все права за владельцем проекта).

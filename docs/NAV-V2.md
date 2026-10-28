@@ -17,7 +17,7 @@
 | **Главная** `/` | лента + AI-поиск (сегмент «Лента \| AI» сверху, AI-чат как панель на том же экране), FAB «+ Продать» только здесь |
 | **Авто** `/auto` | сегменты: Избранное / История (просмотры+разборы) / Мои объявления (для не-гостей) |
 | **Чаты** `/chats` | текущий экран чатов целиком (сегмент Диалоги/Переговорные) |
-| **Профиль** `/profile` | как сейчас (плюс «Сменить поверхность») |
+| **Профиль** `/profile` | как раньше (плюс «Сменить поверхность») |
 
 - Плавающий конверт ChatEnvelopeFloat и ChatBadge в сайдбаре — удалить
   (чат — таб; бейдж непрочитанных на самом табе).
@@ -33,3 +33,137 @@
 - Десктоп-сайдбар: все 9 пунктов списком (без сворачивания).
 
 ## Волны: F-mini (лендинг+меню), F-partner (таб-бар). Тесты обновить.
+
+---
+
+## 4. Как реализовано (2026-10-28, волны F-mini + F-partner)
+
+### 4.1. Лендинг (§1)
+
+- `frontend/src/App.tsx` — `App()`: корень `/` без query и вне Telegram
+  (`!isTelegramContext()`) → `LandingGate`; `/partner` и `/admin` уводятся
+  на `SurfaceRouter` раньше всего. Выбор пользователя (`onChooseUser`)
+  переключает `entered` → `MiniApp` рендерится **без перезагрузки
+  страницы**.
+- `frontend/src/screens/Landing.tsx` — карточки «Приложение для
+  пользователей» и «Кабинет партнёра» (`<a href="/partner">`). Последний
+  выбор — `localStorage["autobot.surface"]` (`chooseSurface`, только
+  сортировка карточек + метка «● последний вход»); `resetSurface()` —
+  сброс. Событие `autobot:surface`. «Сменить поверхность» в Профиле
+  (`screens/Profile.tsx`) зовёт reset + полную загрузку «/» → лендинг
+  открывается снова.
+- Deep-links не задеты: query на корне (`/?make=…`) и Telegram сразу
+  попадают в `MiniApp` (проверка в `App()` до LandingGate).
+
+### 4.2. Таб-бар мини-аппа (§2)
+
+- `frontend/src/components/Shell.tsx` — `NAV_ITEMS`: Главная `/`, Авто
+  `/auto`, Чаты `/chats`, Профиль `/profile` (иконки lucide). Мобайл:
+  фиксированный `Tabbar` telegram-ui; десктоп (получает `desktop` из
+  `App.tsx` при ≥768px): `nav.app-sidebar` с теми же 4 пунктами.
+  `useIsActive()` — точное совпадение пути, «Чаты» активны и на
+  `/chats/:id` (оверлей комнаты поверх keep-alive списка).
+- **Бейдж чатов** — на самом табе: `useChatUnread()` из единого стора
+  `frontend/src/lib/chatStore.ts` (события личного канала `user:{uid}` +
+  поллинг-фоллбэк; muted не считаются). Гость — бейджа нет
+  (`isGuest()` → 0), у точки «99+» при >99. a11y: `aria-label` «Чаты:
+  N непрочитанных», активный таб — `aria-current="page"`.
+- ChatEnvelopeFloat и сайдбар-ChatBadge удалены (компонент + CSS + тест);
+  ссылка «сигналы»/калькулятор/сравнение — стек-экраны без места в
+  таб-баре (ссылки из Ленты и Профиля).
+
+### 4.3. Keep-alive табов и сегментов
+
+- `frontend/src/App.tsx` — `KEEPALIVE_TABS`: `/` (Home), `/auto` (Auto),
+  `/filters`, `/calc`, `/compare`, `/profile`, `/chats`. `KeepAliveTabs`
+  монтирует экран при **первом заходе** (лениво: `visited`-set — на старте
+  грузится только активная лента, чтобы не простреливать все ручки),
+  переключение прячет неактивный классом `.keepalive-hidden`
+  (display:none), а не размонтирует — эффекты не перезапускаются,
+  фильтры/чаты/скролл живут. `/chats/:id` — оверлей: `tabPath()` маппит
+  его на таб `/chats`. Гостевой `/login` — тоже keep-alive слой.
+- Карточка лота — отдельный `ListingKeepAlive`: экземпляр `ListingScreen`
+  живёт после открытия (новый id = новый key), на табе-источнике плашка
+  «← Вернуться к карточке»; `Routes location={`/listing/${id}`}` держит
+  `useParams` валидным даже когда карточка скрыта.
+- `ScrollManager` — стек (PDP и прочие) открывается от верха, позиции
+  скролла таб-экранов сохраняются/восстанавливаются (`tabScroll`-map).
+- **Сегменты** — тот же приём внутри экранов:
+  - `frontend/src/screens/Home.tsx`: сегмент «Лента | AI-поиск»
+    (`.hist-seg` пилюли, role=tablist), обе панели keep-alive + ленивый
+    монтаж (`visited`);
+  - `frontend/src/screens/Auto.tsx`: сегменты «Избранное | История |
+    Мои объявления» — панели `FavoritesScreen` / `AnalysesScreen` /
+    `MyLotsPanel` в keep-alive. **Активный сегмент = query `?tab=
+    favorites|history|mine`** (`useSearchParams`, `replace: true`) —
+    работают deep-link, back/forward; гостю сегмент `mine` скрыт
+    (рынок закрыт). «Мои объявления» вынесены из Профиля в
+    `frontend/src/screens/MyLotsPanel.tsx` (статус-пилюли lifecycle,
+    оплата/продление/восстановление, live-событие `listing_status`).
+
+### 4.4. Редиректы старых путей
+
+`App.tsx` → `OverlayRoutes` (рендерится только когда путь — не таб, не
+`/listing/\d+`, не `/chats…`):
+
+| Старый путь | Новый |
+|---|---|
+| `/ai` | `/` (сегмент AI включается вручную; состояние не адресуем) |
+| `/favorites` | `/auto?tab=favorites` |
+| `/analyses` | `/auto?tab=history` + исходный query сохраняется (`/analyses?similar=N` → `/auto?tab=history&similar=N` — сценарий «Найти похожие» из PDP) |
+| прочий мусор | `/` |
+
+### 4.5. Партнёрский кабинет (§3)
+
+- `frontend/src/partner/PartnerApp.tsx` — `NAV_ITEMS` (9 разделов,
+  порядок по частоте сценария). Мобайл: `TAB_ITEMS = NAV_ITEMS.slice(0,4)`
+  (Обзор/Пул/Мои/Чаты) + кнопка **«Ещё»**; `MORE_ITEMS = slice(4)`
+  (Рынок/Витрина/Объявления/Чеки/Биллинг) открываются bottom-sheet
+  `Sheet` (`components/bits`): закрытие — выбором, по scrim и Esc;
+  шторка и меню «⋯» закрываются при смене `location.pathname`.
+- Активный раздел из группы «Ещё» подсвечивает таб «Ещё» (класс
+  `pa-tab--active` + точка `.pa-tab__dot`), внутри шторки — галочка у
+  текущего. Кнопка «Ещё»: `aria-haspopup="dialog"`, `aria-expanded`.
+- Десктоп ≥768px: `aside.pa-sidebar` со всеми 9 пунктами (`NavLink`),
+  без сворачивания; в подвале — «Ключ API» и «Выйти». Меню «⋯» шапки —
+  только мобайл (Ключ API/Выход не занимают таб-бар).
+
+### 4.6. Известные нюансы
+
+- **body.feed-locked и width:100%**: лента — viewport-scroll (вся
+  прокрутка внутри `.feed-scroll`, лок на body вешает `Feed.tsx`, пока
+  лента активна). `body.feed-locked .app-content` делает контент
+  флекс-колонкой, а его `margin: 0 auto` отключает cross-stretch — без
+  явного `width: 100%` контент растягивался шире вьюпорта (~987px,
+  горизонтальный скролл, карточки 951px). Фикс: `width:100%` на
+  `body.feed-locked .app-content` + `min-width:0` в цепочке
+  `.home-screen`/`.home-screen__panel` (`frontend/src/index.css`).
+  `FeedScreen` получил проп `inactive` — на AI-сегменте сам снимает
+  `feed-locked` (страничный скролл), см. `screens/Home.tsx`.
+- **IAB-клик-обходы**: реальные клики проверялись browser-use в IAB-
+  вьюпорте 390x844 (лендинг → вход без перезагрузки; табы/сегменты;
+  редиректы; «Сменить поверхность»; партнёрская «Ещё»-шторка живым
+  кликом открывается/закрывается, переход «Рынок» подсвечивает «Ещё»).
+  Внешние ссылки из миниаппа — только через `WebApp.openLink()`
+  (`frontend/src/lib/external.ts`): `target="_blank"`/`window.open` в
+  WebView Telegram молча не работают.
+- **jsdom-глитч aria-expanded**: jsdom не воспроизводит поведение
+  `aria-expanded` кнопки «Ещё» (react_testing library не видит смену
+  атрибута после клика) — `partnerChats.test.tsx` переписан
+  **структурно** (наличие кнопки, `aria-haspopup`, рендер шторки по
+  состоянию), живой клик подтверждён browser-use. Аналогично структурно
+  проверяется таб-бар в `components/Shell.test.tsx` (4 таба,
+  aria-current, бейдж, «99+», редирект комнаты чатов).
+- **Тесты vitest**: после NAV-V2 — 552/552 (44 файла); запуск требует
+  `threads=2` с `minThreads=1` (tinypool конфликтует с дефолтной min —
+  зависает), см. `frontend/vitest.config.ts` / PROGRESS #NAV-V2.
+
+### 4.7. Что осталось вне NAV-V2
+
+- FAB «+ Продать» — только на Главной (путь «/»), скрывается на
+  остальных (SellFab сам фильтрует по pathname).
+- «Сигналы» (/filters), калькулятор (/calc), сравнение (/compare) —
+  стек-экраны в keep-alive БЕЗ места в таб-баре; вход — ссылки из Ленты
+  и Профиля.
+- Бейдж партнёрского «Чаты» — из poll 60с (`fetchPartnerChats`), не из
+  Centrifugo-канала партнёра.
